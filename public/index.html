@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#78be20">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Clean Air Treatments</title>
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body class="login-body">
+  <div class="login-container">
+    <div class="login-header">
+      <div class="logo-box">
+        <img src="/logo.png" alt="Clean Air">
+      </div>
+      <h1>Treatment Manager</h1>
+      <p>Sign in to continue</p>
+    </div>
+    <form id="loginForm" class="login-form">
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input type="text" id="username" name="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" name="password" autocomplete="current-password" required>
+      </div>
+      <div id="loginError" class="error-msg"></div>
+      <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+    </form>
+
+    <div id="installBanner" class="install-banner" style="display:none;">
+      <p>Install this app on your phone for quick access</p>
+      <button id="installBtn" class="btn btn-secondary">Install App</button>
+    </div>
+  </div>
+
+  <script>
+    // Check if already logged in
+    fetch('/api/auth/me').then(r => {
+      if (r.ok) window.location.href = '/app';
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errEl = document.getElementById('loginError');
+      errEl.textContent = '';
+
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          errEl.textContent = data.error || 'Login failed';
+          return;
+        }
+        window.location.href = '/app';
+      } catch (err) {
+        errEl.textContent = 'Network error. Please try again.';
+      }
+    });
+
+    // PWA install prompt
+    let deferredPrompt;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredPrompt = e;
+      document.getElementById('installBanner').style.display = 'block';
+    });
+    document.getElementById('installBtn').addEventListener('click', async () => {
+      if (!deferredPrompt) return;
+      deferredPrompt.prompt();
+      const result = await deferredPrompt.userChoice;
+      deferredPrompt = null;
+      document.getElementById('installBanner').style.display = 'none';
+    });
+
+    // Register service worker
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
