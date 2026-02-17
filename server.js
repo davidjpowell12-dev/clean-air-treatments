@@ -8,6 +8,11 @@ const { initDatabase } = require('./db/database');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust Railway's reverse proxy (needed for secure cookies over HTTPS)
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 // Initialize database
 initDatabase();
 
@@ -19,7 +24,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use(session({
   store: new SQLiteStore({
     db: 'sessions.sqlite',
-    dir: path.join(__dirname, 'db')
+    dir: process.env.DB_DIR || path.join(__dirname, 'db')
   }),
   secret: process.env.SESSION_SECRET || 'dev-secret-change-me',
   resave: false,

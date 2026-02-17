@@ -4,7 +4,7 @@ const path = require('path');
 const bcrypt = require('bcryptjs');
 const { runMigrations } = require('./migrations');
 
-const DB_PATH = path.join(__dirname, 'clean-air.db');
+const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'clean-air.db');
 let db;
 
 function getDb() {
@@ -26,7 +26,7 @@ function initDatabase() {
   runMigrations(conn);
 
   // Ensure uploads directory exists
-  const uploadsDir = path.join(__dirname, '..', 'uploads');
+  const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
   if (!fs.existsSync(uploadsDir)) {
     fs.mkdirSync(uploadsDir, { recursive: true });
   }
