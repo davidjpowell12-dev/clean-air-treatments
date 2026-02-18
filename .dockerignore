@@ -1,0 +1,9 @@
+node_modules
+db/clean-air.db
+db/clean-air.db-wal
+db/clean-air.db-shm
+db/sessions.sqlite
+uploads/
+.git
+.gitignore
+nixpacks.toml
