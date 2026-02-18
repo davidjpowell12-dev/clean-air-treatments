@@ -1,6 +1,6 @@
 FROM node:18-slim
 
-# Install build tools needed for better-sqlite3
+# Install build tools needed for better-sqlite3 native compilation
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -12,8 +12,6 @@ RUN npm ci
 # Copy app source
 COPY . .
 
-# Railway sets PORT dynamically
-ENV PORT=3001
-
-# Start the app
-CMD ["node", "server.js"]
+# Railway injects PORT at runtime (usually 8080)
+# Use shell form so we can create dirs before starting
+CMD mkdir -p /data/uploads && node server.js
