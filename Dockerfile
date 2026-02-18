@@ -7,13 +7,13 @@ WORKDIR /app
 
 # Copy package files and install dependencies
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci
 
 # Copy app source
 COPY . .
 
-# Expose port
-EXPOSE 3001
+# Railway sets PORT dynamically
+ENV PORT=3001
 
 # Start the app
 CMD ["node", "server.js"]

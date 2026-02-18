@@ -85,7 +85,9 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+console.log(`Starting server on port ${PORT}...`);
+console.log(`DB_PATH=${process.env.DB_PATH || 'default'}, DB_DIR=${process.env.DB_DIR || 'default'}, UPLOADS_DIR=${process.env.UPLOADS_DIR || 'default'}`);
+
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`Clean Air Treatments running on port ${PORT}`);
-  console.log(`http://localhost:${PORT}`);
 });
