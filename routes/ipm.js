@@ -140,7 +140,7 @@ try {
   const multer = require('multer');
   const { v4: uuidv4 } = require('uuid');
   const storage = multer.diskStorage({
-    destination: path.join(__dirname, '..', 'uploads'),
+    destination: process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads'),
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname);
       cb(null, uuidv4() + ext);
@@ -171,7 +171,8 @@ router.get('/photos/:id', requireAuth, (req, res) => {
   const db = getDb();
   const photo = db.prepare('SELECT * FROM ipm_photos WHERE id = ?').get(req.params.id);
   if (!photo) return res.status(404).json({ error: 'Photo not found' });
-  res.sendFile(path.join(__dirname, '..', 'uploads', photo.file_path));
+  const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads');
+  res.sendFile(path.join(uploadsDir, photo.file_path));
 });
 
 module.exports = router;

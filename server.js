@@ -3,6 +3,7 @@ const express = require('express');
 const session = require('express-session');
 const SQLiteStore = require('connect-sqlite3')(session);
 const path = require('path');
+const fs = require('fs');
 const { initDatabase } = require('./db/database');
 
 const app = express();
@@ -11,6 +12,26 @@ const PORT = process.env.PORT || 3001;
 // Trust Railway's reverse proxy (needed for secure cookies over HTTPS)
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
+}
+
+// Ensure data directories exist before anything tries to use them
+const dbDir = process.env.DB_DIR || path.join(__dirname, 'db');
+const uploadsDir = process.env.UPLOADS_DIR || path.join(__dirname, 'uploads');
+if (!fs.existsSync(dbDir)) {
+  fs.mkdirSync(dbDir, { recursive: true });
+  console.log(`Created data directory: ${dbDir}`);
+}
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log(`Created uploads directory: ${uploadsDir}`);
+}
+
+// Also ensure DB_PATH parent directory exists
+const dbPath = process.env.DB_PATH || path.join(__dirname, 'db', 'clean-air.db');
+const dbPathDir = path.dirname(dbPath);
+if (!fs.existsSync(dbPathDir)) {
+  fs.mkdirSync(dbPathDir, { recursive: true });
+  console.log(`Created DB path directory: ${dbPathDir}`);
 }
 
 // Initialize database
