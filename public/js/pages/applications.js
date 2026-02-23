@@ -219,7 +219,7 @@ const ApplicationsPage = {
         <div class="card-body">
           <form id="appForm" class="app-form">
             <!-- Property Search -->
-            <h3 style="color:var(--blue);margin-bottom:12px;font-size:14px;text-transform:uppercase;">Property</h3>
+            <h3 style="color:var(--blue);margin-bottom:12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Property</h3>
             <div class="form-group" style="position:relative;">
               <label>Search Property</label>
               <input type="text" id="propSearchInput" placeholder="Type customer name or address..." value="${app.property_id ? this.esc(app.customer_name || '') + ' — ' + this.esc(app.address || '') : ''}" autocomplete="off">
@@ -230,7 +230,7 @@ const ApplicationsPage = {
             </div>
 
             <!-- Date & Time -->
-            <h3 style="color:var(--blue);margin:20px 0 12px;font-size:14px;text-transform:uppercase;">When</h3>
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">When</h3>
             <div class="form-group">
               <label>Date *</label>
               <input type="date" name="application_date" value="${app.application_date || today}" required>
@@ -247,7 +247,7 @@ const ApplicationsPage = {
             </div>
 
             <!-- Location -->
-            <h3 style="color:var(--blue);margin:20px 0 12px;font-size:14px;text-transform:uppercase;">Where</h3>
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Where</h3>
             <div class="form-group">
               <label>Customer Name</label>
               <input type="text" name="customer_name" id="appCustomerName" value="${this.esc(app.customer_name || '')}">
@@ -272,7 +272,7 @@ const ApplicationsPage = {
             </div>
 
             <!-- Product -->
-            <h3 style="color:var(--blue);margin:20px 0 12px;font-size:14px;text-transform:uppercase;">What</h3>
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">What</h3>
             <div class="form-group">
               <label>Product *</label>
               <select name="product_id" id="appProduct" required>
@@ -330,7 +330,7 @@ const ApplicationsPage = {
             </div>
 
             <!-- Weather -->
-            <h3 style="color:var(--blue);margin:20px 0 12px;font-size:14px;text-transform:uppercase;">Weather</h3>
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Weather</h3>
             <div class="form-row">
               <div class="form-group">
                 <label>Temp (\u00B0F) <span id="tempRequired" style="display:none;color:var(--red);">*</span></label>
@@ -338,7 +338,7 @@ const ApplicationsPage = {
               </div>
               <div class="form-group">
                 <label>Wind (mph) <span id="windRequired" style="display:none;color:var(--red);">*</span></label>
-                <input type="number" name="wind_speed_mph" id="appWindMph" value="${app.wind_speed_mph || ''}" step="0.1">
+                <input type="number" name="wind_speed_mph" id="appWindMph" value="${app.wind_speed_mph || ''}" step="1">
               </div>
             </div>
             <div class="form-row">
@@ -359,7 +359,7 @@ const ApplicationsPage = {
             </div>
 
             <!-- Michigan Compliance -->
-            <h3 style="color:var(--blue);margin:20px 0 12px;font-size:14px;text-transform:uppercase;">Michigan Compliance</h3>
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Michigan Compliance</h3>
             <div class="checkbox-group">
               <input type="checkbox" id="lawnMarkers" name="lawn_markers_posted" ${app.lawn_markers_posted ? 'checked' : ''}>
               <label for="lawnMarkers">Lawn markers posted at entry points</label>
@@ -470,7 +470,12 @@ const ApplicationsPage = {
           const errDiv = document.getElementById('rupErrors');
           errDiv.style.display = 'block';
           errDiv.innerHTML = '<strong>Missing required fields for RUP:</strong><br>' + errors.join('<br>');
-          errDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          // Scroll to first empty required field so the tech sees what needs filling
+          const firstEmpty = data.temperature_f == null ? document.getElementById('appTempF')
+            : data.wind_speed_mph == null ? document.getElementById('appWindMph')
+            : errDiv;
+          firstEmpty.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (firstEmpty.focus) firstEmpty.focus();
           return;
         }
       }

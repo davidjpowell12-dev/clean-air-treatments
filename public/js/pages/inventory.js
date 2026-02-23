@@ -210,12 +210,6 @@ const InventoryPage = {
             </div>
 
             <h4 style="color:var(--blue);margin:16px 0 8px;font-size:14px;">Items</h4>
-            <div style="display:grid;grid-template-columns:1fr 70px 80px 28px;gap:6px;margin-bottom:4px;padding:0 0 4px;">
-              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">Product</span>
-              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">Qty</span>
-              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">$/Unit</span>
-              <span></span>
-            </div>
             <div id="receiveItems"></div>
             <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 4px;" onclick="InventoryPage.addReceiveItem()">+ Add Product</button>
 
@@ -284,21 +278,25 @@ const InventoryPage = {
     const container = document.getElementById('receiveItems');
     const div = document.createElement('div');
     div.className = 'receive-line';
-    div.style.cssText = 'display:grid;grid-template-columns:1fr 70px 80px 28px;gap:6px;align-items:end;margin-bottom:6px;';
+    div.style.cssText = 'background:var(--gray-50);border-radius:8px;padding:10px;margin-bottom:8px;position:relative;';
     div.innerHTML = `
-      <div style="margin:0;">
-        <select name="recv_product" required style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;">
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;">
+        <select name="recv_product" required style="flex:1;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
           <option value="">Product...</option>
           ${this._receiveProductOptions}
         </select>
+        <button type="button" style="background:none;border:none;color:var(--red);font-size:20px;cursor:pointer;padding:8px;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center;" onclick="this.closest('.receive-line').remove();InventoryPage.updateReceiveTotals()">&times;</button>
       </div>
-      <div style="margin:0;">
-        <input type="number" name="recv_qty" step="any" min="0.1" required placeholder="Qty" style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;" oninput="InventoryPage.updateReceiveTotals()">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;">
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);font-weight:600;display:block;margin-bottom:2px;">Qty</label>
+          <input type="number" name="recv_qty" step="any" min="0.1" required placeholder="Qty" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;" oninput="InventoryPage.updateReceiveTotals()">
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--gray-500);font-weight:600;display:block;margin-bottom:2px;">$/Unit</label>
+          <input type="number" name="recv_cost" step="0.01" min="0" placeholder="$/unit" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;" oninput="InventoryPage.updateReceiveTotals()">
+        </div>
       </div>
-      <div style="margin:0;">
-        <input type="number" name="recv_cost" step="0.01" min="0" placeholder="$/unit" style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;" oninput="InventoryPage.updateReceiveTotals()">
-      </div>
-      <button type="button" style="background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;padding:4px;" onclick="this.closest('.receive-line').remove();InventoryPage.updateReceiveTotals()">&times;</button>
     `;
     container.appendChild(div);
 
