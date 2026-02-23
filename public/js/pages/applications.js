@@ -279,6 +279,7 @@ const ApplicationsPage = {
                 <option value="">Choose product...</option>
                 ${products.map(p => `<option value="${p.id}" data-epa="${this.esc(p.epa_reg_number || '')}" data-name="${this.esc(p.name)}" data-rup="${p.is_restricted_use}" data-unit="${this.esc(p.app_rate_unit || '')}" ${app.product_id == p.id ? 'selected' : ''}>${this.esc(p.name)}</option>`).join('')}
               </select>
+              <p class="form-hint" id="stockHint" style="display:none;font-weight:600;"></p>
             </div>
             <div id="rupWarning" style="display:none;padding:10px 14px;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;margin-bottom:16px;font-size:13px;color:#856404;">
               <strong>Restricted-Use Product</strong> — Weather conditions, lawn markers, and registry check are required for MDARD compliance.
@@ -390,18 +391,36 @@ const ApplicationsPage = {
     const productSelect = document.getElementById('appProduct');
     const rupWarning = document.getElementById('rupWarning');
 
-    const updateProductInfo = () => {
+    const updateProductInfo = async () => {
       const opt = productSelect.selectedOptions[0];
+      const stockHint = document.getElementById('stockHint');
       if (opt && opt.value) {
         document.getElementById('appRateUnit').value = opt.dataset.unit || '';
         const isRup = opt.dataset.rup === '1';
         rupWarning.style.display = isRup ? 'block' : 'none';
         document.getElementById('tempRequired').style.display = isRup ? 'inline' : 'none';
         document.getElementById('windRequired').style.display = isRup ? 'inline' : 'none';
+
+        // Fetch and show current stock
+        try {
+          if (navigator.onLine) {
+            const inv = await Api.get('/api/inventory/' + opt.value);
+            stockHint.textContent = 'In stock: ' + Number(inv.quantity).toFixed(1) + ' ' + (inv.unit_of_measure || '');
+            stockHint.style.color = inv.quantity <= 0 ? 'var(--red)' : inv.quantity <= inv.reorder_threshold ? 'var(--orange)' : 'var(--green-dark)';
+            stockHint.style.display = 'block';
+            ApplicationsPage._currentStock = inv.quantity;
+            ApplicationsPage._currentStockUnit = inv.unit_of_measure || '';
+          }
+        } catch (e) {
+          stockHint.style.display = 'none';
+          ApplicationsPage._currentStock = null;
+        }
       } else {
         rupWarning.style.display = 'none';
         document.getElementById('tempRequired').style.display = 'none';
         document.getElementById('windRequired').style.display = 'none';
+        if (stockHint) stockHint.style.display = 'none';
+        ApplicationsPage._currentStock = null;
       }
     };
     productSelect.addEventListener('change', updateProductInfo);
@@ -441,8 +460,8 @@ const ApplicationsPage = {
       // --- RUP validation ---
       if (data.is_restricted_use) {
         const errors = [];
-        if (!data.temperature_f) errors.push('Temperature is required for restricted-use products');
-        if (!data.wind_speed_mph && data.wind_speed_mph !== 0) errors.push('Wind speed is required for restricted-use products');
+        if (data.temperature_f == null) errors.push('Temperature is required for restricted-use products');
+        if (data.wind_speed_mph == null) errors.push('Wind speed is required for restricted-use products');
         if (!data.lawn_markers_posted) errors.push('Lawn markers must be posted for restricted-use products');
         if (!data.notification_registry_checked) errors.push('Notification registry must be checked for restricted-use products');
         if (!data.applicator_cert_number) errors.push('Applicator certification number is required for restricted-use products. Update your profile in Settings.');
@@ -454,6 +473,17 @@ const ApplicationsPage = {
           errDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
           return;
         }
+      }
+
+      // Stock validation (soft warning — allows override)
+      if (ApplicationsPage._currentStock != null && data.total_product_used > ApplicationsPage._currentStock) {
+        const deficit = (data.total_product_used - ApplicationsPage._currentStock).toFixed(1);
+        const proceed = confirm(
+          'Warning: You are using ' + data.total_product_used + ' ' + (ApplicationsPage._currentStockUnit || '') +
+          ', but only ' + ApplicationsPage._currentStock.toFixed(1) + ' is in stock (' +
+          deficit + ' more than available).\n\nThis may indicate an inventory error.\n\nProceed anyway?'
+        );
+        if (!proceed) return;
       }
 
       // Clear validation errors
