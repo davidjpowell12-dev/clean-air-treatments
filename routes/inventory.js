@@ -69,9 +69,9 @@ router.post('/adjust', requireAuth, (req, res) => {
   res.json({ product_id, new_quantity: newQty });
 });
 
-// Bulk receive inventory (season intake / delivery)
+// Bulk receive inventory (season intake / delivery) + create purchase records
 router.post('/receive', requireAuth, (req, res) => {
-  const { items, po_number } = req.body;
+  const { items, po_number, vendor_name, purchase_date, received_date } = req.body;
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'At least one item is required' });
@@ -79,6 +79,7 @@ router.post('/receive', requireAuth, (req, res) => {
 
   const db = getDb();
   const results = [];
+  const today = new Date().toISOString().split('T')[0];
 
   const receiveAll = db.transaction(() => {
     for (const item of items) {
@@ -97,6 +98,25 @@ router.post('/receive', requireAuth, (req, res) => {
       db.prepare(
         'INSERT INTO inventory_log (product_id, change_amount, reason, application_id, user_id) VALUES (?, ?, ?, ?, ?)'
       ).run(item.product_id, Number(item.quantity), reason, null, req.session.userId);
+
+      // Create formal purchase record for COGS tracking
+      const unitCost = item.unit_cost != null ? Number(item.unit_cost) : null;
+      const totalCost = (unitCost != null) ? unitCost * Number(item.quantity) : null;
+
+      db.prepare(`
+        INSERT INTO purchases (product_id, quantity, unit_cost, total_cost, po_number, vendor_name, purchase_date, received_date, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        item.product_id,
+        Number(item.quantity),
+        unitCost,
+        totalCost,
+        po_number || null,
+        vendor_name || null,
+        purchase_date || today,
+        received_date || today,
+        req.session.userId
+      );
 
       results.push({ product_id: item.product_id, new_quantity: newQty });
     }

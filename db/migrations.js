@@ -6,6 +6,29 @@ const migrations = [
   function addPropertyColumns(db) {
     try { db.exec('ALTER TABLE applications ADD COLUMN property_id INTEGER REFERENCES properties(id)'); } catch (e) { /* column may already exist */ }
     try { db.exec('ALTER TABLE applications ADD COLUMN retention_years INTEGER DEFAULT 3'); } catch (e) { /* column may already exist */ }
+  },
+  // Migration 2: Create purchases table for COGS tracking
+  function createPurchasesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS purchases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        product_id INTEGER NOT NULL REFERENCES products(id),
+        quantity REAL NOT NULL,
+        unit_cost REAL,
+        total_cost REAL,
+        po_number TEXT,
+        vendor_name TEXT,
+        purchase_date DATE NOT NULL,
+        received_date DATE,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(purchase_date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_product ON purchases(product_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_po ON purchases(po_number)');
   }
 ];
 

@@ -154,6 +154,27 @@ CREATE TABLE IF NOT EXISTS ipm_photos (
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Purchases (formal purchase records for COGS tracking)
+CREATE TABLE IF NOT EXISTS purchases (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  product_id INTEGER NOT NULL REFERENCES products(id),
+  quantity REAL NOT NULL,
+  unit_cost REAL,
+  total_cost REAL,
+  po_number TEXT,
+  vendor_name TEXT,
+  purchase_date DATE NOT NULL,
+  received_date DATE,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(purchase_date);
+CREATE INDEX IF NOT EXISTS idx_purchases_product ON purchases(product_id);
+CREATE INDEX IF NOT EXISTS idx_purchases_po ON purchases(po_number);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products

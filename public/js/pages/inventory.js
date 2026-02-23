@@ -27,6 +27,23 @@ const InventoryPage = {
             ` : inventory.map(i => this.renderRow(i)).join('')}
           </div>
         </div>
+
+        <div class="card" style="margin-top:20px;">
+          <div style="padding:16px;border-bottom:1px solid var(--gray-100);">
+            <h3 style="margin:0;font-size:16px;">COGS Report</h3>
+          </div>
+          <div style="padding:16px;">
+            <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;">
+              <div style="flex:1;">
+                <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Month</label>
+                <input type="month" id="cogsMonth" value="${new Date().toISOString().slice(0, 7)}"
+                  style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+              </div>
+              <button class="btn btn-primary btn-sm" onclick="InventoryPage.loadCogsPreview()">Generate</button>
+            </div>
+            <div id="cogsPreview"></div>
+          </div>
+        </div>
       `;
 
       document.getElementById('invSearch').addEventListener('input', (e) => {
@@ -149,7 +166,7 @@ const InventoryPage = {
     });
   },
 
-  // --- Receive Delivery Modal ---
+  // --- Receive Delivery Modal (with cost tracking) ---
   async showReceiveModal() {
     document.querySelector('.modal-overlay')?.remove();
 
@@ -161,9 +178,10 @@ const InventoryPage = {
       return;
     }
 
+    this._receiveProducts = products;
     const today = new Date().toISOString().split('T')[0];
     this._receiveProductOptions = products.map(p =>
-      '<option value="' + p.id + '">' + this.esc(p.name) + ' (' + this.esc(p.unit_of_measure) + ')</option>'
+      '<option value="' + p.id + '" data-cost="' + (p.cost_per_unit || '') + '">' + this.esc(p.name) + ' (' + this.esc(p.unit_of_measure) + ')</option>'
     ).join('');
 
     const overlay = document.createElement('div');
@@ -178,20 +196,34 @@ const InventoryPage = {
           <form id="receiveForm" class="app-form">
             <div class="form-row">
               <div class="form-group">
-                <label>Date Received</label>
-                <input type="date" name="received_date" value="${today}">
+                <label>Purchase Date</label>
+                <input type="date" name="purchase_date" value="${today}">
               </div>
               <div class="form-group">
-                <label>PO # (optional)</label>
+                <label>PO #</label>
                 <input type="text" name="po_number" placeholder="PO-2026-001">
               </div>
             </div>
+            <div class="form-group">
+              <label>Vendor</label>
+              <input type="text" name="vendor_name" placeholder="e.g. SiteOne Landscape Supply">
+            </div>
 
             <h4 style="color:var(--blue);margin:16px 0 8px;font-size:14px;">Items</h4>
+            <div style="display:grid;grid-template-columns:1fr 70px 80px 28px;gap:6px;margin-bottom:4px;padding:0 0 4px;">
+              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">Product</span>
+              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">Qty</span>
+              <span style="font-size:11px;color:var(--gray-500);font-weight:600;">$/Unit</span>
+              <span></span>
+            </div>
             <div id="receiveItems"></div>
-            <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 16px;" onclick="InventoryPage.addReceiveItem()">+ Add Product</button>
+            <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 4px;" onclick="InventoryPage.addReceiveItem()">+ Add Product</button>
 
-            <button type="submit" class="btn btn-primary btn-full">Receive All Items</button>
+            <div id="receiveGrandTotal" style="text-align:right;font-size:16px;font-weight:700;padding:12px 0;border-top:2px solid var(--gray-200);margin-top:8px;display:none;">
+              Total: $<span id="grandTotalAmount">0.00</span>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px;">Receive All Items</button>
           </form>
         </div>
       </div>
@@ -216,8 +248,9 @@ const InventoryPage = {
       for (const row of rows) {
         const product_id = Number(row.querySelector('[name="recv_product"]').value);
         const quantity = Number(row.querySelector('[name="recv_qty"]').value);
+        const unit_cost = row.querySelector('[name="recv_cost"]').value ? Number(row.querySelector('[name="recv_cost"]').value) : null;
         if (product_id && quantity > 0) {
-          items.push({ product_id, quantity });
+          items.push({ product_id, quantity, unit_cost });
         }
       }
 
@@ -229,7 +262,10 @@ const InventoryPage = {
       const formData = new FormData(e.target);
       const payload = {
         items,
-        po_number: formData.get('po_number') || null
+        po_number: formData.get('po_number') || null,
+        vendor_name: formData.get('vendor_name') || null,
+        purchase_date: formData.get('purchase_date') || null,
+        received_date: formData.get('purchase_date') || null
       };
 
       try {
@@ -248,20 +284,212 @@ const InventoryPage = {
     const container = document.getElementById('receiveItems');
     const div = document.createElement('div');
     div.className = 'receive-line';
-    div.style.cssText = 'display:grid;grid-template-columns:1fr 80px 32px;gap:8px;align-items:end;margin-bottom:8px;';
+    div.style.cssText = 'display:grid;grid-template-columns:1fr 70px 80px 28px;gap:6px;align-items:end;margin-bottom:6px;';
     div.innerHTML = `
-      <div class="form-group" style="margin:0;">
-        <select name="recv_product" required style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+      <div style="margin:0;">
+        <select name="recv_product" required style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;">
           <option value="">Product...</option>
           ${this._receiveProductOptions}
         </select>
       </div>
-      <div class="form-group" style="margin:0;">
-        <input type="number" name="recv_qty" step="any" min="0.1" required placeholder="Qty" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+      <div style="margin:0;">
+        <input type="number" name="recv_qty" step="any" min="0.1" required placeholder="Qty" style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;" oninput="InventoryPage.updateReceiveTotals()">
       </div>
-      <button type="button" style="background:none;border:none;color:var(--red);font-size:20px;cursor:pointer;padding:8px;" onclick="this.closest('.receive-line').remove()">&times;</button>
+      <div style="margin:0;">
+        <input type="number" name="recv_cost" step="0.01" min="0" placeholder="$/unit" style="width:100%;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:13px;" oninput="InventoryPage.updateReceiveTotals()">
+      </div>
+      <button type="button" style="background:none;border:none;color:var(--red);font-size:18px;cursor:pointer;padding:4px;" onclick="this.closest('.receive-line').remove();InventoryPage.updateReceiveTotals()">&times;</button>
     `;
     container.appendChild(div);
+
+    // Auto-fill cost from product catalog when product selected
+    const select = div.querySelector('[name="recv_product"]');
+    select.addEventListener('change', () => {
+      const product = this._receiveProducts.find(p => p.id == select.value);
+      if (product && product.cost_per_unit) {
+        div.querySelector('[name="recv_cost"]').value = product.cost_per_unit;
+        this.updateReceiveTotals();
+      }
+    });
+  },
+
+  updateReceiveTotals() {
+    let grandTotal = 0;
+    let hasAnyCost = false;
+    document.querySelectorAll('.receive-line').forEach(row => {
+      const qty = Number(row.querySelector('[name="recv_qty"]')?.value) || 0;
+      const cost = Number(row.querySelector('[name="recv_cost"]')?.value) || 0;
+      if (cost > 0 && qty > 0) {
+        grandTotal += qty * cost;
+        hasAnyCost = true;
+      }
+    });
+    const el = document.getElementById('receiveGrandTotal');
+    if (el) {
+      el.style.display = hasAnyCost ? 'block' : 'none';
+      document.getElementById('grandTotalAmount').textContent = grandTotal.toFixed(2);
+    }
+  },
+
+  // --- COGS Report ---
+  async loadCogsPreview() {
+    const month = document.getElementById('cogsMonth').value;
+    if (!month) { App.toast('Select a month', 'error'); return; }
+
+    const preview = document.getElementById('cogsPreview');
+    preview.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      const purchases = await Api.get('/api/purchases?month=' + month);
+
+      if (purchases.length === 0) {
+        preview.innerHTML = '<div class="empty-state" style="padding:20px 0;"><p>No purchases found for this month</p></div>';
+        return;
+      }
+
+      const totalCost = purchases.reduce((sum, p) => sum + (p.total_cost || 0), 0);
+      const monthLabel = new Date(month + '-01').toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+      preview.innerHTML = `
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <span style="font-size:14px;color:var(--gray-500);">${purchases.length} purchase${purchases.length !== 1 ? 's' : ''} in ${monthLabel}</span>
+          <span style="font-size:18px;font-weight:700;">$${totalCost.toFixed(2)}</span>
+        </div>
+        ${purchases.map(p => `
+          <div class="data-row" style="cursor:pointer;" onclick="InventoryPage.showEditPurchaseModal(${p.id})">
+            <div class="data-row-main">
+              <h4>${this.esc(p.product_name)}</h4>
+              <p>${p.purchase_date}${p.vendor_name ? ' &middot; ' + this.esc(p.vendor_name) : ''}${p.po_number ? ' &middot; PO: ' + this.esc(p.po_number) : ''}</p>
+            </div>
+            <div class="data-row-right" style="text-align:right;">
+              <div style="font-size:14px;font-weight:600;">${p.total_cost != null ? '$' + p.total_cost.toFixed(2) : 'No cost'}</div>
+              <div style="font-size:12px;color:var(--gray-500);">${p.quantity} ${this.esc(p.unit_of_measure)}${p.unit_cost != null ? ' @ $' + p.unit_cost.toFixed(2) : ''}</div>
+            </div>
+          </div>
+        `).join('')}
+        <button class="btn btn-primary btn-full" style="margin-top:12px;" onclick="InventoryPage.downloadCogsCSV('${month}')">Download CSV</button>
+      `;
+    } catch (err) {
+      preview.innerHTML = '<div class="empty-state"><p>Error: ' + err.message + '</p></div>';
+    }
+  },
+
+  async downloadCogsCSV(month) {
+    try {
+      const res = await fetch('/api/purchases/export?month=' + month);
+      if (!res.ok) throw new Error('Export failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'cogs-report-' + month + '.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      App.toast('COGS report downloaded', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  // --- Edit Purchase Modal (for cost corrections) ---
+  async showEditPurchaseModal(purchaseId) {
+    document.querySelector('.modal-overlay')?.remove();
+
+    let purchase;
+    try {
+      purchase = await Api.get('/api/purchases/' + purchaseId);
+    } catch (err) {
+      App.toast('Failed to load purchase', 'error');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Edit Purchase</h3>
+          <button class="modal-close" onclick="this.closest('.modal-overlay').classList.remove('open');setTimeout(()=>this.closest('.modal-overlay').remove(),200)">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="margin-bottom:16px;font-weight:700;">${this.esc(purchase.product_name)}</p>
+          <form id="editPurchaseForm" class="app-form">
+            <div class="form-row">
+              <div class="form-group">
+                <label>Purchase Date</label>
+                <input type="date" name="purchase_date" value="${purchase.purchase_date || ''}">
+              </div>
+              <div class="form-group">
+                <label>PO #</label>
+                <input type="text" name="po_number" value="${this.esc(purchase.po_number || '')}">
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Vendor</label>
+              <input type="text" name="vendor_name" value="${this.esc(purchase.vendor_name || '')}">
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Quantity</label>
+                <input type="number" step="any" name="quantity" value="${purchase.quantity}" required>
+              </div>
+              <div class="form-group">
+                <label>Unit Cost ($)</label>
+                <input type="number" step="0.01" name="unit_cost" value="${purchase.unit_cost != null ? purchase.unit_cost : ''}" placeholder="0.00">
+              </div>
+            </div>
+            <div id="editLineTotal" style="text-align:right;font-size:14px;font-weight:600;color:var(--blue);margin-bottom:12px;">
+              ${purchase.total_cost != null ? 'Total: $' + purchase.total_cost.toFixed(2) : ''}
+            </div>
+            <div class="form-group">
+              <label>Notes</label>
+              <textarea name="notes" rows="2">${this.esc(purchase.notes || '')}</textarea>
+            </div>
+            <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
+          </form>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) {
+        overlay.classList.remove('open');
+        setTimeout(() => overlay.remove(), 200);
+      }
+    });
+
+    // Live line total calculation
+    const qtyInput = overlay.querySelector('[name="quantity"]');
+    const costInput = overlay.querySelector('[name="unit_cost"]');
+    const totalDiv = overlay.querySelector('#editLineTotal');
+    const updateTotal = () => {
+      const q = Number(qtyInput.value) || 0;
+      const c = Number(costInput.value) || 0;
+      totalDiv.textContent = (c > 0) ? 'Total: $' + (q * c).toFixed(2) : '';
+    };
+    qtyInput.addEventListener('input', updateTotal);
+    costInput.addEventListener('input', updateTotal);
+
+    document.getElementById('editPurchaseForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData.entries());
+      data.quantity = Number(data.quantity);
+      data.unit_cost = data.unit_cost ? Number(data.unit_cost) : null;
+
+      try {
+        await Api.put('/api/purchases/' + purchaseId, data);
+        overlay.classList.remove('open');
+        setTimeout(() => overlay.remove(), 200);
+        App.toast('Purchase updated', 'success');
+        this.loadCogsPreview();
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    });
   },
 
   // --- Inventory History Modal ---

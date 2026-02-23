@@ -102,6 +102,7 @@ try {
   app.use('/api/calculator', require('./routes/calculator'));
   app.use('/api/properties', require('./routes/properties'));
   app.use('/api/ipm', require('./routes/ipm'));
+  app.use('/api/purchases', require('./routes/purchases'));
   app.use('/api/audit-log', require('./routes/audit-log'));
   console.log('[startup] All routes loaded');
 } catch (err) {
