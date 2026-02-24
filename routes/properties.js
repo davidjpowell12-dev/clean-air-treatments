@@ -43,6 +43,9 @@ router.get('/:id', requireAuth, (req, res) => {
   prop.active_ipm_cases = ipmCount.count;
   prop.last_application_date = lastApp ? lastApp.application_date : null;
 
+  // Include yard zones
+  prop.zones = db.prepare('SELECT * FROM property_zones WHERE property_id = ? ORDER BY sort_order, id').all(req.params.id);
+
   res.json(prop);
 });
 
@@ -138,6 +141,68 @@ router.delete('/:id', requireAdmin, (req, res) => {
   db.prepare('DELETE FROM properties WHERE id = ?').run(req.params.id);
   logAudit(db, 'property', req.params.id, req.session.userId, 'delete', existing);
   res.json({ success: true });
+});
+
+// --- Property Zones ---
+
+// Helper: recalculate property sqft from zone totals
+function syncPropertySqft(db, propertyId) {
+  const sum = db.prepare('SELECT COALESCE(SUM(sqft), 0) as total FROM property_zones WHERE property_id = ?').get(propertyId);
+  if (sum.total > 0) {
+    db.prepare('UPDATE properties SET sqft = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(sum.total, propertyId);
+  }
+  return sum.total;
+}
+
+// List zones for a property
+router.get('/:id/zones', requireAuth, (req, res) => {
+  const db = getDb();
+  const zones = db.prepare('SELECT * FROM property_zones WHERE property_id = ? ORDER BY sort_order, id').all(req.params.id);
+  res.json(zones);
+});
+
+// Add a zone
+router.post('/:id/zones', requireAuth, (req, res) => {
+  const db = getDb();
+  const prop = db.prepare('SELECT id FROM properties WHERE id = ?').get(req.params.id);
+  if (!prop) return res.status(404).json({ error: 'Property not found' });
+
+  const { zone_name, sqft } = req.body;
+  if (!zone_name || !sqft) return res.status(400).json({ error: 'Zone name and square footage required' });
+
+  const maxOrder = db.prepare('SELECT COALESCE(MAX(sort_order), 0) as max FROM property_zones WHERE property_id = ?').get(req.params.id);
+  const result = db.prepare('INSERT INTO property_zones (property_id, zone_name, sqft, sort_order) VALUES (?, ?, ?, ?)')
+    .run(req.params.id, zone_name, Number(sqft), maxOrder.max + 1);
+
+  const total = syncPropertySqft(db, req.params.id);
+  const zone = db.prepare('SELECT * FROM property_zones WHERE id = ?').get(result.lastInsertRowid);
+  res.json({ zone, total_sqft: total });
+});
+
+// Update a zone
+router.put('/:id/zones/:zoneId', requireAuth, (req, res) => {
+  const db = getDb();
+  const zone = db.prepare('SELECT * FROM property_zones WHERE id = ? AND property_id = ?').get(req.params.zoneId, req.params.id);
+  if (!zone) return res.status(404).json({ error: 'Zone not found' });
+
+  const { zone_name, sqft } = req.body;
+  db.prepare('UPDATE property_zones SET zone_name = COALESCE(?, zone_name), sqft = COALESCE(?, sqft) WHERE id = ?')
+    .run(zone_name || null, sqft != null ? Number(sqft) : null, req.params.zoneId);
+
+  const total = syncPropertySqft(db, req.params.id);
+  const updated = db.prepare('SELECT * FROM property_zones WHERE id = ?').get(req.params.zoneId);
+  res.json({ zone: updated, total_sqft: total });
+});
+
+// Delete a zone
+router.delete('/:id/zones/:zoneId', requireAuth, (req, res) => {
+  const db = getDb();
+  const zone = db.prepare('SELECT * FROM property_zones WHERE id = ? AND property_id = ?').get(req.params.zoneId, req.params.id);
+  if (!zone) return res.status(404).json({ error: 'Zone not found' });
+
+  db.prepare('DELETE FROM property_zones WHERE id = ?').run(req.params.zoneId);
+  const total = syncPropertySqft(db, req.params.id);
+  res.json({ success: true, total_sqft: total });
 });
 
 // Bulk import properties (admin only)

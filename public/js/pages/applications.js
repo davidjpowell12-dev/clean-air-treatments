@@ -226,6 +226,7 @@ const ApplicationsPage = {
               <input type="hidden" name="property_id" id="propIdField" value="${app.property_id || ''}">
               <div id="propDropdown" class="dropdown-results" style="display:none;"></div>
               ${app.property_id ? `<p class="form-hint" id="propSelectedHint" style="color:var(--green-dark);">Property linked: ${this.esc(app.customer_name || '')} — ${this.esc(app.address || '')}</p>` : '<p class="form-hint" id="propSelectedHint">Select a property to auto-fill location, or enter manually below</p>'}
+              <div id="propZonesHint" style="display:none;font-size:13px;color:var(--gray-700);margin-top:4px;padding:8px 10px;background:var(--gray-50);border-radius:6px;"></div>
               <button type="button" class="btn btn-sm btn-outline" style="margin-top:6px;" id="clearPropBtn" ${!app.property_id ? 'style="display:none;"' : ''} onclick="ApplicationsPage.clearPropertySelection()">Clear Property</button>
             </div>
 
@@ -386,6 +387,11 @@ const ApplicationsPage = {
 
     // --- Property search typeahead ---
     this._setupPropertySearch();
+
+    // If property is already linked, load zones
+    if (app.property_id) {
+      this._loadPropertyZones(app.property_id);
+    }
 
     // --- Product change: auto-fill rate unit + show RUP warning ---
     const productSelect = document.getElementById('appProduct');
@@ -604,6 +610,27 @@ const ApplicationsPage = {
 
     const clearBtn = document.getElementById('clearPropBtn');
     if (clearBtn) clearBtn.style.display = 'inline-flex';
+
+    // Fetch and show yard zones
+    this._loadPropertyZones(data.id);
+  },
+
+  async _loadPropertyZones(propId) {
+    const zonesHint = document.getElementById('propZonesHint');
+    if (!zonesHint) return;
+    try {
+      const zones = await Api.get('/api/properties/' + propId + '/zones');
+      if (zones.length > 0) {
+        const total = zones.reduce((s, z) => s + z.sqft, 0);
+        const parts = zones.map(z => '<strong>' + z.zone_name + ':</strong> ' + z.sqft.toLocaleString());
+        zonesHint.innerHTML = parts.join(' &middot; ') + '<br><strong>Total: ' + total.toLocaleString() + ' sq ft</strong>';
+        zonesHint.style.display = 'block';
+      } else {
+        zonesHint.style.display = 'none';
+      }
+    } catch (e) {
+      zonesHint.style.display = 'none';
+    }
   },
 
   clearPropertySelection() {
@@ -618,6 +645,9 @@ const ApplicationsPage = {
     const hint = document.getElementById('propSelectedHint');
     hint.textContent = 'Select a property to auto-fill location, or enter manually below';
     hint.style.color = '';
+
+    const zonesHint = document.getElementById('propZonesHint');
+    if (zonesHint) zonesHint.style.display = 'none';
 
     const clearBtn = document.getElementById('clearPropBtn');
     if (clearBtn) clearBtn.style.display = 'none';

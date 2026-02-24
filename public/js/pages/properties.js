@@ -75,6 +75,10 @@ const PropertiesPage = {
       ]);
       const isAdmin = App.user.role === 'admin';
 
+      const zones = prop.zones || [];
+      const zoneTotalSqft = zones.reduce((sum, z) => sum + (z.sqft || 0), 0);
+      this._currentPropertyId = prop.id;
+
       main.innerHTML = `
         <span class="back-link" onclick="App.navigate('properties')">&larr; Properties</span>
 
@@ -90,11 +94,30 @@ const PropertiesPage = {
           </div>
           <div class="card-body">
             <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value">${this.esc(prop.address)}${prop.city ? ', ' + this.esc(prop.city) : ''} ${this.esc(prop.state || '')} ${this.esc(prop.zip || '')}</span></div>
-            <div class="detail-row"><span class="detail-label">Size</span><span class="detail-value">${prop.sqft ? prop.sqft.toLocaleString() + ' sq ft' : 'N/A'}</span></div>
+            <div class="detail-row"><span class="detail-label">Total Size</span><span class="detail-value" id="propTotalSqft">${prop.sqft ? prop.sqft.toLocaleString() + ' sq ft' : 'N/A'}</span></div>
             <div class="detail-row"><span class="detail-label">Soil Type</span><span class="detail-value">${this.esc(prop.soil_type || 'N/A')}</span></div>
             <div class="detail-row"><span class="detail-label">Last Treatment</span><span class="detail-value">${prop.last_application_date || 'Never'}</span></div>
             ${prop.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${this.esc(prop.notes)}</span></div>` : ''}
           </div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px;">
+          <div class="card-header">
+            <h3 style="font-size:16px;">Yard Zones</h3>
+            <button class="btn btn-sm btn-outline" onclick="PropertiesPage.showAddZone(${prop.id})">+ Add</button>
+          </div>
+          <div id="zonesList">
+            ${zones.length === 0 ? `
+              <div id="zonesEmpty" style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
+                No zones added yet. Tap "+ Add" to break down yard areas.
+              </div>
+            ` : zones.map(z => this.renderZoneRow(prop.id, z)).join('')}
+          </div>
+          <div id="zoneTotalRow" style="${zones.length === 0 ? 'display:none;' : ''}padding:12px 16px;border-top:2px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-weight:700;color:var(--blue);font-size:15px;">Total</span>
+            <span style="font-weight:700;font-size:16px;" id="zoneTotalDisplay">${zoneTotalSqft.toLocaleString()} sq ft</span>
+          </div>
+          <div id="zoneFormArea"></div>
         </div>
 
         <div style="margin-bottom:12px;">
@@ -349,6 +372,144 @@ const PropertiesPage = {
       await Api.delete(`/api/properties/${id}`);
       App.toast('Property deleted', 'success');
       App.navigate('properties');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  // --- Yard Zone Methods ---
+
+  _zonePresets: ['Front Yard', 'Back Yard', 'Left Side Yard', 'Right Side Yard', 'Parking Strip', 'Landscape Beds'],
+
+  renderZoneRow(propId, z) {
+    return `
+      <div class="data-row" data-zone-id="${z.id}" onclick="PropertiesPage.showEditZone(${propId}, ${z.id}, '${this.esc(z.zone_name)}', ${z.sqft})">
+        <div class="data-row-main">
+          <h4 style="font-size:15px;">${this.esc(z.zone_name)}</h4>
+        </div>
+        <div class="data-row-right" style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:15px;font-weight:600;color:var(--gray-900);">${z.sqft.toLocaleString()} sq ft</span>
+          <button class="btn-icon" style="color:var(--red);font-size:18px;background:none;border:none;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center;" onclick="event.stopPropagation();PropertiesPage.deleteZone(${propId}, ${z.id}, '${this.esc(z.zone_name)}')">&times;</button>
+        </div>
+      </div>
+    `;
+  },
+
+  showAddZone(propId) {
+    const area = document.getElementById('zoneFormArea');
+    area.innerHTML = `
+      <div style="padding:12px 16px;background:var(--gray-50);border-top:1px solid var(--gray-200);">
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Zone Name</label>
+          <select id="zoneNameSelect" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;" onchange="if(this.value==='__custom__'){document.getElementById('zoneNameCustom').style.display='block';document.getElementById('zoneNameCustom').focus();}else{document.getElementById('zoneNameCustom').style.display='none';}">
+            <option value="">Select zone...</option>
+            ${this._zonePresets.map(n => '<option value="' + n + '">' + n + '</option>').join('')}
+            <option value="__custom__">Other (custom name)</option>
+          </select>
+          <input type="text" id="zoneNameCustom" placeholder="Custom zone name..." style="display:none;width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;margin-top:6px;">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Square Footage</label>
+          <input type="number" id="zoneSqftInput" step="1" min="1" placeholder="e.g. 3200" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary btn-sm" style="flex:1;" onclick="PropertiesPage.saveNewZone(${propId})">Save Zone</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('zoneFormArea').innerHTML=''">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('zoneNameSelect').focus();
+  },
+
+  async saveNewZone(propId) {
+    const select = document.getElementById('zoneNameSelect');
+    const customInput = document.getElementById('zoneNameCustom');
+    const sqftInput = document.getElementById('zoneSqftInput');
+
+    const zoneName = select.value === '__custom__' ? customInput.value.trim() : select.value;
+    const sqft = Number(sqftInput.value);
+
+    if (!zoneName) { App.toast('Select or enter a zone name', 'error'); return; }
+    if (!sqft || sqft <= 0) { App.toast('Enter square footage', 'error'); return; }
+
+    try {
+      const result = await Api.post(`/api/properties/${propId}/zones`, { zone_name: zoneName, sqft });
+      // Clear empty state, append new row, update total
+      const emptyEl = document.getElementById('zonesEmpty');
+      if (emptyEl) emptyEl.remove();
+      const list = document.getElementById('zonesList');
+      list.insertAdjacentHTML('beforeend', this.renderZoneRow(propId, result.zone));
+      document.getElementById('zoneTotalRow').style.display = 'flex';
+      document.getElementById('zoneTotalDisplay').textContent = result.total_sqft.toLocaleString() + ' sq ft';
+      document.getElementById('propTotalSqft').textContent = result.total_sqft.toLocaleString() + ' sq ft';
+      document.getElementById('zoneFormArea').innerHTML = '';
+      App.toast('Zone added', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  showEditZone(propId, zoneId, currentName, currentSqft) {
+    const area = document.getElementById('zoneFormArea');
+    area.innerHTML = `
+      <div style="padding:12px 16px;background:var(--gray-50);border-top:1px solid var(--gray-200);">
+        <h4 style="font-size:14px;color:var(--blue);margin-bottom:8px;">Edit Zone</h4>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Zone Name</label>
+          <input type="text" id="editZoneName" value="${this.esc(currentName)}" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+        </div>
+        <div style="margin-bottom:8px;">
+          <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Square Footage</label>
+          <input type="number" id="editZoneSqft" value="${currentSqft}" step="1" min="1" style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary btn-sm" style="flex:1;" onclick="PropertiesPage.saveEditZone(${propId}, ${zoneId})">Save</button>
+          <button class="btn btn-outline btn-sm" onclick="document.getElementById('zoneFormArea').innerHTML=''">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.getElementById('editZoneSqft').focus();
+  },
+
+  async saveEditZone(propId, zoneId) {
+    const zoneName = document.getElementById('editZoneName').value.trim();
+    const sqft = Number(document.getElementById('editZoneSqft').value);
+
+    if (!zoneName) { App.toast('Enter a zone name', 'error'); return; }
+    if (!sqft || sqft <= 0) { App.toast('Enter square footage', 'error'); return; }
+
+    try {
+      const result = await Api.put(`/api/properties/${propId}/zones/${zoneId}`, { zone_name: zoneName, sqft });
+      // Update the row in place
+      const row = document.querySelector(`[data-zone-id="${zoneId}"]`);
+      if (row) {
+        row.outerHTML = this.renderZoneRow(propId, result.zone);
+      }
+      document.getElementById('zoneTotalDisplay').textContent = result.total_sqft.toLocaleString() + ' sq ft';
+      document.getElementById('propTotalSqft').textContent = result.total_sqft.toLocaleString() + ' sq ft';
+      document.getElementById('zoneFormArea').innerHTML = '';
+      App.toast('Zone updated', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  async deleteZone(propId, zoneId, zoneName) {
+    if (!confirm('Remove "' + zoneName + '" zone?')) return;
+    try {
+      const result = await Api.delete(`/api/properties/${propId}/zones/${zoneId}`);
+      const row = document.querySelector(`[data-zone-id="${zoneId}"]`);
+      if (row) row.remove();
+      // Check if any zones remain
+      const remaining = document.querySelectorAll('#zonesList [data-zone-id]');
+      if (remaining.length === 0) {
+        document.getElementById('zonesList').innerHTML = '<div id="zonesEmpty" style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">No zones added yet. Tap "+ Add" to break down yard areas.</div>';
+        document.getElementById('zoneTotalRow').style.display = 'none';
+      } else {
+        document.getElementById('zoneTotalDisplay').textContent = result.total_sqft.toLocaleString() + ' sq ft';
+      }
+      document.getElementById('propTotalSqft').textContent = result.total_sqft > 0 ? result.total_sqft.toLocaleString() + ' sq ft' : 'N/A';
+      App.toast('Zone removed', 'success');
     } catch (err) {
       App.toast(err.message, 'error');
     }

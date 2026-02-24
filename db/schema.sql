@@ -175,6 +175,18 @@ CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(purchase_date);
 CREATE INDEX IF NOT EXISTS idx_purchases_product ON purchases(product_id);
 CREATE INDEX IF NOT EXISTS idx_purchases_po ON purchases(po_number);
 
+-- Property Zones (yard area breakdown by zone)
+CREATE TABLE IF NOT EXISTS property_zones (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+  zone_name TEXT NOT NULL,
+  sqft REAL NOT NULL,
+  sort_order INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_zones_property ON property_zones(property_id);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products

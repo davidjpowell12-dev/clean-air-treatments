@@ -1,4 +1,4 @@
-const CACHE_NAME = 'clean-air-v5';
+const CACHE_NAME = 'clean-air-v6';
 const STATIC_ASSETS = [
   '/',
   '/app',

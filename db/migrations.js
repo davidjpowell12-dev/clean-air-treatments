@@ -29,6 +29,20 @@ const migrations = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_date ON purchases(purchase_date)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_product ON purchases(product_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_purchases_po ON purchases(po_number)');
+  },
+  // Migration 3: Create property_zones table for yard area breakdown
+  function createPropertyZonesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS property_zones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        zone_name TEXT NOT NULL,
+        sqft REAL NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_zones_property ON property_zones(property_id)');
   }
 ];
 
