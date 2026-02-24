@@ -33,13 +33,11 @@ const InventoryPage = {
             <h3 style="margin:0;font-size:16px;">COGS Report</h3>
           </div>
           <div style="padding:16px;">
-            <div style="display:flex;gap:8px;align-items:end;margin-bottom:12px;">
-              <div style="flex:1;">
-                <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Month</label>
-                <input type="month" id="cogsMonth" value="${new Date().toISOString().slice(0, 7)}"
-                  style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
-              </div>
-              <button class="btn btn-primary btn-sm" onclick="InventoryPage.loadCogsPreview()">Generate</button>
+            <div style="margin-bottom:12px;">
+              <label style="font-size:12px;font-weight:600;color:var(--gray-500);display:block;margin-bottom:4px;">Month</label>
+              <input type="month" id="cogsMonth" value="${new Date().toISOString().slice(0, 7)}"
+                style="width:100%;padding:10px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;margin-bottom:8px;">
+              <button class="btn btn-primary btn-full" onclick="InventoryPage.loadCogsPreview()">Generate COGS Report</button>
             </div>
             <div id="cogsPreview"></div>
           </div>

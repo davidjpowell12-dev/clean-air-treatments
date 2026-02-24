@@ -181,7 +181,7 @@ body {
   top: 0;
   left: 0;
   right: 0;
-  height: var(--header-height);
+  height: calc(var(--header-height) + env(safe-area-inset-top, 0));
   padding-top: env(safe-area-inset-top, 0);
   background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
   color: white;
@@ -302,9 +302,9 @@ body {
 
 /* ===== Main Content ===== */
 .main-content {
-  margin-top: var(--header-height);
+  margin-top: calc(var(--header-height) + env(safe-area-inset-top, 0));
   padding: 16px;
-  padding-bottom: calc(var(--bottom-nav-height) + 16px);
+  padding-bottom: calc(var(--bottom-nav-height) + env(safe-area-inset-bottom, 0) + 16px);
   min-height: calc(100vh - var(--header-height));
 }
 
