@@ -113,7 +113,7 @@ const PropertiesPage = {
               </div>
             ` : zones.map(z => this.renderZoneRow(prop.id, z)).join('')}
           </div>
-          <div id="zoneTotalRow" style="${zones.length === 0 ? 'display:none;' : ''}padding:12px 16px;border-top:2px solid var(--gray-200);display:flex;justify-content:space-between;align-items:center;">
+          <div id="zoneTotalRow" style="padding:12px 16px;border-top:2px solid var(--gray-200);${zones.length === 0 ? 'display:none' : 'display:flex'};justify-content:space-between;align-items:center;">
             <span style="font-weight:700;color:var(--blue);font-size:15px;">Total</span>
             <span style="font-weight:700;font-size:16px;" id="zoneTotalDisplay">${zoneTotalSqft.toLocaleString()} sq ft</span>
           </div>
