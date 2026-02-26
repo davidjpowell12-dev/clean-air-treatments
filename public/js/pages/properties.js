@@ -98,6 +98,14 @@ const PropertiesPage = {
             <div class="detail-row"><span class="detail-label">Soil Type</span><span class="detail-value">${this.esc(prop.soil_type || 'N/A')}</span></div>
             <div class="detail-row"><span class="detail-label">Last Treatment</span><span class="detail-value">${prop.last_application_date || 'Never'}</span></div>
             ${prop.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${this.esc(prop.notes)}</span></div>` : ''}
+            ${prop.profitability && prop.profitability.total_revenue > 0 ? `
+              <div style="margin-top:16px;padding-top:16px;border-top:2px solid var(--gray-200);">
+                <h4 style="font-size:14px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Profitability</h4>
+                <div class="detail-row"><span class="detail-label">Total Revenue</span><span class="detail-value" style="color:var(--green-dark);font-weight:600;">$${Number(prop.profitability.total_revenue).toFixed(2)}</span></div>
+                <div class="detail-row"><span class="detail-label">Total Cost</span><span class="detail-value">$${Number(prop.profitability.total_cost).toFixed(2)}</span></div>
+                <div class="detail-row"><span class="detail-label">Total Margin</span><span class="detail-value" style="font-weight:600;color:${prop.profitability.total_margin >= 0 ? 'var(--green-dark)' : 'var(--red)'};">$${Number(prop.profitability.total_margin).toFixed(2)} (${prop.profitability.margin_pct}%)</span></div>
+              </div>
+            ` : ''}
           </div>
         </div>
 

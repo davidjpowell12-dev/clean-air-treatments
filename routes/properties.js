@@ -46,6 +46,21 @@ router.get('/:id', requireAuth, (req, res) => {
   // Include yard zones
   prop.zones = db.prepare('SELECT * FROM property_zones WHERE property_id = ? ORDER BY sort_order, id').all(req.params.id);
 
+  // Profitability summary across all visits
+  const profitability = db.prepare(`
+    SELECT
+      COALESCE(SUM(revenue), 0) as total_revenue,
+      COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0) as total_cost,
+      COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0)) as total_margin,
+      CASE WHEN COALESCE(SUM(revenue), 0) > 0
+        THEN ROUND(((COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0))) / COALESCE(SUM(revenue), 0)) * 100, 1)
+        ELSE 0
+      END as margin_pct
+    FROM applications
+    WHERE property_id = ?
+  `).get(req.params.id);
+  prop.profitability = profitability;
+
   res.json(prop);
 });
 

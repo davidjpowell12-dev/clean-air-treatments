@@ -154,6 +154,29 @@ const ApplicationsPage = {
             </div>
 
             ${a.notes ? `<div class="detail-section"><h3>Notes</h3><p style="font-size:14px;color:var(--gray-700);">${this.esc(a.notes)}</p></div>` : ''}
+
+            ${(a.revenue != null || a.labor_cost != null || a.material_cost != null) ? `
+              <div class="detail-section">
+                <h3>Job Costing</h3>
+                ${a.duration_minutes ? `<div class="detail-row"><span class="detail-label">Duration</span><span class="detail-value">${a.duration_minutes} min (${(a.duration_minutes / 60).toFixed(1)} hr)</span></div>` : ''}
+                <div class="detail-row"><span class="detail-label">Revenue</span><span class="detail-value" style="color:var(--green-dark);font-weight:600;">${a.revenue != null ? '$' + Number(a.revenue).toFixed(2) : 'N/A'}</span></div>
+                <div class="detail-row"><span class="detail-label">Labor Cost</span><span class="detail-value">${a.labor_cost != null ? '$' + Number(a.labor_cost).toFixed(2) : 'N/A'}</span></div>
+                <div class="detail-row"><span class="detail-label">Material Cost</span><span class="detail-value">${a.material_cost != null ? '$' + Number(a.material_cost).toFixed(2) : 'N/A'}</span></div>
+                <div class="detail-row" style="border-top:2px solid var(--gray-200);padding-top:8px;margin-top:4px;">
+                  <span class="detail-label" style="font-weight:700;">Total Cost</span>
+                  <span class="detail-value" style="font-weight:700;">${(a.labor_cost != null || a.material_cost != null) ? '$' + ((a.labor_cost || 0) + (a.material_cost || 0)).toFixed(2) : 'N/A'}</span>
+                </div>
+                ${a.revenue != null ? `
+                  <div class="detail-row">
+                    <span class="detail-label" style="font-weight:700;">Gross Margin</span>
+                    <span class="detail-value" style="font-weight:700;color:${(a.revenue - (a.labor_cost || 0) - (a.material_cost || 0)) >= 0 ? 'var(--green-dark)' : 'var(--red)'};">
+                      $${(a.revenue - (a.labor_cost || 0) - (a.material_cost || 0)).toFixed(2)}
+                      (${a.revenue > 0 ? Math.round(((a.revenue - (a.labor_cost || 0) - (a.material_cost || 0)) / a.revenue) * 100) : 0}%)
+                    </span>
+                  </div>
+                ` : ''}
+              </div>
+            ` : ''}
           </div>
         </div>
       `;
@@ -171,6 +194,13 @@ const ApplicationsPage = {
 
     try {
       products = await Api.get('/api/products');
+      // Fetch labor rate for job costing
+      try {
+        const settings = await Api.get('/api/settings');
+        ApplicationsPage._laborRate = Number(settings.hourly_labor_rate) || 45;
+      } catch (e) {
+        ApplicationsPage._laborRate = 45;
+      }
       if (editId) {
         app = await Api.get(`/api/applications/${editId}`);
         // Block editing locked records
@@ -278,7 +308,7 @@ const ApplicationsPage = {
               <label>Product *</label>
               <select name="product_id" id="appProduct" required>
                 <option value="">Choose product...</option>
-                ${products.map(p => `<option value="${p.id}" data-epa="${this.esc(p.epa_reg_number || '')}" data-name="${this.esc(p.name)}" data-rup="${p.is_restricted_use}" data-unit="${this.esc(p.app_rate_unit || '')}" ${app.product_id == p.id ? 'selected' : ''}>${this.esc(p.name)}</option>`).join('')}
+                ${products.map(p => `<option value="${p.id}" data-epa="${this.esc(p.epa_reg_number || '')}" data-name="${this.esc(p.name)}" data-rup="${p.is_restricted_use}" data-unit="${this.esc(p.app_rate_unit || '')}" data-cost="${p.cost_per_unit || ''}" ${app.product_id == p.id ? 'selected' : ''}>${this.esc(p.name)}</option>`).join('')}
               </select>
               <p class="form-hint" id="stockHint" style="display:none;font-weight:600;"></p>
             </div>
@@ -373,6 +403,30 @@ const ApplicationsPage = {
             <!-- Validation errors -->
             <div id="rupErrors" style="display:none;padding:10px 14px;background:#fde8e8;border:1px solid var(--red);border-radius:6px;margin-top:16px;font-size:13px;color:var(--red);"></div>
 
+            <!-- Job Costing -->
+            <h3 style="color:var(--blue);margin:24px 0 12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Job Costing</h3>
+            <div class="form-group">
+              <label>Duration (minutes)</label>
+              <input type="number" name="duration_minutes" id="durationMinutes" value="${app.duration_minutes || ''}" step="1" min="0" placeholder="Auto-calculated from times">
+              <p class="form-hint" id="durationHint">Auto-calculated from start/end times, or enter manually</p>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label>Labor Cost ($)</label>
+                <input type="number" name="labor_cost" id="laborCost" value="${app.labor_cost != null ? app.labor_cost : ''}" step="0.01" min="0" readonly style="background:var(--gray-50);">
+                <p class="form-hint" id="laborCostHint">Auto: duration × rate</p>
+              </div>
+              <div class="form-group">
+                <label>Material Cost ($)</label>
+                <input type="number" name="material_cost" id="materialCost" value="${app.material_cost != null ? app.material_cost : ''}" step="0.01" min="0">
+                <p class="form-hint">Auto-filled from product cost</p>
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Revenue ($)</label>
+              <input type="number" name="revenue" id="revenueInput" value="${app.revenue != null ? app.revenue : ''}" step="0.01" min="0" placeholder="What did the customer pay?">
+            </div>
+
             <!-- Notes -->
             <div class="form-group" style="margin-top:16px;">
               <label>Notes</label>
@@ -407,6 +461,10 @@ const ApplicationsPage = {
         document.getElementById('tempRequired').style.display = isRup ? 'inline' : 'none';
         document.getElementById('windRequired').style.display = isRup ? 'inline' : 'none';
 
+        // Capture product cost for material cost auto-calc
+        ApplicationsPage._selectedProductCost = opt.dataset.cost ? Number(opt.dataset.cost) : null;
+        calcMaterialCost();
+
         // Fetch and show current stock
         try {
           if (navigator.onLine) {
@@ -427,13 +485,67 @@ const ApplicationsPage = {
         document.getElementById('windRequired').style.display = 'none';
         if (stockHint) stockHint.style.display = 'none';
         ApplicationsPage._currentStock = null;
+        ApplicationsPage._selectedProductCost = null;
       }
     };
     productSelect.addEventListener('change', updateProductInfo);
 
+    // --- Job Costing auto-calculations ---
+    const startTimeInput = document.querySelector('[name="start_time"]');
+    const endTimeInput = document.querySelector('[name="end_time"]');
+    const durationInput = document.getElementById('durationMinutes');
+    const laborCostInput = document.getElementById('laborCost');
+    const materialCostInput = document.getElementById('materialCost');
+    const totalProductInput = document.querySelector('[name="total_product_used"]');
+    let durationManual = !!app.duration_minutes;
+    let materialCostManual = !!(app.material_cost != null && editId);
+
+    const calcLaborCost = () => {
+      const mins = Number(durationInput.value);
+      if (mins > 0 && ApplicationsPage._laborRate) {
+        laborCostInput.value = ((mins / 60) * ApplicationsPage._laborRate).toFixed(2);
+        document.getElementById('laborCostHint').textContent = 'Auto: ' + mins + ' min × $' + ApplicationsPage._laborRate + '/hr';
+      }
+    };
+
+    const calcDuration = () => {
+      if (durationManual) return;
+      const start = startTimeInput.value;
+      const end = endTimeInput.value;
+      if (start && end) {
+        const [sh, sm] = start.split(':').map(Number);
+        const [eh, em] = end.split(':').map(Number);
+        let mins = (eh * 60 + em) - (sh * 60 + sm);
+        if (mins < 0) mins += 24 * 60;
+        if (mins > 0) {
+          durationInput.value = mins;
+          calcLaborCost();
+        }
+      }
+    };
+
+    const calcMaterialCost = () => {
+      if (materialCostManual) return;
+      const qty = Number(totalProductInput.value);
+      if (qty > 0 && ApplicationsPage._selectedProductCost != null && ApplicationsPage._selectedProductCost > 0) {
+        materialCostInput.value = (qty * ApplicationsPage._selectedProductCost).toFixed(2);
+      }
+    };
+
+    durationInput.addEventListener('input', () => { durationManual = true; calcLaborCost(); });
+    startTimeInput.addEventListener('change', calcDuration);
+    endTimeInput.addEventListener('change', calcDuration);
+    materialCostInput.addEventListener('input', () => { materialCostManual = true; });
+    totalProductInput.addEventListener('input', calcMaterialCost);
+
     // Trigger initial fill if product pre-selected
     if (app.product_id) {
       updateProductInfo();
+    }
+    // Run initial calculations for edit mode
+    if (editId) {
+      if (!durationManual) calcDuration();
+      calcLaborCost();
     }
 
     // --- Form submit ---
@@ -458,7 +570,7 @@ const ApplicationsPage = {
       data.applicator_cert_number = App.user.applicatorCertNumber || '';
 
       // Convert numeric fields
-      ['property_sqft', 'app_rate_used', 'total_product_used', 'total_area_treated', 'total_mix_volume', 'temperature_f', 'wind_speed_mph'].forEach(f => {
+      ['property_sqft', 'app_rate_used', 'total_product_used', 'total_area_treated', 'total_mix_volume', 'temperature_f', 'wind_speed_mph', 'duration_minutes', 'labor_cost', 'material_cost', 'revenue'].forEach(f => {
         data[f] = data[f] ? Number(data[f]) : null;
       });
       data.product_id = Number(data.product_id);

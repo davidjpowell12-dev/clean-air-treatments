@@ -9,7 +9,10 @@ const SettingsPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const users = await Api.get('/api/auth/users');
+      const [users, settings] = await Promise.all([
+        Api.get('/api/auth/users'),
+        Api.get('/api/settings').catch(() => ({}))
+      ]);
 
       main.innerHTML = `
         <div class="page-header">
@@ -33,6 +36,20 @@ const SettingsPage = {
               </div>
             </div>
           `).join('')}
+        </div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>Job Costing Settings</h3></div>
+          <div class="card-body">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Hourly Labor Rate ($)</label>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <input type="number" id="laborRateInput" value="${settings.hourly_labor_rate || '45'}" step="0.50" min="0" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:6px;font-size:16px;">
+                <button class="btn btn-primary btn-sm" onclick="SettingsPage.saveLaborRate()">Save</button>
+              </div>
+              <p class="form-hint">Used to auto-calculate labor cost on applications (duration × rate)</p>
+            </div>
+          </div>
         </div>
 
         <div class="card" style="margin-top:16px;">
@@ -127,6 +144,20 @@ const SettingsPage = {
         App.toast(err.message, 'error');
       }
     });
+  },
+
+  async saveLaborRate() {
+    const value = document.getElementById('laborRateInput').value;
+    if (!value || Number(value) < 0) {
+      App.toast('Enter a valid rate', 'error');
+      return;
+    }
+    try {
+      await Api.put('/api/settings/hourly_labor_rate', { value });
+      App.toast('Labor rate updated', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
   },
 
   async deleteUser(id) {

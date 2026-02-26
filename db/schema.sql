@@ -82,8 +82,19 @@ CREATE TABLE IF NOT EXISTS applications (
   notification_registry_checked INTEGER DEFAULT 0,
   is_restricted_use INTEGER DEFAULT 0,
   notes TEXT,
+  duration_minutes REAL,
+  labor_cost REAL,
+  material_cost REAL,
+  revenue REAL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   synced INTEGER DEFAULT 1
+);
+
+-- App-wide settings (key-value)
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Properties (customer/service locations)

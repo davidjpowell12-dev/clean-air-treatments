@@ -43,6 +43,22 @@ const migrations = [
       )
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_zones_property ON property_zones(property_id)');
+  },
+  // Migration 4: Job costing fields + app settings table
+  function addJobCostingFields(db) {
+    try { db.exec('ALTER TABLE applications ADD COLUMN duration_minutes REAL'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE applications ADD COLUMN labor_cost REAL'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE applications ADD COLUMN material_cost REAL'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE applications ADD COLUMN revenue REAL'); } catch (e) { /* exists */ }
+
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('hourly_labor_rate', '45')");
   }
 ];
 

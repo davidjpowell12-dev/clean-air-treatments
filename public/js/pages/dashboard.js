@@ -4,11 +4,12 @@ const DashboardPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [products, inventory, applications, properties] = await Promise.all([
+      const [products, inventory, applications, properties, financials] = await Promise.all([
         Api.get('/api/products'),
         Api.get('/api/inventory'),
         Api.get('/api/applications?limit=5'),
-        Api.get('/api/properties').catch(() => [])
+        Api.get('/api/properties').catch(() => []),
+        Api.get('/api/applications/stats').catch(() => ({ total_revenue: 0, total_cost: 0, total_margin: 0, margin_pct: 0 }))
       ]);
 
       const lowStock = inventory.filter(i => i.quantity <= i.reorder_threshold);
@@ -38,6 +39,27 @@ const DashboardPage = {
             <div class="stat-label">Low Stock</div>
           </div>
         </div>
+
+        ${financials.total_revenue > 0 ? `
+          <div class="stat-grid" style="margin-top:4px;">
+            <div class="stat-card">
+              <div class="stat-value" style="font-size:22px;color:var(--green-dark);">$${Number(financials.total_revenue).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
+              <div class="stat-label">YTD Revenue</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" style="font-size:22px;">$${Number(financials.total_cost).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
+              <div class="stat-label">YTD Costs</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" style="font-size:22px;color:${financials.total_margin >= 0 ? 'var(--green-dark)' : 'var(--red)'};">$${Number(financials.total_margin).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
+              <div class="stat-label">YTD Margin</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-value" style="font-size:22px;color:${financials.margin_pct >= 0 ? 'var(--green-dark)' : 'var(--red)'};">${financials.margin_pct}%</div>
+              <div class="stat-label">Margin %</div>
+            </div>
+          </div>
+        ` : ''}
 
         ${lowStock.length > 0 ? `
           <div class="card card-accent">

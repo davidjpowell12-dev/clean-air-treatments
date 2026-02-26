@@ -89,6 +89,30 @@ router.get('/export', requireAuth, (req, res) => {
   res.send(csv);
 });
 
+// YTD financial stats for dashboard (must be before /:id)
+router.get('/stats', requireAuth, (req, res) => {
+  const db = getDb();
+  const year = req.query.year || new Date().getFullYear();
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+
+  const stats = db.prepare(`
+    SELECT
+      COALESCE(SUM(revenue), 0) as total_revenue,
+      COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0) as total_cost,
+      COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0)) as total_margin,
+      CASE WHEN COALESCE(SUM(revenue), 0) > 0
+        THEN ROUND(((COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0))) / COALESCE(SUM(revenue), 0)) * 100, 1)
+        ELSE 0
+      END as margin_pct,
+      COUNT(*) as total_applications
+    FROM applications
+    WHERE application_date BETWEEN ? AND ?
+  `).get(startDate, endDate);
+
+  res.json(stats);
+});
+
 // Get single application
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
@@ -122,9 +146,10 @@ router.post('/', requireAuth, (req, res) => {
       application_method, target_pest,
       temperature_f, wind_speed_mph, wind_direction, weather_conditions,
       lawn_markers_posted, notification_registry_checked, is_restricted_use,
-      notes, property_id, retention_years
+      notes, property_id, retention_years,
+      duration_minutes, labor_cost, material_cost, revenue
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     req.session.userId,
@@ -140,7 +165,8 @@ router.post('/', requireAuth, (req, res) => {
     b.lawn_markers_posted || 0, b.notification_registry_checked || 0, b.is_restricted_use || 0,
     b.notes || null,
     b.property_id || null,
-    retentionYears
+    retentionYears,
+    b.duration_minutes || null, b.labor_cost || null, b.material_cost || null, b.revenue || null
   );
 
   // Auto-deduct inventory
@@ -226,7 +252,8 @@ router.put('/:id', requireAuth, (req, res) => {
         application_method = ?, target_pest = ?,
         temperature_f = ?, wind_speed_mph = ?, wind_direction = ?, weather_conditions = ?,
         lawn_markers_posted = ?, notification_registry_checked = ?, is_restricted_use = ?,
-        notes = ?, property_id = ?
+        notes = ?, property_id = ?,
+        duration_minutes = ?, labor_cost = ?, material_cost = ?, revenue = ?
       WHERE id = ?
     `).run(
       b.application_date, b.start_time || null, b.end_time || null,
@@ -238,6 +265,7 @@ router.put('/:id', requireAuth, (req, res) => {
       b.temperature_f || null, b.wind_speed_mph || null, b.wind_direction || null, b.weather_conditions || null,
       b.lawn_markers_posted || 0, b.notification_registry_checked || 0, b.is_restricted_use || 0,
       b.notes || null, b.property_id || null,
+      b.duration_minutes || null, b.labor_cost || null, b.material_cost || null, b.revenue || null,
       appId
     );
   });
@@ -274,8 +302,9 @@ router.post('/sync', requireAuth, (req, res) => {
           application_method, target_pest,
           temperature_f, wind_speed_mph, wind_direction, weather_conditions,
           lawn_markers_posted, notification_registry_checked, is_restricted_use,
-          notes, property_id, retention_years
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          notes, property_id, retention_years,
+          duration_minutes, labor_cost, material_cost, revenue
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         req.session.userId, b.applicator_cert_number || null,
         b.application_date, b.start_time || null, b.end_time || null,
@@ -286,7 +315,8 @@ router.post('/sync', requireAuth, (req, res) => {
         b.application_method || null, b.target_pest || null,
         b.temperature_f || null, b.wind_speed_mph || null, b.wind_direction || null, b.weather_conditions || null,
         b.lawn_markers_posted || 0, b.notification_registry_checked || 0, b.is_restricted_use || 0,
-        b.notes || null, b.property_id || null, retentionYears
+        b.notes || null, b.property_id || null, retentionYears,
+        b.duration_minutes || null, b.labor_cost || null, b.material_cost || null, b.revenue || null
       );
       // Auto-deduct inventory for synced record
       if (b.product_id && b.total_product_used) {
