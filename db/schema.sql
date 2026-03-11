@@ -200,6 +200,24 @@ CREATE TABLE IF NOT EXISTS property_zones (
 
 CREATE INDEX IF NOT EXISTS idx_zones_property ON property_zones(property_id);
 
+-- Schedules (assign properties to dates for service visits)
+CREATE TABLE IF NOT EXISTS schedules (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL REFERENCES properties(id),
+  scheduled_date DATE NOT NULL,
+  assigned_to INTEGER REFERENCES users(id),
+  status TEXT NOT NULL DEFAULT 'scheduled',
+  sort_order INTEGER DEFAULT 0,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id);
+CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products

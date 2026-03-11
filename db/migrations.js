@@ -64,6 +64,26 @@ const migrations = [
   function addPropertyContactFields(db) {
     try { db.exec('ALTER TABLE properties ADD COLUMN email TEXT'); } catch (e) { /* exists */ }
     try { db.exec('ALTER TABLE properties ADD COLUMN phone TEXT'); } catch (e) { /* exists */ }
+  },
+  // Migration 6: Create schedules table
+  function createSchedulesTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL REFERENCES properties(id),
+        scheduled_date DATE NOT NULL,
+        assigned_to INTEGER REFERENCES users(id),
+        status TEXT NOT NULL DEFAULT 'scheduled',
+        sort_order INTEGER DEFAULT 0,
+        notes TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to)');
   }
 ];
 

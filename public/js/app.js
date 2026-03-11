@@ -120,6 +120,9 @@ const App = {
       case 'ipm':
         IpmPage.render(action, id ? Number(id) : null);
         break;
+      case 'scheduling':
+        SchedulingPage.render(action, id ? Number(id) : null);
+        break;
       case 'settings':
         SettingsPage.render();
         break;

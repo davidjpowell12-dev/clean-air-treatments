@@ -105,6 +105,7 @@ try {
   app.use('/api/purchases', require('./routes/purchases'));
   app.use('/api/audit-log', require('./routes/audit-log'));
   app.use('/api/settings', require('./routes/settings'));
+  app.use('/api/schedules', require('./routes/schedules'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);
