@@ -105,6 +105,8 @@ CREATE TABLE IF NOT EXISTS properties (
   city TEXT,
   state TEXT DEFAULT 'MI',
   zip TEXT,
+  email TEXT,
+  phone TEXT,
   sqft REAL,
   soil_type TEXT,
   notes TEXT,

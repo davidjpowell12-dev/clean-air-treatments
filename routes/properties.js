@@ -94,16 +94,16 @@ router.get('/:id/ipm-cases', requireAuth, (req, res) => {
 // Create property
 router.post('/', requireAuth, (req, res) => {
   const db = getDb();
-  const { customer_name, address, city, state, zip, sqft, soil_type, notes } = req.body;
+  const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes } = req.body;
 
   if (!customer_name || !address) {
     return res.status(400).json({ error: 'Customer name and address are required' });
   }
 
   const result = db.prepare(`
-    INSERT INTO properties (customer_name, address, city, state, zip, sqft, soil_type, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(customer_name, address, city || null, state || 'MI', zip || null, sqft || null, soil_type || null, notes || null);
+    INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(customer_name, address, city || null, state || 'MI', zip || null, email || null, phone || null, sqft || null, soil_type || null, notes || null);
 
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(result.lastInsertRowid);
   logAudit(db, 'property', prop.id, req.session.userId, 'create', prop);
@@ -116,13 +116,13 @@ router.put('/:id', requireAuth, (req, res) => {
   const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Property not found' });
 
-  const { customer_name, address, city, state, zip, sqft, soil_type, notes } = req.body;
+  const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes } = req.body;
 
   db.prepare(`
     UPDATE properties SET
       customer_name = COALESCE(?, customer_name),
       address = COALESCE(?, address),
-      city = ?, state = ?, zip = ?, sqft = ?, soil_type = ?, notes = ?,
+      city = ?, state = ?, zip = ?, email = ?, phone = ?, sqft = ?, soil_type = ?, notes = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -130,6 +130,8 @@ router.put('/:id', requireAuth, (req, res) => {
     city !== undefined ? city : existing.city,
     state || existing.state,
     zip !== undefined ? zip : existing.zip,
+    email !== undefined ? email : existing.email,
+    phone !== undefined ? phone : existing.phone,
     sqft !== undefined ? sqft : existing.sqft,
     soil_type !== undefined ? soil_type : existing.soil_type,
     notes !== undefined ? notes : existing.notes,
@@ -229,12 +231,18 @@ router.post('/import', requireAdmin, (req, res) => {
 
   const db = getDb();
   const stmt = db.prepare(`
-    INSERT INTO properties (customer_name, address, city, state, zip, sqft, soil_type, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
+
+  // Get existing addresses for dedup
+  const existingAddresses = new Set(
+    db.prepare('SELECT LOWER(address) as addr FROM properties').all().map(r => r.addr)
+  );
 
   const importMany = db.transaction((props) => {
     let imported = 0;
+    let skipped = 0;
     const errors = [];
     for (let i = 0; i < props.length; i++) {
       const p = props[i];
@@ -242,17 +250,25 @@ router.post('/import', requireAdmin, (req, res) => {
         errors.push(`Row ${i + 1}: Missing customer_name or address`);
         continue;
       }
+      // Skip duplicates
+      const addrLower = p.address.trim().toLowerCase();
+      if (existingAddresses.has(addrLower)) {
+        skipped++;
+        continue;
+      }
       try {
         stmt.run(
           p.customer_name, p.address, p.city || null, p.state || 'MI',
-          p.zip || null, p.sqft ? Number(p.sqft) : null, p.soil_type || null, p.notes || null
+          p.zip || null, p.email || null, p.phone || null,
+          p.sqft ? Number(p.sqft) : null, p.soil_type || null, p.notes || null
         );
+        existingAddresses.add(addrLower);
         imported++;
       } catch (e) {
         errors.push(`Row ${i + 1}: ${e.message}`);
       }
     }
-    return { imported, errors };
+    return { imported, skipped, errors };
   });
 
   const result = importMany(properties);

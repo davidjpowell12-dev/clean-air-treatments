@@ -94,6 +94,8 @@ const PropertiesPage = {
           </div>
           <div class="card-body">
             <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value">${this.esc(prop.address)}${prop.city ? ', ' + this.esc(prop.city) : ''} ${this.esc(prop.state || '')} ${this.esc(prop.zip || '')}</span></div>
+            ${prop.email ? `<div class="detail-row"><span class="detail-label">Email</span><span class="detail-value"><a href="mailto:${this.esc(prop.email)}" style="color:var(--blue);text-decoration:none;">${this.esc(prop.email)}</a></span></div>` : ''}
+            ${prop.phone ? `<div class="detail-row"><span class="detail-label">Phone</span><span class="detail-value"><a href="tel:${this.esc(prop.phone)}" style="color:var(--blue);text-decoration:none;">${this.esc(prop.phone)}</a></span></div>` : ''}
             <div class="detail-row"><span class="detail-label">Total Size</span><span class="detail-value" id="propTotalSqft">${prop.sqft ? prop.sqft.toLocaleString() + ' sq ft' : 'N/A'}</span></div>
             <div class="detail-row"><span class="detail-label">Soil Type</span><span class="detail-value">${this.esc(prop.soil_type || 'N/A')}</span></div>
             <div class="detail-row"><span class="detail-label">Last Treatment</span><span class="detail-value">${prop.last_application_date || 'Never'}</span></div>
@@ -218,6 +220,16 @@ const PropertiesPage = {
             </div>
             <div class="form-row">
               <div class="form-group">
+                <label>Email</label>
+                <input type="email" name="email" value="${this.esc(prop.email || '')}">
+              </div>
+              <div class="form-group">
+                <label>Phone</label>
+                <input type="tel" name="phone" value="${this.esc(prop.phone || '')}">
+              </div>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
                 <label>Size (sq ft)</label>
                 <input type="number" name="sqft" value="${prop.sqft || ''}" step="1">
               </div>
@@ -265,6 +277,72 @@ const PropertiesPage = {
     });
   },
 
+  // --- CSV Import ---
+
+  _columnAliases: {
+    customer_name: ['customer_company_name', 'name', 'client', 'customer', 'account', 'contact', 'company_name', 'client_name', 'account_name'],
+    address: ['street', 'street_address', 'address_1', 'service_address', 'street1'],
+    city: ['city', 'town'],
+    state: ['state', 'province', 'region'],
+    zip: ['postal_code', 'zip_code', 'zipcode', 'postcode'],
+    email: ['email', 'email_address', 'e-mail', 'e_mail'],
+    phone: ['mobile', 'cell', 'phone_number', 'cell_phone', 'mobile_phone', 'telephone'],
+    sqft: ['sqft', 'square_feet', 'sq_ft', 'lot_size'],
+    soil_type: ['soil_type', 'soil'],
+    notes: ['notes', 'comments', 'memo', 'description']
+  },
+
+  _appFields: ['customer_name', 'address', 'city', 'state', 'zip', 'email', 'phone', 'sqft', 'soil_type', 'notes'],
+
+  _suggestMapping(header) {
+    const h = header.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    for (const [field, aliases] of Object.entries(this._columnAliases)) {
+      if (h === field || aliases.includes(h)) return field;
+    }
+    return '';
+  },
+
+  _splitCSVLine(line, delimiter) {
+    const values = [];
+    let current = '';
+    let inQuotes = false;
+    for (const char of line) {
+      if (char === '"') { inQuotes = !inQuotes; }
+      else if (char === delimiter && !inQuotes) { values.push(current.trim()); current = ''; }
+      else { current += char; }
+    }
+    values.push(current.trim());
+    return values;
+  },
+
+  parseCSV(text) {
+    // Strip BOM
+    if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+    if (lines.length < 2) return { headers: [], rows: [] };
+
+    // Auto-detect delimiter
+    const headerLine = lines[0];
+    const commas = (headerLine.match(/,/g) || []).length;
+    const tabs = (headerLine.match(/\t/g) || []).length;
+    const semis = (headerLine.match(/;/g) || []).length;
+    const delimiter = tabs > commas ? '\t' : semis > commas ? ';' : ',';
+
+    const headers = this._splitCSVLine(headerLine, delimiter).map(h =>
+      h.replace(/^"(.*)"$/, '$1').trim()
+    );
+
+    const rows = lines.slice(1).map(line => {
+      const values = this._splitCSVLine(line, delimiter);
+      const obj = {};
+      headers.forEach((h, i) => { obj[h] = values[i] || ''; });
+      return obj;
+    });
+
+    return { headers, rows };
+  },
+
   renderImport() {
     const main = document.getElementById('mainContent');
     main.innerHTML = `
@@ -273,19 +351,14 @@ const PropertiesPage = {
         <div class="card-header"><h3>Import Properties from CSV</h3></div>
         <div class="card-body">
           <p style="font-size:14px;color:var(--gray-700);margin-bottom:16px;">
-            Upload a CSV file with your customer properties. Required columns: <strong>customer_name</strong> and <strong>address</strong>.
-            Optional columns: city, state, zip, sqft, soil_type, notes.
+            Upload a CSV file from your CRM or spreadsheet. You'll map columns to the right fields before importing.
           </p>
           <div class="form-group">
             <label>Select CSV File</label>
-            <input type="file" id="csvFile" accept=".csv" style="font-size:16px;">
+            <input type="file" id="csvFile" accept=".csv,.tsv,.txt" style="font-size:16px;">
           </div>
-          <div id="csvPreview" style="display:none;">
-            <h4 style="margin-bottom:8px;color:var(--blue);">Preview (first 5 rows)</h4>
-            <div id="csvPreviewTable" style="overflow-x:auto;margin-bottom:16px;"></div>
-            <div id="csvStats" style="font-size:14px;color:var(--gray-700);margin-bottom:16px;"></div>
-            <button class="btn btn-primary btn-full" onclick="PropertiesPage.doImport()">Import Properties</button>
-          </div>
+          <div id="csvMapping" style="display:none;"></div>
+          <div id="csvPreview" style="display:none;"></div>
           <div id="importResults" style="display:none;"></div>
         </div>
       </div>
@@ -297,72 +370,148 @@ const PropertiesPage = {
 
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const text = ev.target.result;
-        this._parsedCSV = this.parseCSV(text);
+        const parsed = this.parseCSV(ev.target.result);
+        this._csvHeaders = parsed.headers;
+        this._csvRows = parsed.rows;
 
-        if (this._parsedCSV.length === 0) {
+        if (parsed.rows.length === 0) {
           App.toast('No data found in CSV', 'error');
           return;
         }
 
-        // Show preview
-        const preview = document.getElementById('csvPreview');
-        preview.style.display = 'block';
-
-        const headers = Object.keys(this._parsedCSV[0]);
-        const previewRows = this._parsedCSV.slice(0, 5);
-
-        document.getElementById('csvPreviewTable').innerHTML = `
-          <table style="width:100%;border-collapse:collapse;font-size:13px;">
-            <thead><tr>${headers.map(h => `<th style="padding:6px 8px;border:1px solid var(--gray-200);background:var(--gray-50);text-align:left;">${this.esc(h)}</th>`).join('')}</tr></thead>
-            <tbody>${previewRows.map(row => `<tr>${headers.map(h => `<td style="padding:6px 8px;border:1px solid var(--gray-200);">${this.esc(row[h] || '')}</td>`).join('')}</tr>`).join('')}</tbody>
-          </table>
-        `;
-
-        document.getElementById('csvStats').textContent = `${this._parsedCSV.length} properties found in CSV`;
+        this.renderColumnMapping(parsed.headers, parsed.rows.length);
       };
       reader.readAsText(file);
     });
   },
 
-  parseCSV(text) {
-    const lines = text.split('\n').map(l => l.trim()).filter(l => l);
-    if (lines.length < 2) return [];
+  renderColumnMapping(headers, rowCount) {
+    const mappingDiv = document.getElementById('csvMapping');
+    mappingDiv.style.display = 'block';
+    document.getElementById('csvPreview').style.display = 'none';
+    document.getElementById('importResults').style.display = 'none';
 
-    const headers = lines[0].split(',').map(h => h.replace(/^"(.*)"$/, '$1').trim().toLowerCase().replace(/\s+/g, '_'));
+    const fieldOptions = this._appFields.map(f => `<option value="${f}">${f}</option>`).join('');
 
-    return lines.slice(1).map(line => {
-      const values = [];
-      let current = '';
-      let inQuotes = false;
-      for (const char of line) {
-        if (char === '"') { inQuotes = !inQuotes; }
-        else if (char === ',' && !inQuotes) { values.push(current.trim()); current = ''; }
-        else { current += char; }
+    mappingDiv.innerHTML = `
+      <div style="background:var(--blue-light);color:var(--blue);padding:10px 14px;border-radius:8px;font-size:14px;margin-bottom:16px;">
+        Found <strong>${rowCount}</strong> rows with <strong>${headers.length}</strong> columns
+      </div>
+      <h4 style="margin-bottom:8px;font-size:15px;">Map CSV Columns</h4>
+      <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Match each CSV column to a property field. Required: customer_name and address.</p>
+      <div id="mappingRows">
+        ${headers.map((h, i) => {
+          const suggested = this._suggestMapping(h);
+          return `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="flex:1;font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${this.esc(h)}">${this.esc(h)}</span>
+              <span style="color:var(--gray-400);font-size:16px;">&rarr;</span>
+              <select class="csv-map-select" data-index="${i}" style="flex:1;padding:8px;border:2px solid var(--gray-200);border-radius:6px;font-size:14px;">
+                <option value="">-- skip --</option>
+                ${this._appFields.map(f => `<option value="${f}" ${suggested === f ? 'selected' : ''}>${f}</option>`).join('')}
+              </select>
+            </div>
+          `;
+        }).join('')}
+      </div>
+      <button class="btn btn-primary btn-full" style="margin-top:12px;" onclick="PropertiesPage.applyMapping()">Apply Mapping &amp; Preview</button>
+    `;
+  },
+
+  applyMapping() {
+    const selects = document.querySelectorAll('.csv-map-select');
+    const mapping = {};
+    selects.forEach(sel => {
+      if (sel.value) {
+        mapping[this._csvHeaders[Number(sel.dataset.index)]] = sel.value;
       }
-      values.push(current.trim());
+    });
 
+    // Validate required fields are mapped
+    const mappedFields = Object.values(mapping);
+    if (!mappedFields.includes('customer_name')) {
+      App.toast('Please map a column to "customer_name"', 'error');
+      return;
+    }
+    if (!mappedFields.includes('address')) {
+      App.toast('Please map a column to "address"', 'error');
+      return;
+    }
+
+    // Transform rows using mapping
+    const mapped = [];
+    let skippedEmpty = 0;
+    const seenAddresses = new Set();
+
+    for (const row of this._csvRows) {
       const obj = {};
-      headers.forEach((h, i) => { obj[h] = values[i] || ''; });
-      return obj;
-    }).filter(obj => obj.customer_name || obj.address);
+      for (const [csvCol, appField] of Object.entries(mapping)) {
+        let val = (row[csvCol] || '').trim();
+        // Strip HTML from notes
+        if (appField === 'notes' && val) {
+          val = val.replace(/<[^>]*>/g, '').trim();
+        }
+        // Clean "undefined" city
+        if (appField === 'city' && val.toLowerCase() === 'undefined') {
+          val = '';
+        }
+        obj[appField] = val;
+      }
+
+      // Skip empty addresses
+      if (!obj.address) { skippedEmpty++; continue; }
+
+      // Dedup within CSV
+      const addrKey = obj.address.toLowerCase();
+      if (seenAddresses.has(addrKey)) { skippedEmpty++; continue; }
+      seenAddresses.add(addrKey);
+
+      // Default state
+      if (!obj.state) obj.state = 'MI';
+
+      mapped.push(obj);
+    }
+
+    this._mappedCSV = mapped;
+
+    // Show preview
+    const preview = document.getElementById('csvPreview');
+    preview.style.display = 'block';
+
+    const fields = this._appFields.filter(f => mapped.length > 0 && mapped.some(r => r[f]));
+    const previewRows = mapped.slice(0, 5);
+
+    preview.innerHTML = `
+      <h4 style="margin:16px 0 8px;color:var(--blue);font-size:15px;">Preview (first 5 of ${mapped.length})</h4>
+      ${skippedEmpty > 0 ? `<p style="font-size:13px;color:var(--orange);margin-bottom:8px;">${skippedEmpty} rows skipped (no address or duplicate)</p>` : ''}
+      <div style="overflow-x:auto;margin-bottom:16px;">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr>${fields.map(f => `<th style="padding:6px 8px;border:1px solid var(--gray-200);background:var(--gray-50);text-align:left;white-space:nowrap;">${this.esc(f)}</th>`).join('')}</tr></thead>
+          <tbody>${previewRows.map(row => `<tr>${fields.map(f => `<td style="padding:6px 8px;border:1px solid var(--gray-200);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${this.esc(row[f] || '')}</td>`).join('')}</tr>`).join('')}</tbody>
+        </table>
+      </div>
+      <button class="btn btn-primary btn-full" onclick="PropertiesPage.doImport()">Import ${mapped.length} Properties</button>
+    `;
   },
 
   async doImport() {
-    if (!this._parsedCSV || this._parsedCSV.length === 0) {
+    if (!this._mappedCSV || this._mappedCSV.length === 0) {
       App.toast('No data to import', 'error');
       return;
     }
 
     try {
-      const result = await Api.post('/api/properties/import', { properties: this._parsedCSV });
+      const result = await Api.post('/api/properties/import', { properties: this._mappedCSV });
       const resultsDiv = document.getElementById('importResults');
       resultsDiv.style.display = 'block';
+      document.getElementById('csvPreview').style.display = 'none';
+      document.getElementById('csvMapping').style.display = 'none';
       resultsDiv.innerHTML = `
         <div class="card card-accent">
           <div class="card-body">
             <h4 style="color:var(--green-dark);margin-bottom:8px;">Import Complete</h4>
             <p>${result.imported} properties imported successfully</p>
+            ${result.skipped ? `<p style="color:var(--orange);margin-top:4px;">${result.skipped} duplicates skipped (address already exists)</p>` : ''}
             ${result.errors && result.errors.length > 0 ? `<p style="color:var(--red);margin-top:8px;">${result.errors.length} errors:<br>${result.errors.slice(0, 5).map(e => this.esc(e)).join('<br>')}</p>` : ''}
             <button class="btn btn-primary" style="margin-top:12px;" onclick="App.navigate('properties')">View Properties</button>
           </div>

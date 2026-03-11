@@ -59,6 +59,11 @@ const migrations = [
       )
     `);
     db.exec("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('hourly_labor_rate', '45')");
+  },
+  // Migration 5: Add email and phone to properties
+  function addPropertyContactFields(db) {
+    try { db.exec('ALTER TABLE properties ADD COLUMN email TEXT'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE properties ADD COLUMN phone TEXT'); } catch (e) { /* exists */ }
   }
 ];
 
