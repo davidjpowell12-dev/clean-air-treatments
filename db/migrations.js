@@ -84,6 +84,13 @@ const migrations = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to)');
+  },
+  // Migration 7: Add program scheduling columns for multi-visit seasons
+  function addProgramSchedulingColumns(db) {
+    try { db.exec('ALTER TABLE schedules ADD COLUMN round_number INTEGER'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE schedules ADD COLUMN total_rounds INTEGER DEFAULT 6'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE schedules ADD COLUMN program_id TEXT'); } catch (e) { /* exists */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_program ON schedules(program_id)');
   }
 ];
 

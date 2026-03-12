@@ -1209,6 +1209,85 @@ body {
   color: var(--gray-900);
 }
 
+/* Season overview */
+.season-card {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--gray-100);
+}
+.season-card:last-child { border-bottom: none; }
+
+.season-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+.season-card-name {
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--blue);
+}
+.season-card-addr {
+  font-size: 13px;
+  color: var(--gray-700);
+}
+
+.season-rounds {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 6px 0;
+  -webkit-overflow-scrolling: touch;
+}
+
+.round-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 44px;
+}
+
+.round-dot {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: white;
+  transition: transform 0.15s;
+}
+.round-dot:hover { transform: scale(1.15); }
+
+.round-dot-completed { background: var(--green); }
+.round-dot-scheduled { background: var(--blue); }
+.round-dot-skipped { background: var(--gray-300); }
+.round-dot-overdue { background: var(--red); }
+
+.round-date {
+  font-size: 10px;
+  color: var(--gray-500);
+  white-space: nowrap;
+}
+
+/* Progress bar */
+.progress-bar {
+  height: 6px;
+  background: var(--gray-200);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--green);
+  border-radius: 3px;
+  transition: width 0.3s;
+}
+
 @media (max-width: 767px) {
   .schedule-entry {
     flex-direction: column;

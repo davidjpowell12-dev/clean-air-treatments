@@ -67,6 +67,174 @@ router.get('/unscheduled', requireAuth, (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
+// Generate season — bulk create rounds for selected properties
+router.post('/generate-season', requireAuth, (req, res) => {
+  const db = getDb();
+  const { property_ids, start_date, interval_weeks, assigned_to } = req.body;
+
+  if (!Array.isArray(property_ids) || !start_date || !interval_weeks) {
+    return res.status(400).json({ error: 'property_ids, start_date, and interval_weeks required' });
+  }
+
+  const totalRounds = 6;
+  const year = start_date.slice(0, 4);
+
+  const generate = db.transaction(() => {
+    let generated = 0;
+    let skippedProperties = 0;
+
+    for (const pid of property_ids) {
+      // Skip if property already has a program this year
+      const existing = db.prepare(
+        "SELECT id FROM schedules WHERE property_id = ? AND program_id IS NOT NULL AND scheduled_date LIKE ?"
+      ).get(pid, `${year}%`);
+      if (existing) { skippedProperties++; continue; }
+
+      const programId = `pgm_${Date.now()}_${pid}`;
+
+      for (let round = 1; round <= totalRounds; round++) {
+        const offsetDays = (round - 1) * interval_weeks * 7;
+        const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(start_date, offsetDays);
+
+        db.prepare(`
+          INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, created_by)
+          VALUES (?, ?, ?, 0, ?, ?, ?, ?)
+        `).run(pid, roundDate.d, assigned_to || null, round, totalRounds, programId, req.session.userId);
+        generated++;
+      }
+    }
+    return { generated, skippedProperties };
+  });
+
+  const result = generate();
+  logAudit(db, 'schedule', 0, req.session.userId, 'generate_season', {
+    start_date, interval_weeks, count: result.generated, skipped: result.skippedProperties
+  });
+  res.json({ generated: result.generated, skipped_properties: result.skippedProperties, rounds: totalRounds });
+});
+
+// Get properties without a season for a given year
+router.get('/unscheduled-programs', requireAuth, (req, res) => {
+  const db = getDb();
+  const { year, search } = req.query;
+  if (!year) return res.status(400).json({ error: 'Year parameter required' });
+
+  let sql = `
+    SELECT p.* FROM properties p
+    WHERE p.id NOT IN (
+      SELECT DISTINCT property_id FROM schedules
+      WHERE program_id IS NOT NULL AND scheduled_date LIKE ?
+    )
+  `;
+  const params = [`${year}%`];
+
+  if (search) {
+    sql += ' AND (p.customer_name LIKE ? OR p.address LIKE ? OR p.city LIKE ?)';
+    const q = `%${search}%`;
+    params.push(q, q, q);
+  }
+
+  sql += ' ORDER BY p.customer_name';
+  res.json(db.prepare(sql).all(...params));
+});
+
+// Season overview — all program entries grouped by property
+router.get('/season-overview', requireAuth, (req, res) => {
+  const db = getDb();
+  const { year } = req.query;
+  if (!year) return res.status(400).json({ error: 'Year parameter required' });
+
+  const entries = db.prepare(`
+    SELECT s.id, s.property_id, s.scheduled_date, s.status, s.round_number, s.total_rounds, s.program_id,
+           p.customer_name, p.address, p.city
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    WHERE s.program_id IS NOT NULL AND s.scheduled_date LIKE ?
+    ORDER BY p.customer_name, s.round_number
+  `).all(`${year}%`);
+
+  // Group by program_id
+  const programs = {};
+  for (const e of entries) {
+    if (!programs[e.program_id]) {
+      programs[e.program_id] = {
+        property_id: e.property_id,
+        customer_name: e.customer_name,
+        address: e.address,
+        city: e.city,
+        program_id: e.program_id,
+        rounds: []
+      };
+    }
+    programs[e.program_id].rounds.push({
+      id: e.id,
+      round_number: e.round_number,
+      scheduled_date: e.scheduled_date,
+      status: e.status
+    });
+  }
+
+  res.json(Object.values(programs));
+});
+
+// Get schedule entries for a specific property (for property detail page)
+router.get('/property/:propertyId', requireAuth, (req, res) => {
+  const db = getDb();
+  const entries = db.prepare(`
+    SELECT s.* FROM schedules s
+    WHERE s.property_id = ? AND s.program_id IS NOT NULL
+    ORDER BY s.round_number
+  `).all(req.params.propertyId);
+  res.json(entries);
+});
+
+// Reschedule a single entry to a new date
+router.put('/:id/reschedule', requireAuth, (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Schedule entry not found' });
+
+  const { new_date } = req.body;
+  if (!new_date) return res.status(400).json({ error: 'new_date required' });
+
+  db.prepare(
+    'UPDATE schedules SET scheduled_date = ?, sort_order = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).run(new_date, req.params.id);
+
+  const updated = db.prepare(`
+    SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.sqft,
+           u.full_name as assigned_to_name
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    LEFT JOIN users u ON u.id = s.assigned_to
+    WHERE s.id = ?
+  `).get(req.params.id);
+
+  logAudit(db, 'schedule', req.params.id, req.session.userId, 'reschedule', {
+    old_date: existing.scheduled_date, new_date
+  });
+  res.json(updated);
+});
+
+// Cancel entire season (delete non-completed program entries)
+router.delete('/program/:programId', requireAuth, (req, res) => {
+  const db = getDb();
+  const entries = db.prepare(
+    "SELECT * FROM schedules WHERE program_id = ?"
+  ).all(req.params.programId);
+
+  if (entries.length === 0) return res.status(404).json({ error: 'Program not found' });
+
+  const result = db.prepare(
+    "DELETE FROM schedules WHERE program_id = ? AND status = 'scheduled'"
+  ).run(req.params.programId);
+
+  logAudit(db, 'schedule', 0, req.session.userId, 'cancel_season', {
+    program_id: req.params.programId, deleted: result.changes
+  });
+  res.json({ deleted: result.changes });
+});
+
 // Get single schedule entry
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();

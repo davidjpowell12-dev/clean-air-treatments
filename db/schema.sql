@@ -209,6 +209,9 @@ CREATE TABLE IF NOT EXISTS schedules (
   status TEXT NOT NULL DEFAULT 'scheduled',
   sort_order INTEGER DEFAULT 0,
   notes TEXT,
+  round_number INTEGER,
+  total_rounds INTEGER DEFAULT 6,
+  program_id TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -217,6 +220,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to);
+-- idx_schedules_program created by migration 7 (safe for existing DBs)
 
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert

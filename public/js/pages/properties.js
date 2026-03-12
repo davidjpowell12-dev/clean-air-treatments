@@ -68,10 +68,11 @@ const PropertiesPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [prop, applications, ipmCases] = await Promise.all([
+      const [prop, applications, ipmCases, scheduleRounds] = await Promise.all([
         Api.get(`/api/properties/${id}`),
         Api.get(`/api/properties/${id}/applications`),
-        Api.get(`/api/properties/${id}/ipm-cases`)
+        Api.get(`/api/properties/${id}/ipm-cases`),
+        Api.get(`/api/schedules/property/${id}`).catch(() => [])
       ]);
       const isAdmin = App.user.role === 'admin';
 
@@ -129,6 +130,33 @@ const PropertiesPage = {
           </div>
           <div id="zoneFormArea"></div>
         </div>
+
+        ${scheduleRounds.length > 0 ? (() => {
+          const done = scheduleRounds.filter(r => r.status === 'completed').length;
+          const total = scheduleRounds.length;
+          const pct = Math.round((done / total) * 100);
+          const today = new Date().toISOString().slice(0, 10);
+          return `
+            <div class="card" style="margin-bottom:12px;">
+              <div class="card-header"><h3 style="font-size:16px;">Season Progress</h3><span class="badge ${done === total ? 'badge-green' : 'badge-blue'}">${done}/${total}</span></div>
+              <div class="card-body">
+                <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+                <div style="margin-top:10px;">
+                  ${scheduleRounds.map(r => {
+                    const statusIcon = r.status === 'completed' ? '&#10003;' : r.status === 'skipped' ? '&mdash;' : '&#9679;';
+                    const statusColor = r.status === 'completed' ? 'var(--green)' : r.status === 'skipped' ? 'var(--gray-500)' : (r.scheduled_date < today ? 'var(--red)' : 'var(--blue)');
+                    const d = new Date(r.scheduled_date + 'T12:00:00');
+                    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    return `<div class="detail-row" style="cursor:pointer;" onclick="App.navigate('scheduling')">
+                      <span class="detail-label" style="color:${statusColor};font-weight:600;">Round ${r.round_number} ${statusIcon}</span>
+                      <span class="detail-value">${dateStr} &mdash; ${r.status}${r.status === 'scheduled' && r.scheduled_date < today ? ' (overdue)' : ''}</span>
+                    </div>`;
+                  }).join('')}
+                </div>
+              </div>
+            </div>
+          `;
+        })() : ''}
 
         <div style="margin-bottom:12px;">
           <button class="btn btn-primary btn-full" onclick="App.navigate('applications', 'new', null, {propertyId:${prop.id}, customerName:'${this.esc(prop.customer_name)}', address:'${this.esc(prop.address)}', city:'${this.esc(prop.city || '')}', state:'${this.esc(prop.state || 'MI')}', zip:'${this.esc(prop.zip || '')}', sqft:${prop.sqft || 0}})">
