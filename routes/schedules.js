@@ -45,6 +45,36 @@ router.get('/week', requireAuth, (req, res) => {
   res.json(days);
 });
 
+// Get month overview (all entries for a given month, grouped by date)
+router.get('/month', requireAuth, (req, res) => {
+  const db = getDb();
+  const { year, month } = req.query;
+  if (!year || !month) return res.status(400).json({ error: 'year and month required' });
+
+  const startDate = `${year}-${String(month).padStart(2, '0')}-01`;
+
+  const entries = db.prepare(`
+    SELECT s.id, s.property_id, s.scheduled_date, s.assigned_to, s.status,
+           s.sort_order, s.notes, s.round_number, s.total_rounds, s.program_id,
+           p.customer_name, p.address, p.city, p.sqft,
+           u.full_name as assigned_to_name
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    LEFT JOIN users u ON u.id = s.assigned_to
+    WHERE s.scheduled_date >= ?
+      AND s.scheduled_date < date(?, '+1 month')
+    ORDER BY s.scheduled_date, s.sort_order, s.id
+  `).all(startDate, startDate);
+
+  const grouped = {};
+  for (const e of entries) {
+    if (!grouped[e.scheduled_date]) grouped[e.scheduled_date] = [];
+    grouped[e.scheduled_date].push(e);
+  }
+
+  res.json({ entries, grouped });
+});
+
 // Get unscheduled properties for a given date (to add to schedule)
 router.get('/unscheduled', requireAuth, (req, res) => {
   const db = getDb();

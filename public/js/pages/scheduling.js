@@ -1,12 +1,15 @@
-// Scheduling Page — daily schedule, season generation, season overview
+// Scheduling Page — daily schedule, season generation, season overview, calendar
 const SchedulingPage = {
   _techs: [],
   _selectedDate: null,
+  _calYear: null,
+  _calMonth: null,
 
   async render(action, id) {
     if (action === 'add') return this.renderAddProperties();
     if (action === 'season') return this.renderGenerateSeason();
     if (action === 'overview') return this.renderSeasonOverview();
+    if (action === 'calendar') return this.renderCalendar();
     return this.renderDaily();
   },
 
@@ -133,6 +136,7 @@ const SchedulingPage = {
 
       <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
         <button id="addPropsBtn" class="btn btn-primary btn-sm">+ Add Properties</button>
+        <button id="calendarBtn" class="btn btn-outline btn-sm">Calendar</button>
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
         <div style="display: flex; align-items: center; gap: 6px;">
@@ -190,6 +194,7 @@ const SchedulingPage = {
     });
 
     document.getElementById('addPropsBtn').addEventListener('click', () => App.navigate('scheduling', 'add'));
+    document.getElementById('calendarBtn').addEventListener('click', () => App.navigate('scheduling', 'calendar'));
     document.getElementById('genSeasonBtn').addEventListener('click', () => App.navigate('scheduling', 'season'));
     document.getElementById('seasonOverviewBtn').addEventListener('click', () => App.navigate('scheduling', 'overview'));
     const addEmpty = document.getElementById('addPropsEmpty');
@@ -778,5 +783,279 @@ const SchedulingPage = {
         <button class="cancel-season" data-program="${p.program_id}" style="font-size: 12px; color: var(--red); background: none; border: none; cursor: pointer; padding: 4px 0;">Cancel Season</button>
       </div>
     `;
+  },
+
+  // ==================== CALENDAR VIEW ====================
+  async renderCalendar() {
+    const main = document.getElementById('mainContent');
+    main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    const now = new Date();
+    if (this._calYear === null) this._calYear = now.getFullYear();
+    if (this._calMonth === null) this._calMonth = now.getMonth();
+
+    const year = this._calYear;
+    const month = this._calMonth;
+
+    let data;
+    try {
+      data = await Api.get(`/api/schedules/month?year=${year}&month=${month + 1}`);
+    } catch (err) {
+      data = { entries: [], grouped: {} };
+    }
+    const grouped = data.grouped || {};
+
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    let startDow = firstDay.getDay();
+    startDow = startDow === 0 ? 6 : startDow - 1;
+    const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
+    const monthName = firstDay.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+    const todayStr = this._today();
+
+    main.innerHTML = `
+      <a href="#scheduling" class="back-link">&larr; Back to Schedule</a>
+      <div class="page-header"><h2>Calendar</h2></div>
+
+      <div class="cal-nav">
+        <button id="calPrev" class="btn btn-sm btn-outline">&larr;</button>
+        <span class="cal-month-label">${monthName}</span>
+        <button id="calNext" class="btn btn-sm btn-outline">&rarr;</button>
+        <button id="calToday" class="btn btn-sm btn-outline">Today</button>
+      </div>
+
+      <div class="cal-grid">
+        <div class="cal-header-row">
+          ${['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d =>
+            `<div class="cal-header-cell">${d}</div>`
+          ).join('')}
+        </div>
+        <div class="cal-body" id="calBody">
+          ${this._buildCalendarCells(year, month, startDow, daysInMonth, totalCells, grouped, todayStr)}
+        </div>
+      </div>
+
+      <p class="form-hint" style="margin-top: 10px; text-align: center;">Tap a day number to view details. Long-press an entry to drag it to another day.</p>
+    `;
+
+    // Month navigation
+    document.getElementById('calPrev').addEventListener('click', () => {
+      this._calMonth--;
+      if (this._calMonth < 0) { this._calMonth = 11; this._calYear--; }
+      this.renderCalendar();
+    });
+    document.getElementById('calNext').addEventListener('click', () => {
+      this._calMonth++;
+      if (this._calMonth > 11) { this._calMonth = 0; this._calYear++; }
+      this.renderCalendar();
+    });
+    document.getElementById('calToday').addEventListener('click', () => {
+      const n = new Date();
+      this._calYear = n.getFullYear();
+      this._calMonth = n.getMonth();
+      this.renderCalendar();
+    });
+
+    // Tap day number → daily view
+    document.querySelectorAll('.cal-day-num[data-date]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._selectedDate = el.dataset.date;
+        App.navigate('scheduling');
+      });
+    });
+
+    // Init drag-and-drop
+    this._initCalendarDrag();
+  },
+
+  _buildCalendarCells(year, month, startDow, daysInMonth, totalCells, grouped, todayStr) {
+    let html = '';
+    for (let i = 0; i < totalCells; i++) {
+      if (i % 7 === 0) html += '<div class="cal-row">';
+
+      const dayNum = i - startDow + 1;
+      const isInMonth = dayNum >= 1 && dayNum <= daysInMonth;
+
+      if (isInMonth) {
+        const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}`;
+        const entries = grouped[dateStr] || [];
+        const isToday = dateStr === todayStr;
+        const isWeekend = (i % 7) >= 5;
+
+        html += `
+          <div class="cal-cell ${isToday ? 'cal-cell-today' : ''} ${isWeekend ? 'cal-cell-weekend' : ''}"
+               data-date="${dateStr}">
+            <div class="cal-day-num" data-date="${dateStr}">${dayNum}</div>
+            ${entries.length > 0 ? `
+              <div class="cal-entries">
+                ${entries.slice(0, 2).map(e => `
+                  <div class="cal-entry cal-entry-${e.status}"
+                       data-entry-id="${e.id}"
+                       data-entry-name="${e.customer_name.replace(/"/g, '&quot;')}"
+                       data-source-date="${dateStr}">
+                    <span class="cal-entry-name">${e.customer_name.length > 10 ? e.customer_name.substring(0, 10) + '…' : e.customer_name}</span>
+                  </div>
+                `).join('')}
+                ${entries.length > 2 ? `<div class="cal-entry-more">+${entries.length - 2} more</div>` : ''}
+              </div>
+            ` : ''}
+            ${entries.length > 0 ? `<div class="cal-count-badge">${entries.length}</div>` : ''}
+          </div>
+        `;
+      } else {
+        html += '<div class="cal-cell cal-cell-outside"></div>';
+      }
+
+      if (i % 7 === 6) html += '</div>';
+    }
+    return html;
+  },
+
+  _initCalendarDrag() {
+    const LONG_PRESS_MS = 300;
+    const DRAG_THRESHOLD_PX = 5;
+    const self = this;
+    let pressTimer = null;
+    let startX = 0, startY = 0;
+    let isDragging = false;
+    let dragEntry = null;
+    let ghostEl = null;
+    let sourceDate = null;
+    let currentDropTarget = null;
+
+    const calBody = document.getElementById('calBody');
+    if (!calBody) return;
+
+    calBody.addEventListener('pointerdown', (e) => {
+      const entryEl = e.target.closest('.cal-entry[data-entry-id]');
+      if (!entryEl) return;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      dragEntry = entryEl;
+      sourceDate = entryEl.dataset.sourceDate;
+
+      pressTimer = setTimeout(() => {
+        isDragging = true;
+        entryEl.classList.add('cal-entry-dragging');
+
+        document.body.style.overflow = 'hidden';
+        document.body.style.touchAction = 'none';
+
+        ghostEl = document.createElement('div');
+        ghostEl.className = 'cal-drag-ghost';
+        ghostEl.textContent = entryEl.dataset.entryName;
+        ghostEl.style.left = e.clientX + 'px';
+        ghostEl.style.top = e.clientY + 'px';
+        document.body.appendChild(ghostEl);
+
+        if (navigator.vibrate) navigator.vibrate(50);
+      }, LONG_PRESS_MS);
+    });
+
+    calBody.addEventListener('pointermove', (e) => {
+      if (pressTimer && !isDragging) {
+        const dx = Math.abs(e.clientX - startX);
+        const dy = Math.abs(e.clientY - startY);
+        if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+        return;
+      }
+
+      if (!isDragging || !ghostEl) return;
+      e.preventDefault();
+
+      ghostEl.style.left = e.clientX + 'px';
+      ghostEl.style.top = (e.clientY - 20) + 'px';
+
+      ghostEl.style.pointerEvents = 'none';
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      ghostEl.style.pointerEvents = '';
+
+      const cellEl = target ? target.closest('.cal-cell[data-date]') : null;
+
+      if (currentDropTarget && currentDropTarget !== cellEl) {
+        currentDropTarget.classList.remove('cal-cell-drop-target');
+      }
+
+      if (cellEl && cellEl.dataset.date !== sourceDate) {
+        cellEl.classList.add('cal-cell-drop-target');
+        currentDropTarget = cellEl;
+      } else {
+        currentDropTarget = null;
+      }
+    });
+
+    const endDrag = async (e) => {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+
+      if (!isDragging) return;
+      isDragging = false;
+
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+
+      if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+      if (dragEntry) dragEntry.classList.remove('cal-entry-dragging');
+      document.querySelectorAll('.cal-cell-drop-target').forEach(el =>
+        el.classList.remove('cal-cell-drop-target')
+      );
+
+      if (currentDropTarget && dragEntry) {
+        const entryId = dragEntry.dataset.entryId;
+        const newDate = currentDropTarget.dataset.date;
+        const entryName = dragEntry.dataset.entryName;
+
+        // Optimistic UI: move the element
+        dragEntry.dataset.sourceDate = newDate;
+        let targetEntries = currentDropTarget.querySelector('.cal-entries');
+        if (!targetEntries) {
+          targetEntries = document.createElement('div');
+          targetEntries.className = 'cal-entries';
+          currentDropTarget.appendChild(targetEntries);
+        }
+        targetEntries.appendChild(dragEntry);
+
+        // Update count badges
+        self._updateCellBadge(document.querySelector(`.cal-cell[data-date="${sourceDate}"]`));
+        self._updateCellBadge(currentDropTarget);
+
+        try {
+          await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
+          App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+        } catch (err) {
+          App.toast('Reschedule failed: ' + (err.message || 'Unknown error'), 'error');
+          self.renderCalendar();
+        }
+      }
+
+      dragEntry = null;
+      sourceDate = null;
+      currentDropTarget = null;
+    };
+
+    calBody.addEventListener('pointerup', endDrag);
+    calBody.addEventListener('pointercancel', endDrag);
+  },
+
+  _updateCellBadge(cellEl) {
+    if (!cellEl) return;
+    const count = cellEl.querySelectorAll('.cal-entry[data-entry-id]').length;
+    let badge = cellEl.querySelector('.cal-count-badge');
+    if (count > 0) {
+      if (!badge) {
+        badge = document.createElement('div');
+        badge.className = 'cal-count-badge';
+        cellEl.appendChild(badge);
+      }
+      badge.textContent = count;
+    } else if (badge) {
+      badge.remove();
+    }
   }
 };
