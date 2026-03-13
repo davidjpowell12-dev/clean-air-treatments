@@ -62,11 +62,21 @@ router.post('/', requireAuth, (req, res) => {
   if (!prop) return res.status(404).json({ error: 'Property not found' });
 
   const fields = [
-    'property_id', 'test_date', 'lab_name',
-    'ph', 'buffer_ph', 'organic_matter_pct',
+    'property_id', 'test_date', 'lab_name', 'lab_number', 'sample_depth_inches',
+    'ph', 'buffer_ph', 'organic_matter_pct', 'cec',
     'nitrogen_ppm', 'phosphorus_ppm', 'potassium_ppm',
     'calcium_ppm', 'magnesium_ppm', 'sulfur_ppm',
-    'cec', 'recommendations', 'notes'
+    'phosphorus_lbs_acre',
+    'calcium_lbs_acre', 'calcium_desired_lbs_acre',
+    'magnesium_lbs_acre', 'magnesium_desired_lbs_acre',
+    'potassium_lbs_acre', 'potassium_desired_lbs_acre',
+    'sodium_lbs_acre',
+    'base_sat_calcium_pct', 'base_sat_magnesium_pct',
+    'base_sat_potassium_pct', 'base_sat_sodium_pct',
+    'base_sat_other_pct', 'base_sat_hydrogen_pct',
+    'boron_ppm', 'iron_ppm', 'manganese_ppm',
+    'copper_ppm', 'zinc_ppm', 'aluminum_ppm',
+    'recommendations', 'notes'
   ];
 
   const values = fields.map(f => {
@@ -95,11 +105,21 @@ router.put('/:id', requireAuth, (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Soil test not found' });
 
   const fields = [
-    'test_date', 'lab_name',
-    'ph', 'buffer_ph', 'organic_matter_pct',
+    'test_date', 'lab_name', 'lab_number', 'sample_depth_inches',
+    'ph', 'buffer_ph', 'organic_matter_pct', 'cec',
     'nitrogen_ppm', 'phosphorus_ppm', 'potassium_ppm',
     'calcium_ppm', 'magnesium_ppm', 'sulfur_ppm',
-    'cec', 'recommendations', 'notes'
+    'phosphorus_lbs_acre',
+    'calcium_lbs_acre', 'calcium_desired_lbs_acre',
+    'magnesium_lbs_acre', 'magnesium_desired_lbs_acre',
+    'potassium_lbs_acre', 'potassium_desired_lbs_acre',
+    'sodium_lbs_acre',
+    'base_sat_calcium_pct', 'base_sat_magnesium_pct',
+    'base_sat_potassium_pct', 'base_sat_sodium_pct',
+    'base_sat_other_pct', 'base_sat_hydrogen_pct',
+    'boron_ppm', 'iron_ppm', 'manganese_ppm',
+    'copper_ppm', 'zinc_ppm', 'aluminum_ppm',
+    'recommendations', 'notes'
   ];
 
   const setClauses = fields.map(f => `${f} = ?`).join(', ');

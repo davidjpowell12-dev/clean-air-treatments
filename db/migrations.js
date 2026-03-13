@@ -126,6 +126,41 @@ const migrations = [
     `);
     db.exec('CREATE INDEX IF NOT EXISTS idx_soil_tests_property ON soil_tests(property_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_soil_tests_date ON soil_tests(test_date)');
+  },
+  // Migration 10: Expand soil_tests for Logan Labs report format
+  function expandSoilTestsForLoganLabs(db) {
+    const cols = [
+      // Sample info
+      'lab_number TEXT',
+      'sample_depth_inches REAL',
+      // Anions
+      'phosphorus_lbs_acre REAL',
+      // Exchangeable Cations (lbs/acre) - desired + found
+      'calcium_lbs_acre REAL',
+      'calcium_desired_lbs_acre REAL',
+      'magnesium_lbs_acre REAL',
+      'magnesium_desired_lbs_acre REAL',
+      'potassium_lbs_acre REAL',
+      'potassium_desired_lbs_acre REAL',
+      'sodium_lbs_acre REAL',
+      // Base Saturation %
+      'base_sat_calcium_pct REAL',
+      'base_sat_magnesium_pct REAL',
+      'base_sat_potassium_pct REAL',
+      'base_sat_sodium_pct REAL',
+      'base_sat_other_pct REAL',
+      'base_sat_hydrogen_pct REAL',
+      // Trace Elements (ppm)
+      'boron_ppm REAL',
+      'iron_ppm REAL',
+      'manganese_ppm REAL',
+      'copper_ppm REAL',
+      'zinc_ppm REAL',
+      'aluminum_ppm REAL'
+    ];
+    for (const col of cols) {
+      try { db.exec(`ALTER TABLE soil_tests ADD COLUMN ${col}`); } catch (e) { /* exists */ }
+    }
   }
 ];
 

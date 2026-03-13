@@ -716,103 +716,125 @@ const PropertiesPage = {
   // --- Soil Testing Methods ---
 
   renderSoilSummary(tests) {
-    const latest = tests[0]; // newest first
-    const phPct = latest.ph ? Math.max(0, Math.min(100, ((latest.ph - 4) / 6) * 100)) : null;
+    const t = tests[0]; // newest first
+    const phPct = t.ph ? Math.max(0, Math.min(100, ((t.ph - 4) / 6) * 100)) : null;
 
-    // N-P-K bar percentages (typical max ranges for lawn soil)
-    const nMax = 120, pMax = 100, kMax = 400;
-    const nPct = latest.nitrogen_ppm ? Math.min(100, (latest.nitrogen_ppm / nMax) * 100) : 0;
-    const pPct = latest.phosphorus_ppm ? Math.min(100, (latest.phosphorus_ppm / pMax) * 100) : 0;
-    const kPct = latest.potassium_ppm ? Math.min(100, (latest.potassium_ppm / kMax) * 100) : 0;
+    const hasData = t.ph || t.calcium_lbs_acre || t.potassium_lbs_acre || t.organic_matter_pct ||
+      t.cec || t.base_sat_calcium_pct || t.boron_ppm || t.sulfur_ppm || t.phosphorus_lbs_acre;
 
-    const hasData = latest.ph || latest.nitrogen_ppm || latest.phosphorus_ppm || latest.potassium_ppm ||
-      latest.organic_matter_pct || latest.cec || latest.calcium_ppm || latest.magnesium_ppm || latest.sulfur_ppm;
+    // Cation bar helper: found vs desired
+    const cationBar = (label, color, found, desired) => {
+      if (found == null) return '';
+      const pct = desired ? Math.min(100, (found / desired) * 100) : 50;
+      const deficit = desired ? found - desired : null;
+      const deficitColor = deficit != null ? (deficit >= 0 ? 'var(--green-dark)' : 'var(--red)') : '';
+      return `<div class="soil-cation-row">
+        <span class="soil-cation-label" style="color:${color};">${label}</span>
+        <div class="soil-cation-bar-wrap">
+          <div class="soil-bar-track"><div class="soil-bar-fill" style="width:${pct}%;background:${color};"></div></div>
+          ${desired ? `<div class="soil-cation-meta"><span>${found.toLocaleString()}</span><span style="color:var(--gray-400);">/ ${desired.toLocaleString()}</span></div>` : `<div class="soil-cation-meta"><span>${found.toLocaleString()}</span></div>`}
+        </div>
+        ${deficit != null ? `<span class="soil-cation-deficit" style="color:${deficitColor};">${deficit >= 0 ? '+' : ''}${deficit.toLocaleString()}</span>` : `<span class="soil-cation-deficit">${found.toLocaleString()}</span>`}
+      </div>`;
+    };
+
+    // Base saturation bar segment helper
+    const baseSatData = [
+      { label: 'Ca', pct: t.base_sat_calcium_pct, color: '#3182ce', ideal: '60-70%' },
+      { label: 'Mg', pct: t.base_sat_magnesium_pct, color: '#38a169', ideal: '10-20%' },
+      { label: 'K', pct: t.base_sat_potassium_pct, color: '#dd6b20', ideal: '2-5%' },
+      { label: 'Na', pct: t.base_sat_sodium_pct, color: '#e53e3e', ideal: '0.5-3%' },
+      { label: 'H', pct: t.base_sat_hydrogen_pct, color: '#805ad5', ideal: '10-15%' },
+      { label: 'Other', pct: t.base_sat_other_pct, color: '#a0aec0', ideal: '' }
+    ].filter(b => b.pct != null);
 
     return `
       <div class="soil-summary">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
-          <span style="font-size:12px;color:var(--gray-500);">${latest.test_date} ${latest.lab_name ? '&middot; ' + this.esc(latest.lab_name) : ''}</span>
-          <button class="btn btn-sm btn-outline" style="font-size:11px;padding:2px 8px;" onclick="PropertiesPage.showSoilTestModal(${latest.property_id}, ${latest.id})">Edit</button>
+          <span style="font-size:12px;color:var(--gray-500);">${t.test_date}${t.lab_name ? ' &middot; ' + this.esc(t.lab_name) : ''}${t.lab_number ? ' #' + this.esc(t.lab_number) : ''}</span>
+          <button class="btn btn-sm btn-outline" style="font-size:11px;padding:2px 8px;" onclick="PropertiesPage.showSoilTestModal(${t.property_id}, ${t.id})">Edit</button>
         </div>
 
         ${!hasData ? `
           <div style="text-align:center;padding:20px 12px;background:var(--gray-50);border-radius:10px;margin:8px 0;">
             <svg viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" width="36" height="36" style="margin-bottom:8px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6v6l4 2"/></svg>
             <h4 style="margin:0 0 4px;color:var(--gray-700);font-size:15px;">Lab results not entered yet</h4>
-            <p style="margin:0 0 12px;font-size:13px;color:var(--gray-500);line-height:1.4;">Tap Edit to enter pH, nutrients, and other values from your lab report to see visual charts.</p>
-            <button class="btn btn-sm btn-primary" onclick="PropertiesPage.showSoilTestModal(${latest.property_id}, ${latest.id})">Enter Lab Results</button>
+            <p style="margin:0 0 12px;font-size:13px;color:var(--gray-500);line-height:1.4;">Tap Edit to enter values from your lab report to see visual charts.</p>
+            <button class="btn btn-sm btn-primary" onclick="PropertiesPage.showSoilTestModal(${t.property_id}, ${t.id})">Enter Lab Results</button>
           </div>
         ` : ''}
 
-        ${latest.ph ? `
-          <div class="soil-section-title">pH Level</div>
+        ${t.ph ? `
+          <div class="soil-section-title">pH</div>
           <div style="display:flex;align-items:center;gap:16px;margin-bottom:4px;">
-            <span class="soil-ph-value ${this.phColor(latest.ph)}">${latest.ph}</span>
-            <span style="font-size:13px;color:var(--gray-500);">${this.phLabel(latest.ph)}</span>
+            <span class="soil-ph-value ${this.phColor(t.ph)}">${t.ph}</span>
+            <span style="font-size:13px;color:var(--gray-500);">${this.phLabel(t.ph)}</span>
           </div>
           <div style="position:relative;margin-bottom:8px;">
-            <div class="soil-ph-gauge">
-              <div class="soil-ph-marker" style="left:${phPct}%;"></div>
-            </div>
-            <div class="soil-ph-labels">
-              <span>4.0</span>
-              <span style="color:var(--green-dark);font-weight:600;">6.0–7.0</span>
-              <span>10.0</span>
-            </div>
+            <div class="soil-ph-gauge"><div class="soil-ph-marker" style="left:${phPct}%;"></div></div>
+            <div class="soil-ph-labels"><span>4.0</span><span style="color:var(--green-dark);font-weight:600;">6.0–7.0</span><span>10.0</span></div>
           </div>
         ` : ''}
 
-        ${(latest.nitrogen_ppm || latest.phosphorus_ppm || latest.potassium_ppm) ? `
-          <div class="soil-section-title">Nutrients (N-P-K)</div>
-          <div class="soil-bar-group">
-            ${latest.nitrogen_ppm != null ? `
-              <div class="soil-bar-row">
-                <span class="soil-bar-label" style="color:#38a169;">N</span>
-                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-n" style="width:${nPct}%;"></div></div>
-                <span class="soil-bar-value ${this.nutrientColor('n', latest.nitrogen_ppm)}">${latest.nitrogen_ppm} ppm</span>
-              </div>
-            ` : ''}
-            ${latest.phosphorus_ppm != null ? `
-              <div class="soil-bar-row">
-                <span class="soil-bar-label" style="color:#3182ce;">P</span>
-                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-p" style="width:${pPct}%;"></div></div>
-                <span class="soil-bar-value ${this.nutrientColor('p', latest.phosphorus_ppm)}">${latest.phosphorus_ppm} ppm</span>
-              </div>
-            ` : ''}
-            ${latest.potassium_ppm != null ? `
-              <div class="soil-bar-row">
-                <span class="soil-bar-label" style="color:#dd6b20;">K</span>
-                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-k" style="width:${kPct}%;"></div></div>
-                <span class="soil-bar-value ${this.nutrientColor('k', latest.potassium_ppm)}">${latest.potassium_ppm} ppm</span>
-              </div>
-            ` : ''}
-          </div>
-        ` : ''}
-
-        ${(latest.organic_matter_pct || latest.cec || latest.calcium_ppm || latest.magnesium_ppm || latest.sulfur_ppm) ? `
-          <div class="soil-section-title">Additional</div>
+        ${(t.organic_matter_pct || t.cec || t.sulfur_ppm || t.phosphorus_lbs_acre) ? `
+          <div class="soil-section-title">Primary Results</div>
           <div class="soil-detail-grid">
-            ${latest.organic_matter_pct != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Organic Matter</span><span class="soil-detail-value">${latest.organic_matter_pct}%</span></div>` : ''}
-            ${latest.cec != null ? `<div class="soil-detail-item"><span class="soil-detail-label">CEC</span><span class="soil-detail-value">${latest.cec}</span></div>` : ''}
-            ${latest.buffer_ph != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Buffer pH</span><span class="soil-detail-value">${latest.buffer_ph}</span></div>` : ''}
-            ${latest.calcium_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Calcium</span><span class="soil-detail-value">${latest.calcium_ppm} ppm</span></div>` : ''}
-            ${latest.magnesium_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Magnesium</span><span class="soil-detail-value">${latest.magnesium_ppm} ppm</span></div>` : ''}
-            ${latest.sulfur_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Sulfur</span><span class="soil-detail-value">${latest.sulfur_ppm} ppm</span></div>` : ''}
+            ${t.organic_matter_pct != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Organic Matter</span><span class="soil-detail-value">${t.organic_matter_pct}%</span></div>` : ''}
+            ${t.cec != null ? `<div class="soil-detail-item"><span class="soil-detail-label">CEC (M.E.)</span><span class="soil-detail-value">${t.cec}</span></div>` : ''}
+            ${t.sulfur_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Sulfur</span><span class="soil-detail-value">${t.sulfur_ppm} ppm</span></div>` : ''}
+            ${t.phosphorus_lbs_acre != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Phosphorus (P₂O₅)</span><span class="soil-detail-value">${t.phosphorus_lbs_acre} lbs/ac</span></div>` : ''}
+            ${t.buffer_ph != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Buffer pH</span><span class="soil-detail-value">${t.buffer_ph}</span></div>` : ''}
+            ${t.sample_depth_inches != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Sample Depth</span><span class="soil-detail-value">${t.sample_depth_inches}"</span></div>` : ''}
           </div>
         ` : ''}
 
-        ${latest.recommendations ? `
-          <div class="soil-section-title">Recommendations</div>
-          <p style="font-size:14px;color:var(--gray-700);line-height:1.5;">${this.esc(latest.recommendations)}</p>
+        ${(t.calcium_lbs_acre != null || t.magnesium_lbs_acre != null || t.potassium_lbs_acre != null) ? `
+          <div class="soil-section-title">Exchangeable Cations <span style="font-weight:400;color:var(--gray-400);">lbs/acre</span></div>
+          <div style="font-size:11px;color:var(--gray-400);display:flex;justify-content:space-between;padding:0 0 4px;margin-top:-2px;">
+            <span>Found vs Desired</span><span>Deficit</span>
+          </div>
+          <div class="soil-cation-group">
+            ${cationBar('Ca', '#3182ce', t.calcium_lbs_acre, t.calcium_desired_lbs_acre)}
+            ${cationBar('Mg', '#38a169', t.magnesium_lbs_acre, t.magnesium_desired_lbs_acre)}
+            ${cationBar('K', '#dd6b20', t.potassium_lbs_acre, t.potassium_desired_lbs_acre)}
+            ${t.sodium_lbs_acre != null ? cationBar('Na', '#e53e3e', t.sodium_lbs_acre, null) : ''}
+          </div>
         ` : ''}
 
-        ${latest.file_path ? `
-          <a href="/api/soil-tests/${latest.id}/report" target="_blank" class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;">
+        ${baseSatData.length > 0 ? `
+          <div class="soil-section-title">Base Saturation %</div>
+          <div class="soil-basesat-bar">
+            ${baseSatData.map(b => `<div class="soil-basesat-seg" style="width:${Math.max(b.pct, 2)}%;background:${b.color};" title="${b.label}: ${b.pct}%"></div>`).join('')}
+          </div>
+          <div class="soil-basesat-legend">
+            ${baseSatData.map(b => `<span class="soil-basesat-item"><span class="soil-basesat-dot" style="background:${b.color};"></span>${b.label} ${b.pct}%${b.ideal ? ` <span style="color:var(--gray-400);">(${b.ideal})</span>` : ''}</span>`).join('')}
+          </div>
+        ` : ''}
+
+        ${(t.boron_ppm != null || t.iron_ppm != null || t.manganese_ppm != null || t.copper_ppm != null || t.zinc_ppm != null || t.aluminum_ppm != null) ? `
+          <div class="soil-section-title">Trace Elements <span style="font-weight:400;color:var(--gray-400);">ppm</span></div>
+          <div class="soil-detail-grid soil-detail-grid-3">
+            ${t.boron_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Boron</span><span class="soil-detail-value">${t.boron_ppm}</span></div>` : ''}
+            ${t.iron_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Iron</span><span class="soil-detail-value">${t.iron_ppm}</span></div>` : ''}
+            ${t.manganese_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Manganese</span><span class="soil-detail-value">${t.manganese_ppm}</span></div>` : ''}
+            ${t.copper_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Copper</span><span class="soil-detail-value">${t.copper_ppm}</span></div>` : ''}
+            ${t.zinc_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Zinc</span><span class="soil-detail-value">${t.zinc_ppm}</span></div>` : ''}
+            ${t.aluminum_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Aluminum</span><span class="soil-detail-value">${t.aluminum_ppm}</span></div>` : ''}
+          </div>
+        ` : ''}
+
+        ${t.recommendations ? `
+          <div class="soil-section-title">Recommendations</div>
+          <p style="font-size:14px;color:var(--gray-700);line-height:1.5;">${this.esc(t.recommendations)}</p>
+        ` : ''}
+
+        ${t.file_path ? `
+          <a href="/api/soil-tests/${t.id}/report" target="_blank" class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
             View Lab Report
           </a>
         ` : `
-          <button class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;" onclick="PropertiesPage.uploadSoilReport(${latest.id})">
+          <button class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;" onclick="PropertiesPage.uploadSoilReport(${t.id})">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
             Upload Lab Report
           </button>
@@ -820,13 +842,13 @@ const PropertiesPage = {
 
         ${tests.length > 1 ? `
           <div class="soil-section-title" style="margin-top:16px;">Previous Tests</div>
-          ${tests.slice(1).map(t => `
-            <div class="soil-history-row" onclick="PropertiesPage.showSoilTestDetail(${t.id})">
+          ${tests.slice(1).map(prev => `
+            <div class="soil-history-row" onclick="PropertiesPage.showSoilTestDetail(${prev.id})">
               <div class="soil-history-info">
-                <span class="soil-history-date">${t.test_date}</span>
-                <span class="soil-history-lab">${this.esc(t.lab_name || 'Unknown lab')}</span>
+                <span class="soil-history-date">${prev.test_date}</span>
+                <span class="soil-history-lab">${this.esc(prev.lab_name || 'Unknown lab')}</span>
               </div>
-              ${t.ph ? `<span class="soil-history-ph ${this.phColor(t.ph)}">${t.ph}</span>` : ''}
+              ${prev.ph ? `<span class="soil-history-ph ${this.phColor(prev.ph)}">${prev.ph}</span>` : ''}
             </div>
           `).join('')}
         ` : ''}
@@ -848,18 +870,21 @@ const PropertiesPage = {
     return 'Alkaline';
   },
 
-  nutrientColor(type, val) {
-    const ranges = {
-      n: { low: 20, high: 80 },
-      p: { low: 15, high: 60 },
-      k: { low: 100, high: 250 }
-    };
-    const r = ranges[type];
-    if (!r) return '';
-    if (val < r.low) return 'soil-critical';
-    if (val > r.high) return 'soil-marginal';
-    return 'soil-optimal';
-  },
+  _soilNumericFields: [
+    'sample_depth_inches', 'ph', 'buffer_ph', 'organic_matter_pct', 'cec',
+    'sulfur_ppm', 'phosphorus_lbs_acre',
+    'calcium_lbs_acre', 'calcium_desired_lbs_acre',
+    'magnesium_lbs_acre', 'magnesium_desired_lbs_acre',
+    'potassium_lbs_acre', 'potassium_desired_lbs_acre',
+    'sodium_lbs_acre',
+    'base_sat_calcium_pct', 'base_sat_magnesium_pct',
+    'base_sat_potassium_pct', 'base_sat_sodium_pct',
+    'base_sat_other_pct', 'base_sat_hydrogen_pct',
+    'boron_ppm', 'iron_ppm', 'manganese_ppm',
+    'copper_ppm', 'zinc_ppm', 'aluminum_ppm'
+  ],
+
+  _sfv(test, f) { return test[f] != null && test[f] !== '' ? test[f] : ''; },
 
   async showSoilTestModal(propertyId, editId) {
     let test = {};
@@ -868,6 +893,9 @@ const PropertiesPage = {
     }
 
     const today = new Date().toISOString().slice(0, 10);
+    const v = (f) => this._sfv(test, f);
+    const sect = (title) => `<div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">${title}</div>`;
+    const nf = (name, label, placeholder) => `<div class="form-group"><label>${label}</label><input type="number" name="${name}" value="${v(name)}" step="0.01" min="0" ${placeholder ? 'placeholder="'+placeholder+'"' : ''}></div>`;
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay';
@@ -882,81 +910,81 @@ const PropertiesPage = {
             <input type="hidden" name="property_id" value="${propertyId}">
 
             <div class="form-row">
-              <div class="form-group">
-                <label>Test Date *</label>
-                <input type="date" name="test_date" value="${test.test_date || today}" required>
-              </div>
-              <div class="form-group">
-                <label>Lab Name</label>
-                <input type="text" name="lab_name" value="${this.esc(test.lab_name || '')}" placeholder="e.g. MSU Soil Lab">
-              </div>
+              <div class="form-group"><label>Test Date *</label><input type="date" name="test_date" value="${test.test_date || today}" required></div>
+              <div class="form-group"><label>Lab Name</label><input type="text" name="lab_name" value="${this.esc(test.lab_name || '')}" placeholder="e.g. Logan Labs"></div>
             </div>
-
-            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Primary</div>
-
             <div class="form-row">
-              <div class="form-group">
-                <label>pH</label>
-                <input type="number" name="ph" value="${test.ph || ''}" step="0.1" min="0" max="14" placeholder="e.g. 6.5">
-              </div>
-              <div class="form-group">
-                <label>Buffer pH</label>
-                <input type="number" name="buffer_ph" value="${test.buffer_ph || ''}" step="0.1" min="0" max="14">
-              </div>
+              <div class="form-group"><label>Lab Number</label><input type="text" name="lab_number" value="${this.esc(test.lab_number || '')}"></div>
+              ${nf('sample_depth_inches', 'Sample Depth (in)', '6')}
             </div>
 
-            <div class="form-group">
-              <label>Organic Matter %</label>
-              <input type="number" name="organic_matter_pct" value="${test.organic_matter_pct || ''}" step="0.1" min="0" max="100" placeholder="e.g. 3.5">
-            </div>
-
-            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Nutrients (ppm)</div>
-
+            ${sect('Primary Results')}
             <div class="form-row">
-              <div class="form-group">
-                <label>Nitrogen (N)</label>
-                <input type="number" name="nitrogen_ppm" value="${test.nitrogen_ppm || ''}" step="0.1" min="0">
-              </div>
-              <div class="form-group">
-                <label>Phosphorus (P)</label>
-                <input type="number" name="phosphorus_ppm" value="${test.phosphorus_ppm || ''}" step="0.1" min="0">
-              </div>
+              ${nf('ph', 'pH', '6.7')}
+              ${nf('buffer_ph', 'Buffer pH', '')}
             </div>
-
             <div class="form-row">
-              <div class="form-group">
-                <label>Potassium (K)</label>
-                <input type="number" name="potassium_ppm" value="${test.potassium_ppm || ''}" step="0.1" min="0">
-              </div>
-              <div class="form-group">
-                <label>CEC</label>
-                <input type="number" name="cec" value="${test.cec || ''}" step="0.1" min="0">
-              </div>
+              ${nf('cec', 'CEC (M.E.)', '19.24')}
+              ${nf('organic_matter_pct', 'Organic Matter %', '7.7')}
             </div>
 
-            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Secondary Nutrients (ppm)</div>
-
+            ${sect('Anions')}
             <div class="form-row">
-              <div class="form-group">
-                <label>Calcium</label>
-                <input type="number" name="calcium_ppm" value="${test.calcium_ppm || ''}" step="0.1" min="0">
-              </div>
-              <div class="form-group">
-                <label>Magnesium</label>
-                <input type="number" name="magnesium_ppm" value="${test.magnesium_ppm || ''}" step="0.1" min="0">
-              </div>
+              ${nf('sulfur_ppm', 'Sulfur (ppm)', '15')}
+              ${nf('phosphorus_lbs_acre', 'Phosphorus P₂O₅ (lbs/ac)', '110')}
             </div>
 
-            <div class="form-group">
-              <label>Sulfur</label>
-              <input type="number" name="sulfur_ppm" value="${test.sulfur_ppm || ''}" step="0.1" min="0">
+            ${sect('Exchangeable Cations (lbs/acre)')}
+            <div style="font-size:11px;color:var(--gray-400);margin-bottom:4px;">Enter Desired Value and Value Found from your report</div>
+            <div class="form-row">
+              ${nf('calcium_desired_lbs_acre', 'Ca Desired', '5232')}
+              ${nf('calcium_lbs_acre', 'Ca Found', '5724')}
+            </div>
+            <div class="form-row">
+              ${nf('magnesium_desired_lbs_acre', 'Mg Desired', '553')}
+              ${nf('magnesium_lbs_acre', 'Mg Found', '679')}
+            </div>
+            <div class="form-row">
+              ${nf('potassium_desired_lbs_acre', 'K Desired', '600')}
+              ${nf('potassium_lbs_acre', 'K Found', '181')}
+            </div>
+            <div class="form-row">
+              ${nf('sodium_lbs_acre', 'Sodium (lbs/ac)', '43')}
+              <div class="form-group"></div>
+            </div>
+
+            ${sect('Base Saturation %')}
+            <div class="form-row">
+              ${nf('base_sat_calcium_pct', 'Calcium %', '74.39')}
+              ${nf('base_sat_magnesium_pct', 'Magnesium %', '14.71')}
+            </div>
+            <div class="form-row">
+              ${nf('base_sat_potassium_pct', 'Potassium %', '1.21')}
+              ${nf('base_sat_sodium_pct', 'Sodium %', '0.49')}
+            </div>
+            <div class="form-row">
+              ${nf('base_sat_other_pct', 'Other Bases %', '4.70')}
+              ${nf('base_sat_hydrogen_pct', 'Exch. Hydrogen %', '4.50')}
+            </div>
+
+            ${sect('Trace Elements (ppm)')}
+            <div class="form-row">
+              ${nf('boron_ppm', 'Boron', '0.69')}
+              ${nf('iron_ppm', 'Iron', '232')}
+            </div>
+            <div class="form-row">
+              ${nf('manganese_ppm', 'Manganese', '28')}
+              ${nf('copper_ppm', 'Copper', '3.59')}
+            </div>
+            <div class="form-row">
+              ${nf('zinc_ppm', 'Zinc', '3.49')}
+              ${nf('aluminum_ppm', 'Aluminum', '453')}
             </div>
 
             <div class="form-group">
               <label>Recommendations</label>
               <textarea name="recommendations" rows="3" placeholder="Lab recommendations...">${this.esc(test.recommendations || '')}</textarea>
             </div>
-
             <div class="form-group">
               <label>Notes</label>
               <textarea name="notes" rows="2" placeholder="Additional notes...">${this.esc(test.notes || '')}</textarea>
@@ -978,8 +1006,7 @@ const PropertiesPage = {
       const data = Object.fromEntries(formData.entries());
 
       // Convert numeric fields
-      ['ph', 'buffer_ph', 'organic_matter_pct', 'nitrogen_ppm', 'phosphorus_ppm', 'potassium_ppm',
-       'calcium_ppm', 'magnesium_ppm', 'sulfur_ppm', 'cec'].forEach(f => {
+      this._soilNumericFields.forEach(f => {
         if (data[f]) data[f] = Number(data[f]);
       });
 
