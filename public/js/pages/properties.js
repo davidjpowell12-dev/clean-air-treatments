@@ -725,12 +725,24 @@ const PropertiesPage = {
     const pPct = latest.phosphorus_ppm ? Math.min(100, (latest.phosphorus_ppm / pMax) * 100) : 0;
     const kPct = latest.potassium_ppm ? Math.min(100, (latest.potassium_ppm / kMax) * 100) : 0;
 
+    const hasData = latest.ph || latest.nitrogen_ppm || latest.phosphorus_ppm || latest.potassium_ppm ||
+      latest.organic_matter_pct || latest.cec || latest.calcium_ppm || latest.magnesium_ppm || latest.sulfur_ppm;
+
     return `
       <div class="soil-summary">
         <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
           <span style="font-size:12px;color:var(--gray-500);">${latest.test_date} ${latest.lab_name ? '&middot; ' + this.esc(latest.lab_name) : ''}</span>
           <button class="btn btn-sm btn-outline" style="font-size:11px;padding:2px 8px;" onclick="PropertiesPage.showSoilTestModal(${latest.property_id}, ${latest.id})">Edit</button>
         </div>
+
+        ${!hasData ? `
+          <div style="text-align:center;padding:20px 12px;background:var(--gray-50);border-radius:10px;margin:8px 0;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="var(--gray-400)" stroke-width="1.5" width="36" height="36" style="margin-bottom:8px;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/><path d="M12 6v6l4 2"/></svg>
+            <h4 style="margin:0 0 4px;color:var(--gray-700);font-size:15px;">Lab results not entered yet</h4>
+            <p style="margin:0 0 12px;font-size:13px;color:var(--gray-500);line-height:1.4;">Tap Edit to enter pH, nutrients, and other values from your lab report to see visual charts.</p>
+            <button class="btn btn-sm btn-primary" onclick="PropertiesPage.showSoilTestModal(${latest.property_id}, ${latest.id})">Enter Lab Results</button>
+          </div>
+        ` : ''}
 
         ${latest.ph ? `
           <div class="soil-section-title">pH Level</div>
