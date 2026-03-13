@@ -866,7 +866,16 @@ const SchedulingPage = {
       });
     });
 
-    // Init drag-and-drop
+    // Tap "+N more" → daily view
+    document.querySelectorAll('.cal-entry-more[data-date]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._selectedDate = el.dataset.date;
+        App.navigate('scheduling');
+      });
+    });
+
+    // Init drag-and-drop (also handles entry tap → daily view)
     this._initCalendarDrag();
   },
 
@@ -885,20 +894,22 @@ const SchedulingPage = {
         const isWeekend = (i % 7) >= 5;
 
         html += `
-          <div class="cal-cell ${isToday ? 'cal-cell-today' : ''} ${isWeekend ? 'cal-cell-weekend' : ''}"
+          <div class="cal-cell ${isToday ? 'cal-cell-today' : ''} ${isWeekend ? 'cal-cell-weekend' : ''} ${entries.length > 0 ? 'cal-cell-has-entries' : ''}"
                data-date="${dateStr}">
             <div class="cal-day-num" data-date="${dateStr}">${dayNum}</div>
             ${entries.length > 0 ? `
               <div class="cal-entries">
-                ${entries.slice(0, 2).map(e => `
-                  <div class="cal-entry cal-entry-${e.status}"
+                ${entries.slice(0, 2).map(e => {
+                  const isOverdue = e.status === 'scheduled' && dateStr < todayStr;
+                  return `
+                  <div class="cal-entry cal-entry-${isOverdue ? 'overdue' : e.status}"
                        data-entry-id="${e.id}"
                        data-entry-name="${e.customer_name.replace(/"/g, '&quot;')}"
                        data-source-date="${dateStr}">
                     <span class="cal-entry-name">${e.customer_name.length > 10 ? e.customer_name.substring(0, 10) + '…' : e.customer_name}</span>
                   </div>
-                `).join('')}
-                ${entries.length > 2 ? `<div class="cal-entry-more">+${entries.length - 2} more</div>` : ''}
+                `;}).join('')}
+                ${entries.length > 2 ? `<div class="cal-entry-more" data-date="${dateStr}">+${entries.length - 2} more</div>` : ''}
               </div>
             ` : ''}
             ${entries.length > 0 ? `<div class="cal-count-badge">${entries.length}</div>` : ''}
@@ -993,6 +1004,16 @@ const SchedulingPage = {
     const endDrag = async (e) => {
       clearTimeout(pressTimer);
       pressTimer = null;
+
+      // Quick tap (no drag started) → navigate to daily view
+      if (!isDragging && dragEntry) {
+        const tapDate = dragEntry.dataset.sourceDate;
+        dragEntry = null;
+        sourceDate = null;
+        self._selectedDate = tapDate;
+        App.navigate('scheduling');
+        return;
+      }
 
       if (!isDragging) return;
       isDragging = false;
