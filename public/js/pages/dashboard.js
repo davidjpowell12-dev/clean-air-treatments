@@ -1,7 +1,17 @@
 const DashboardPage = {
   async render() {
     const main = document.getElementById('mainContent');
-    main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+    main.innerHTML = `
+      <div class="page-header"><div class="skeleton skeleton-title"></div></div>
+      <div class="stat-grid">
+        <div class="skeleton skeleton-stat"></div>
+        <div class="skeleton skeleton-stat"></div>
+        <div class="skeleton skeleton-stat"></div>
+        <div class="skeleton skeleton-stat"></div>
+      </div>
+      <div class="skeleton skeleton-card"></div>
+      <div class="skeleton skeleton-card"></div>
+    `;
 
     try {
       const [products, inventory, applications, properties, financials] = await Promise.all([
@@ -22,19 +32,19 @@ const DashboardPage = {
         </div>
 
         <div class="stat-grid">
-          <div class="stat-card">
+          <div class="stat-card stat-card-green">
             <div class="stat-value">${todayApps.length}</div>
             <div class="stat-label">Today's Apps</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card stat-card-blue">
             <div class="stat-value">${properties.length}</div>
             <div class="stat-label">Properties</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card stat-card-purple">
             <div class="stat-value">${products.length}</div>
             <div class="stat-label">Products</div>
           </div>
-          <div class="stat-card">
+          <div class="stat-card stat-card-${lowStock.length > 0 ? 'red' : 'orange'}">
             <div class="stat-value">${lowStock.length}</div>
             <div class="stat-label">Low Stock</div>
           </div>
@@ -42,19 +52,19 @@ const DashboardPage = {
 
         ${financials.total_revenue > 0 ? `
           <div class="stat-grid" style="margin-top:4px;">
-            <div class="stat-card">
+            <div class="stat-card stat-card-green">
               <div class="stat-value" style="font-size:22px;color:var(--green-dark);">$${Number(financials.total_revenue).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
               <div class="stat-label">YTD Revenue</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card stat-card-orange">
               <div class="stat-value" style="font-size:22px;">$${Number(financials.total_cost).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
               <div class="stat-label">YTD Costs</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card stat-card-${financials.total_margin >= 0 ? 'teal' : 'red'}">
               <div class="stat-value" style="font-size:22px;color:${financials.total_margin >= 0 ? 'var(--green-dark)' : 'var(--red)'};">$${Number(financials.total_margin).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0})}</div>
               <div class="stat-label">YTD Margin</div>
             </div>
-            <div class="stat-card">
+            <div class="stat-card stat-card-${financials.margin_pct >= 0 ? 'blue' : 'red'}">
               <div class="stat-value" style="font-size:22px;color:${financials.margin_pct >= 0 ? 'var(--green-dark)' : 'var(--red)'};">${financials.margin_pct}%</div>
               <div class="stat-label">Margin %</div>
             </div>

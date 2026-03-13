@@ -2,11 +2,19 @@
 :root {
   --green: #78be20;
   --green-dark: #5a9616;
+  --green-light: #e8f5d8;
   --blue: #1d428a;
   --blue-dark: #152f6b;
+  --blue-light: #e0ecf8;
   --red: #e74c3c;
+  --red-light: #fde8e8;
   --orange: #f39c12;
+  --orange-light: #fef3cd;
   --yellow: #f1c40f;
+  --purple: #7c3aed;
+  --purple-light: #ede9fe;
+  --teal: #0d9488;
+  --teal-light: #ccfbf1;
   --gray-50: #f8f9fa;
   --gray-100: #f0f0f0;
   --gray-200: #e0e0e0;
@@ -14,10 +22,19 @@
   --gray-500: #888;
   --gray-700: #555;
   --gray-900: #333;
-  --radius: 10px;
-  --radius-sm: 6px;
-  --shadow: 0 2px 8px rgba(0,0,0,0.1);
-  --shadow-lg: 0 8px 30px rgba(0,0,0,0.15);
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow-xs: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.08), 0 2px 4px -2px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.05);
+  --shadow-xl: 0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.05);
+  --gradient-green: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+  --gradient-blue: linear-gradient(135deg, var(--blue) 0%, var(--blue-dark) 100%);
+  --gradient-card: linear-gradient(180deg, #ffffff 0%, #f8fafb 100%);
+  --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-spring: 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
   --header-height: 56px;
   --bottom-nav-height: 64px;
   --side-nav-width: 260px;
@@ -107,6 +124,7 @@ body {
 .form-group textarea:focus {
   outline: none;
   border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(120, 190, 32, 0.15);
 }
 
 .error-msg {
@@ -141,28 +159,33 @@ body {
   border: none;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-fast);
   font-family: inherit;
   text-decoration: none;
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+  background: var(--gradient-green);
   color: white;
+  box-shadow: 0 2px 8px rgba(120,190,32,0.25);
 }
 .btn-primary:hover { box-shadow: 0 4px 15px rgba(120,190,32,0.4); transform: translateY(-1px); }
-.btn-primary:active { transform: translateY(0); }
+.btn-primary:active { transform: translateY(0) scale(0.97); }
 
 .btn-secondary {
-  background: var(--blue);
+  background: var(--gradient-blue);
   color: white;
+  box-shadow: 0 2px 8px rgba(29,66,138,0.2);
 }
-.btn-secondary:hover { background: var(--blue-dark); }
+.btn-secondary:hover { box-shadow: 0 4px 15px rgba(29,66,138,0.35); transform: translateY(-1px); }
+.btn-secondary:active { transform: translateY(0) scale(0.97); }
 
 .btn-danger {
-  background: var(--red);
+  background: linear-gradient(135deg, var(--red), #c0392b);
   color: white;
+  box-shadow: 0 2px 8px rgba(231,76,60,0.25);
 }
+.btn-danger:active { transform: scale(0.97); }
 
 .btn-outline {
   background: transparent;
@@ -170,6 +193,7 @@ body {
   color: var(--green-dark);
 }
 .btn-outline:hover { background: var(--green); color: white; }
+.btn-outline:active { transform: scale(0.97); }
 
 .btn-sm { padding: 8px 14px; font-size: 14px; }
 .btn-full { width: 100%; }
@@ -183,7 +207,7 @@ body {
   right: 0;
   height: calc(var(--header-height) + env(safe-area-inset-top, 0));
   padding-top: env(safe-area-inset-top, 0);
-  background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+  background: linear-gradient(135deg, var(--green) 0%, #6ab51e 50%, var(--green-dark) 100%);
   color: white;
   display: flex;
   align-items: center;
@@ -191,7 +215,7 @@ body {
   padding-left: max(16px, env(safe-area-inset-left, 0));
   padding-right: max(16px, env(safe-area-inset-right, 0));
   z-index: 100;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  box-shadow: 0 2px 12px rgba(90, 150, 22, 0.35);
 }
 
 .header-left {
@@ -247,7 +271,9 @@ body {
 .nav-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.4);
+  background: rgba(0,0,0,0.35);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   z-index: 150;
   opacity: 0;
   pointer-events: none;
@@ -323,6 +349,7 @@ body {
   justify-content: space-around;
   z-index: 100;
   padding-bottom: env(safe-area-inset-bottom, 0);
+  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
 }
 
 .bottom-nav-item {
@@ -336,24 +363,37 @@ body {
   font-size: 11px;
   font-weight: 500;
   flex: 1;
-  transition: color 0.15s;
+  transition: color var(--transition-fast), transform var(--transition-spring);
 }
 
-.bottom-nav-item svg { width: 22px; height: 22px; }
-.bottom-nav-item.active { color: var(--green-dark); }
+.bottom-nav-item svg { width: 24px; height: 24px; transition: transform var(--transition-spring); }
+.bottom-nav-item.active { color: var(--green-dark); font-weight: 700; }
+.bottom-nav-item.active svg { transform: scale(1.1); }
+.bottom-nav-item.active::after {
+  content: '';
+  display: block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  margin-top: 1px;
+}
+.bottom-nav-item:active { transform: scale(0.9); }
 
 /* ===== Cards ===== */
 .card {
-  background: white;
+  background: var(--gradient-card);
   border-radius: var(--radius);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-md);
   overflow: hidden;
   margin-bottom: 12px;
+  border: 1px solid rgba(0,0,0,0.04);
+  transition: box-shadow var(--transition-normal);
 }
 
 .card-header {
   padding: 14px 16px;
-  background: var(--gray-50);
+  background: linear-gradient(180deg, var(--gray-50) 0%, rgba(248,249,250,0.5) 100%);
   border-bottom: 1px solid var(--gray-200);
   display: flex;
   align-items: center;
@@ -363,12 +403,15 @@ body {
 .card-header h3 {
   font-size: 16px;
   color: var(--blue);
+  font-weight: 700;
+  letter-spacing: -0.01em;
 }
 
 .card-body { padding: 16px; }
 
 .card-accent {
   border-left: 4px solid var(--green);
+  box-shadow: var(--shadow-md), inset 0 1px 0 rgba(120,190,32,0.08);
 }
 
 /* ===== Page Headers ===== */
@@ -405,6 +448,7 @@ body {
 .search-bar input:focus {
   outline: none;
   border-color: var(--green);
+  box-shadow: 0 0 0 3px rgba(120, 190, 32, 0.15);
 }
 
 .search-bar svg {
@@ -454,11 +498,25 @@ body {
   padding: 14px 16px;
   border-bottom: 1px solid var(--gray-100);
   cursor: pointer;
-  transition: background 0.1s;
+  transition: background var(--transition-fast), border-left-color var(--transition-fast), transform var(--transition-fast);
+  border-left: 3px solid transparent;
+  animation: fadeSlideIn 0.3s ease-out both;
 }
+.data-row:nth-child(1) { animation-delay: 0ms; }
+.data-row:nth-child(2) { animation-delay: 30ms; }
+.data-row:nth-child(3) { animation-delay: 60ms; }
+.data-row:nth-child(4) { animation-delay: 90ms; }
+.data-row:nth-child(5) { animation-delay: 120ms; }
+.data-row:nth-child(n+6) { animation-delay: 150ms; }
 
-.data-row:hover { background: var(--gray-50); }
+.data-row:hover { background: var(--gray-50); border-left-color: var(--green); }
+.data-row:active { transform: scale(0.99); }
 .data-row:last-child { border-bottom: none; }
+
+@keyframes fadeSlideIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
 
 .data-row-main { flex: 1; min-width: 0; }
 .data-row-main h4 {
@@ -483,19 +541,21 @@ body {
 
 /* ===== Badge / Tag ===== */
 .badge {
-  display: inline-block;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 12px;
-  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
 
-.badge-green { background: #e8f5d8; color: var(--green-dark); }
-.badge-blue { background: #e0ecf8; color: var(--blue); }
-.badge-red { background: #fde8e8; color: var(--red); }
-.badge-orange { background: #fef3cd; color: #856404; }
+.badge-green { background: #dcf5c8; color: #2d6a1e; }
+.badge-blue { background: #d0e4f7; color: #1a3a7a; }
+.badge-red { background: #fdd; color: #b91c1c; }
+.badge-orange { background: #fee4b8; color: #92400e; }
 .badge-gray { background: var(--gray-100); color: var(--gray-700); }
 
 /* ===== Stat Cards ===== */
@@ -507,26 +567,48 @@ body {
 }
 
 .stat-card {
-  background: white;
+  background: var(--gradient-card);
   border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
   text-align: center;
+  border: 1px solid rgba(0,0,0,0.04);
+  position: relative;
+  overflow: hidden;
+  transition: transform var(--transition-spring), box-shadow var(--transition-normal);
+}
+.stat-card:active { transform: scale(0.97); }
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--gradient-green);
 }
 
 .stat-card .stat-value {
   font-size: 28px;
-  font-weight: 700;
+  font-weight: 800;
   color: var(--blue);
+  letter-spacing: -0.02em;
 }
 
 .stat-card .stat-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--gray-500);
   margin-top: 4px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.8px;
+  font-weight: 600;
 }
+
+.stat-card-green::before { background: var(--gradient-green); }
+.stat-card-blue::before { background: var(--gradient-blue); }
+.stat-card-orange::before { background: linear-gradient(135deg, var(--orange), #e67e22); }
+.stat-card-red::before { background: linear-gradient(135deg, var(--red), #c0392b); }
+.stat-card-teal::before { background: linear-gradient(135deg, var(--teal), #0f766e); }
+.stat-card-purple::before { background: linear-gradient(135deg, var(--purple), #6d28d9); }
 
 /* ===== Inventory Colors ===== */
 .stock-ok { color: var(--green-dark); }
@@ -601,14 +683,16 @@ body {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.5);
+  background: rgba(0,0,0,0.4);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 300;
   display: flex;
   align-items: flex-end;
   justify-content: center;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.2s;
+  transition: opacity 0.25s ease;
 }
 
 .modal-overlay.open {
@@ -618,13 +702,14 @@ body {
 
 .modal {
   background: white;
-  border-radius: 16px 16px 0 0;
+  border-radius: 20px 20px 0 0;
   width: 100%;
   max-width: 500px;
   max-height: 90vh;
   overflow-y: auto;
   transform: translateY(100%);
-  transition: transform 0.3s ease;
+  transition: transform 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+  box-shadow: 0 -10px 40px rgba(0,0,0,0.15);
 }
 
 .modal-overlay.open .modal {
@@ -675,26 +760,29 @@ body {
 /* ===== Empty State ===== */
 .empty-state {
   text-align: center;
-  padding: 40px 20px;
+  padding: 48px 24px;
   color: var(--gray-500);
 }
 
 .empty-state svg {
-  width: 60px;
-  height: 60px;
-  margin-bottom: 12px;
-  opacity: 0.4;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 16px;
+  color: var(--gray-300);
+  opacity: 1;
 }
 
 .empty-state h3 {
   font-size: 18px;
   color: var(--gray-700);
   margin-bottom: 8px;
+  font-weight: 700;
 }
 
 .empty-state p {
   font-size: 14px;
   margin-bottom: 16px;
+  line-height: 1.5;
 }
 
 /* ===== Loading ===== */
@@ -766,19 +854,20 @@ body {
 /* ===== Toast notifications ===== */
 .toast {
   position: fixed;
-  bottom: calc(var(--bottom-nav-height) + 16px);
+  bottom: calc(var(--bottom-nav-height) + 20px);
   left: 50%;
-  transform: translateX(-50%) translateY(100px);
-  background: var(--gray-900);
-  color: white;
+  transform: translateX(-50%) translateY(80px);
   padding: 12px 24px;
   border-radius: var(--radius);
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   z-index: 500;
   opacity: 0;
-  transition: all 0.3s ease;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
   white-space: nowrap;
+  box-shadow: var(--shadow-lg);
+  color: white;
+  background: var(--gray-900);
 }
 
 .toast.show {
@@ -786,8 +875,8 @@ body {
   transform: translateX(-50%) translateY(0);
 }
 
-.toast.toast-success { background: var(--green-dark); }
-.toast.toast-error { background: var(--red); }
+.toast.toast-success { background: var(--gradient-green); }
+.toast.toast-error { background: linear-gradient(135deg, var(--red), #c0392b); }
 
 /* ===== Sync Badge (offline indicator) ===== */
 .sync-badge {
@@ -1038,6 +1127,7 @@ body {
   .modal {
     border-radius: var(--radius);
     max-width: 500px;
+    box-shadow: var(--shadow-xl);
   }
 
   .modal-overlay {
@@ -1045,11 +1135,29 @@ body {
   }
 
   .modal {
-    transform: translateY(20px);
+    transform: translateY(20px) scale(0.98);
   }
   .modal-overlay.open .modal {
-    transform: translateY(0);
+    transform: translateY(0) scale(1);
   }
+}
+
+/* ===== Skeleton Loading ===== */
+.skeleton {
+  background: linear-gradient(90deg, var(--gray-100) 25%, var(--gray-50) 50%, var(--gray-100) 75%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+.skeleton-text { height: 14px; margin-bottom: 8px; width: 80%; }
+.skeleton-text-short { height: 14px; margin-bottom: 8px; width: 50%; }
+.skeleton-title { height: 20px; width: 60%; margin-bottom: 12px; }
+.skeleton-card { height: 80px; margin-bottom: 12px; border-radius: var(--radius); }
+.skeleton-stat { height: 90px; border-radius: var(--radius); }
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 /* ===== Scheduling ===== */
@@ -1499,4 +1607,191 @@ body {
     box-shadow: 0 1px 4px rgba(0,0,0,0.12);
     transform: translateY(-1px);
   }
+}
+
+/* ===== Soil Testing ===== */
+
+/* pH Gauge - horizontal gradient bar with marker */
+.soil-ph-gauge {
+  position: relative;
+  height: 28px;
+  border-radius: 14px;
+  background: linear-gradient(90deg,
+    #e53e3e 0%,      /* 4.0 - very acidic */
+    #ed8936 15%,     /* 5.0 */
+    #ecc94b 25%,     /* 5.5 */
+    #48bb78 35%,     /* 6.0 - optimal start */
+    #38a169 50%,     /* 6.5 - ideal */
+    #48bb78 60%,     /* 7.0 - optimal end */
+    #ecc94b 70%,     /* 7.5 */
+    #ed8936 80%,     /* 8.0 */
+    #e53e3e 100%     /* 10.0 - very alkaline */
+  );
+  overflow: visible;
+  box-shadow: var(--shadow-xs);
+}
+
+.soil-ph-marker {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 36px;
+  background: white;
+  border: 2px solid var(--gray-900);
+  border-radius: 3px;
+  transform: translateX(-50%);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  z-index: 1;
+}
+
+.soil-ph-labels {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--gray-500);
+}
+
+.soil-ph-value {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  margin-bottom: 4px;
+}
+
+.soil-ph-optimal {
+  position: absolute;
+  top: -18px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--green-dark);
+  white-space: nowrap;
+}
+
+/* N-P-K Nutrient Bars */
+.soil-bar-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.soil-bar-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.soil-bar-label {
+  width: 32px;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.soil-bar-track {
+  flex: 1;
+  height: 20px;
+  background: var(--gray-100);
+  border-radius: 10px;
+  overflow: hidden;
+  position: relative;
+}
+
+.soil-bar-fill {
+  height: 100%;
+  border-radius: 10px;
+  transition: width 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+  min-width: 4px;
+}
+
+.soil-bar-fill-n { background: linear-gradient(90deg, #48bb78, #38a169); }
+.soil-bar-fill-p { background: linear-gradient(90deg, #4299e1, #3182ce); }
+.soil-bar-fill-k { background: linear-gradient(90deg, #ed8936, #dd6b20); }
+
+.soil-bar-value {
+  width: 60px;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+/* Color indicators for soil values */
+.soil-optimal { color: var(--green-dark); }
+.soil-marginal { color: var(--orange); }
+.soil-critical { color: var(--red); }
+
+/* Soil test card summary */
+.soil-summary {
+  padding: 16px;
+}
+
+.soil-section-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--gray-500);
+  margin: 16px 0 8px;
+}
+
+.soil-section-title:first-child { margin-top: 0; }
+
+.soil-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 16px;
+}
+
+.soil-detail-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 4px 0;
+  font-size: 14px;
+}
+
+.soil-detail-label {
+  color: var(--gray-500);
+}
+
+.soil-detail-value {
+  font-weight: 600;
+}
+
+/* Previous soil tests list */
+.soil-history-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid var(--gray-100);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.soil-history-row:active {
+  background: var(--gray-50);
+  transform: scale(0.99);
+}
+
+.soil-history-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.soil-history-date {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--gray-900);
+}
+
+.soil-history-lab {
+  font-size: 12px;
+  color: var(--gray-500);
+}
+
+.soil-history-ph {
+  font-weight: 700;
+  font-size: 16px;
 }

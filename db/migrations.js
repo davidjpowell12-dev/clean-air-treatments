@@ -91,6 +91,41 @@ const migrations = [
     try { db.exec('ALTER TABLE schedules ADD COLUMN total_rounds INTEGER DEFAULT 6'); } catch (e) { /* exists */ }
     try { db.exec('ALTER TABLE schedules ADD COLUMN program_id TEXT'); } catch (e) { /* exists */ }
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_program ON schedules(program_id)');
+  },
+  // Migration 8: Add barcode field to products for UPC scanning
+  function addBarcodeToProducts(db) {
+    try { db.exec('ALTER TABLE products ADD COLUMN barcode TEXT'); } catch (e) { /* exists */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode)');
+  },
+  // Migration 9: Create soil_tests table for lab soil test results
+  function createSoilTestsTable(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS soil_tests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+        test_date DATE NOT NULL,
+        lab_name TEXT,
+        ph REAL,
+        buffer_ph REAL,
+        organic_matter_pct REAL,
+        nitrogen_ppm REAL,
+        phosphorus_ppm REAL,
+        potassium_ppm REAL,
+        calcium_ppm REAL,
+        magnesium_ppm REAL,
+        sulfur_ppm REAL,
+        cec REAL,
+        recommendations TEXT,
+        notes TEXT,
+        file_path TEXT,
+        original_filename TEXT,
+        created_by INTEGER REFERENCES users(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_soil_tests_property ON soil_tests(property_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_soil_tests_date ON soil_tests(test_date)');
   }
 ];
 

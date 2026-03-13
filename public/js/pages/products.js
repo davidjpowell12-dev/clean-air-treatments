@@ -116,6 +116,7 @@ const ProductsPage = {
               <h3>Product Info</h3>
               <div class="detail-row"><span class="detail-label">Type</span><span class="detail-value">${this.esc(p.product_type)}</span></div>
               <div class="detail-row"><span class="detail-label">EPA Reg #</span><span class="detail-value">${this.esc(p.epa_reg_number || 'N/A')}</span></div>
+              ${p.barcode ? `<div class="detail-row"><span class="detail-label">UPC Barcode</span><span class="detail-value">${this.esc(p.barcode)}</span></div>` : ''}
               <div class="detail-row"><span class="detail-label">Active Ingredients</span><span class="detail-value">${this.esc(p.active_ingredients || 'N/A')}</span></div>
               <div class="detail-row"><span class="detail-label">Formulation</span><span class="detail-value">${this.esc(p.formulation || 'N/A')}</span></div>
               <div class="detail-row"><span class="detail-label">Signal Word</span><span class="detail-value">${this.esc(p.signal_word || 'N/A')}</span></div>
@@ -192,6 +193,17 @@ const ProductsPage = {
             <div class="form-group">
               <label>EPA Registration #</label>
               <input type="text" name="epa_reg_number" value="${this.esc(product.epa_reg_number || '')}">
+            </div>
+            <div class="form-group">
+              <label>UPC Barcode</label>
+              <div style="display:flex;gap:8px;">
+                <input type="text" name="barcode" value="${this.esc(product.barcode || '')}" placeholder="Scan or enter UPC" style="flex:1;">
+                <button type="button" class="btn btn-sm btn-outline" onclick="ProductsPage.scanBarcode()" style="flex-shrink:0;gap:4px;">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="14" y1="8" x2="14" y2="16"/><line x1="18" y1="8" x2="18" y2="16"/></svg>
+                  Scan
+                </button>
+              </div>
+              <p class="form-hint">Scan the manufacturer UPC barcode on packaging</p>
             </div>
             <div class="form-group">
               <label>Active Ingredients</label>
@@ -320,6 +332,16 @@ const ProductsPage = {
     } catch (err) {
       App.toast(err.message, 'error');
     }
+  },
+
+  scanBarcode() {
+    InventoryPage.scanBarcodeRaw((barcode) => {
+      const input = document.querySelector('[name="barcode"]');
+      if (input) {
+        input.value = barcode;
+        App.toast('Barcode captured: ' + barcode, 'success');
+      }
+    });
   },
 
   esc(str) {

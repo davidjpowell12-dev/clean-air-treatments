@@ -207,7 +207,13 @@ const InventoryPage = {
               <input type="text" name="vendor_name" placeholder="e.g. SiteOne Landscape Supply">
             </div>
 
-            <h4 style="color:var(--blue);margin:16px 0 8px;font-size:14px;">Items</h4>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;">
+              <h4 style="color:var(--blue);font-size:14px;">Items</h4>
+              <button type="button" class="btn btn-sm btn-outline" onclick="InventoryPage.scanForReceive()" style="gap:4px;">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="16"/><line x1="10" y1="8" x2="10" y2="16"/><line x1="14" y1="8" x2="14" y2="16"/><line x1="18" y1="8" x2="18" y2="16"/></svg>
+                Scan
+              </button>
+            </div>
             <div id="receiveItems"></div>
             <button type="button" class="btn btn-outline btn-sm" style="margin:8px 0 4px;" onclick="InventoryPage.addReceiveItem()">+ Add Product</button>
 
@@ -574,6 +580,177 @@ const InventoryPage = {
     };
     if (reason.startsWith('received')) return reason.replace('received', 'Delivery Received');
     return map[reason] || reason.charAt(0).toUpperCase() + reason.slice(1);
+  },
+
+  // --- Barcode Scanner ---
+  async startBarcodeScanner(onScanSuccess) {
+    if (typeof Html5Qrcode === 'undefined') {
+      App.toast('Barcode scanner not loaded', 'error');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" style="max-height:85vh;">
+        <div class="modal-header">
+          <h3>Scan Barcode</h3>
+          <button class="modal-close" id="scannerClose">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:0;">
+          <div id="barcode-reader" style="width:100%;"></div>
+          <div id="scan-result" style="padding:16px;text-align:center;display:none;">
+            <div class="spinner"></div>
+            <p style="margin-top:8px;font-size:14px;color:var(--gray-500);">Looking up product...</p>
+          </div>
+          <div style="padding:12px 16px;text-align:center;">
+            <p style="font-size:13px;color:var(--gray-500);">Point camera at a UPC barcode</p>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+
+    const html5QrCode = new Html5Qrcode("barcode-reader");
+    const config = {
+      fps: 10,
+      qrbox: { width: 280, height: 100 },
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128
+      ]
+    };
+
+    const cleanup = () => {
+      html5QrCode.stop().catch(() => {});
+      overlay.classList.remove('open');
+      setTimeout(() => overlay.remove(), 250);
+    };
+
+    document.getElementById('scannerClose').onclick = cleanup;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(); });
+
+    try {
+      await html5QrCode.start(
+        { facingMode: "environment" },
+        config,
+        async (decodedText) => {
+          if (navigator.vibrate) navigator.vibrate(100);
+          html5QrCode.pause();
+          document.getElementById('scan-result').style.display = 'block';
+
+          try {
+            const product = await Api.get('/api/products/lookup?barcode=' + encodeURIComponent(decodedText));
+            cleanup();
+            onScanSuccess(product, decodedText);
+          } catch (err) {
+            cleanup();
+            if (err.message && err.message.includes('No product found')) {
+              App.toast('No product found for barcode: ' + decodedText, 'error');
+            } else {
+              App.toast(err.message || 'Lookup failed', 'error');
+            }
+          }
+        }
+      );
+    } catch (err) {
+      cleanup();
+      App.toast('Camera access denied or unavailable', 'error');
+    }
+  },
+
+  scanBarcodeRaw(callback) {
+    if (typeof Html5Qrcode === 'undefined') {
+      App.toast('Barcode scanner not loaded', 'error');
+      return;
+    }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal" style="max-height:85vh;">
+        <div class="modal-header">
+          <h3>Scan Barcode</h3>
+          <button class="modal-close" id="scannerRawClose">&times;</button>
+        </div>
+        <div class="modal-body" style="padding:0;">
+          <div id="barcode-reader-raw" style="width:100%;"></div>
+          <div style="padding:12px 16px;text-align:center;">
+            <p style="font-size:13px;color:var(--gray-500);">Point camera at a UPC barcode</p>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+
+    const html5QrCode = new Html5Qrcode("barcode-reader-raw");
+    const config = {
+      fps: 10,
+      qrbox: { width: 280, height: 100 },
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128
+      ]
+    };
+
+    const cleanup = () => {
+      html5QrCode.stop().catch(() => {});
+      overlay.classList.remove('open');
+      setTimeout(() => overlay.remove(), 250);
+    };
+
+    document.getElementById('scannerRawClose').onclick = cleanup;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) cleanup(); });
+
+    html5QrCode.start(
+      { facingMode: "environment" },
+      config,
+      (decodedText) => {
+        if (navigator.vibrate) navigator.vibrate(100);
+        cleanup();
+        callback(decodedText);
+      }
+    ).catch(() => {
+      cleanup();
+      App.toast('Camera access denied or unavailable', 'error');
+    });
+  },
+
+  scanForReceive() {
+    this.startBarcodeScanner((product) => {
+      const container = document.getElementById('receiveItems');
+      if (!container) return;
+
+      // Check if product already has a line
+      const lines = container.querySelectorAll('.receive-line');
+      for (const line of lines) {
+        const select = line.querySelector('[name="recv_product"]');
+        if (select && select.value == product.id) {
+          const qtyInput = line.querySelector('[name="recv_qty"]');
+          qtyInput.focus();
+          qtyInput.select();
+          App.toast('Found: ' + product.name, 'success');
+          return;
+        }
+      }
+
+      // Add new line and pre-select the product
+      this.addReceiveItem();
+      const lastLine = container.lastElementChild;
+      const select = lastLine.querySelector('[name="recv_product"]');
+      select.value = product.id;
+      select.dispatchEvent(new Event('change'));
+      lastLine.querySelector('[name="recv_qty"]').focus();
+      App.toast('Scanned: ' + product.name, 'success');
+    });
   },
 
   esc(str) {

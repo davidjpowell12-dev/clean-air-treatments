@@ -33,6 +33,17 @@ router.get('/', requireAuth, (req, res) => {
   res.json(products);
 });
 
+// Lookup product by barcode
+router.get('/lookup', requireAuth, (req, res) => {
+  const { barcode } = req.query;
+  if (!barcode) return res.status(400).json({ error: 'Barcode required' });
+
+  const db = getDb();
+  const product = db.prepare('SELECT * FROM products WHERE barcode = ?').get(barcode);
+  if (!product) return res.status(404).json({ error: 'No product found for barcode: ' + barcode });
+  res.json(product);
+});
+
 // Get single product
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
@@ -49,7 +60,7 @@ router.post('/', requireAdmin, (req, res) => {
     'unit_of_measure', 'package_size', 'cost_per_unit',
     'app_rate_low', 'app_rate_high', 'app_rate_unit',
     'mix_rate_oz_per_gal', 'spray_volume_gal_per_1000',
-    'is_restricted_use', 'signal_word', 'rei_hours', 'data_sheet_url', 'notes'
+    'is_restricted_use', 'signal_word', 'rei_hours', 'data_sheet_url', 'notes', 'barcode'
   ];
 
   const values = fields.map(f => req.body[f] !== undefined && req.body[f] !== '' ? req.body[f] : null);
@@ -74,7 +85,7 @@ router.put('/:id', requireAdmin, (req, res) => {
     'unit_of_measure', 'package_size', 'cost_per_unit',
     'app_rate_low', 'app_rate_high', 'app_rate_unit',
     'mix_rate_oz_per_gal', 'spray_volume_gal_per_1000',
-    'is_restricted_use', 'signal_word', 'rei_hours', 'data_sheet_url', 'notes'
+    'is_restricted_use', 'signal_word', 'rei_hours', 'data_sheet_url', 'notes', 'barcode'
   ];
 
   const setClauses = fields.map(f => `${f} = ?`).join(', ');

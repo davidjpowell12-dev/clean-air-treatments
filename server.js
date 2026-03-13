@@ -106,6 +106,7 @@ try {
   app.use('/api/audit-log', require('./routes/audit-log'));
   app.use('/api/settings', require('./routes/settings'));
   app.use('/api/schedules', require('./routes/schedules'));
+  app.use('/api/soil-tests', require('./routes/soil-tests'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);

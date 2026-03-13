@@ -68,11 +68,12 @@ const PropertiesPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [prop, applications, ipmCases, scheduleRounds] = await Promise.all([
+      const [prop, applications, ipmCases, scheduleRounds, soilTests] = await Promise.all([
         Api.get(`/api/properties/${id}`),
         Api.get(`/api/properties/${id}/applications`),
         Api.get(`/api/properties/${id}/ipm-cases`),
-        Api.get(`/api/schedules/property/${id}`).catch(() => [])
+        Api.get(`/api/schedules/property/${id}`).catch(() => []),
+        Api.get(`/api/soil-tests/property/${id}`).catch(() => [])
       ]);
       const isAdmin = App.user.role === 'admin';
 
@@ -129,6 +130,18 @@ const PropertiesPage = {
             <span style="font-weight:700;font-size:16px;" id="zoneTotalDisplay">${zoneTotalSqft.toLocaleString()} sq ft</span>
           </div>
           <div id="zoneFormArea"></div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px;">
+          <div class="card-header">
+            <h3 style="font-size:16px;">Soil Tests</h3>
+            <button class="btn btn-sm btn-outline" onclick="PropertiesPage.showSoilTestModal(${prop.id})">+ Add Test</button>
+          </div>
+          ${soilTests.length === 0 ? `
+            <div style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
+              No soil tests yet. Add lab results to track soil health.
+            </div>
+          ` : this.renderSoilSummary(soilTests)}
         </div>
 
         ${scheduleRounds.length > 0 ? (() => {
@@ -698,6 +711,327 @@ const PropertiesPage = {
     } catch (err) {
       App.toast(err.message, 'error');
     }
+  },
+
+  // --- Soil Testing Methods ---
+
+  renderSoilSummary(tests) {
+    const latest = tests[0]; // newest first
+    const phPct = latest.ph ? Math.max(0, Math.min(100, ((latest.ph - 4) / 6) * 100)) : null;
+
+    // N-P-K bar percentages (typical max ranges for lawn soil)
+    const nMax = 120, pMax = 100, kMax = 400;
+    const nPct = latest.nitrogen_ppm ? Math.min(100, (latest.nitrogen_ppm / nMax) * 100) : 0;
+    const pPct = latest.phosphorus_ppm ? Math.min(100, (latest.phosphorus_ppm / pMax) * 100) : 0;
+    const kPct = latest.potassium_ppm ? Math.min(100, (latest.potassium_ppm / kMax) * 100) : 0;
+
+    return `
+      <div class="soil-summary">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px;">
+          <span style="font-size:12px;color:var(--gray-500);">${latest.test_date} ${latest.lab_name ? '&middot; ' + this.esc(latest.lab_name) : ''}</span>
+          <button class="btn btn-sm btn-outline" style="font-size:11px;padding:2px 8px;" onclick="PropertiesPage.showSoilTestModal(${latest.property_id}, ${latest.id})">Edit</button>
+        </div>
+
+        ${latest.ph ? `
+          <div class="soil-section-title">pH Level</div>
+          <div style="display:flex;align-items:center;gap:16px;margin-bottom:4px;">
+            <span class="soil-ph-value ${this.phColor(latest.ph)}">${latest.ph}</span>
+            <span style="font-size:13px;color:var(--gray-500);">${this.phLabel(latest.ph)}</span>
+          </div>
+          <div style="position:relative;margin-bottom:8px;">
+            <div class="soil-ph-gauge">
+              <div class="soil-ph-marker" style="left:${phPct}%;"></div>
+            </div>
+            <div class="soil-ph-labels">
+              <span>4.0</span>
+              <span style="color:var(--green-dark);font-weight:600;">6.0–7.0</span>
+              <span>10.0</span>
+            </div>
+          </div>
+        ` : ''}
+
+        ${(latest.nitrogen_ppm || latest.phosphorus_ppm || latest.potassium_ppm) ? `
+          <div class="soil-section-title">Nutrients (N-P-K)</div>
+          <div class="soil-bar-group">
+            ${latest.nitrogen_ppm != null ? `
+              <div class="soil-bar-row">
+                <span class="soil-bar-label" style="color:#38a169;">N</span>
+                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-n" style="width:${nPct}%;"></div></div>
+                <span class="soil-bar-value ${this.nutrientColor('n', latest.nitrogen_ppm)}">${latest.nitrogen_ppm} ppm</span>
+              </div>
+            ` : ''}
+            ${latest.phosphorus_ppm != null ? `
+              <div class="soil-bar-row">
+                <span class="soil-bar-label" style="color:#3182ce;">P</span>
+                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-p" style="width:${pPct}%;"></div></div>
+                <span class="soil-bar-value ${this.nutrientColor('p', latest.phosphorus_ppm)}">${latest.phosphorus_ppm} ppm</span>
+              </div>
+            ` : ''}
+            ${latest.potassium_ppm != null ? `
+              <div class="soil-bar-row">
+                <span class="soil-bar-label" style="color:#dd6b20;">K</span>
+                <div class="soil-bar-track"><div class="soil-bar-fill soil-bar-fill-k" style="width:${kPct}%;"></div></div>
+                <span class="soil-bar-value ${this.nutrientColor('k', latest.potassium_ppm)}">${latest.potassium_ppm} ppm</span>
+              </div>
+            ` : ''}
+          </div>
+        ` : ''}
+
+        ${(latest.organic_matter_pct || latest.cec || latest.calcium_ppm || latest.magnesium_ppm || latest.sulfur_ppm) ? `
+          <div class="soil-section-title">Additional</div>
+          <div class="soil-detail-grid">
+            ${latest.organic_matter_pct != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Organic Matter</span><span class="soil-detail-value">${latest.organic_matter_pct}%</span></div>` : ''}
+            ${latest.cec != null ? `<div class="soil-detail-item"><span class="soil-detail-label">CEC</span><span class="soil-detail-value">${latest.cec}</span></div>` : ''}
+            ${latest.buffer_ph != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Buffer pH</span><span class="soil-detail-value">${latest.buffer_ph}</span></div>` : ''}
+            ${latest.calcium_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Calcium</span><span class="soil-detail-value">${latest.calcium_ppm} ppm</span></div>` : ''}
+            ${latest.magnesium_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Magnesium</span><span class="soil-detail-value">${latest.magnesium_ppm} ppm</span></div>` : ''}
+            ${latest.sulfur_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Sulfur</span><span class="soil-detail-value">${latest.sulfur_ppm} ppm</span></div>` : ''}
+          </div>
+        ` : ''}
+
+        ${latest.recommendations ? `
+          <div class="soil-section-title">Recommendations</div>
+          <p style="font-size:14px;color:var(--gray-700);line-height:1.5;">${this.esc(latest.recommendations)}</p>
+        ` : ''}
+
+        ${latest.file_path ? `
+          <a href="/api/soil-tests/${latest.id}/report" target="_blank" class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            View Lab Report
+          </a>
+        ` : `
+          <button class="btn btn-outline btn-full" style="margin-top:12px;gap:6px;" onclick="PropertiesPage.uploadSoilReport(${latest.id})">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            Upload Lab Report
+          </button>
+        `}
+
+        ${tests.length > 1 ? `
+          <div class="soil-section-title" style="margin-top:16px;">Previous Tests</div>
+          ${tests.slice(1).map(t => `
+            <div class="soil-history-row" onclick="PropertiesPage.showSoilTestDetail(${t.id})">
+              <div class="soil-history-info">
+                <span class="soil-history-date">${t.test_date}</span>
+                <span class="soil-history-lab">${this.esc(t.lab_name || 'Unknown lab')}</span>
+              </div>
+              ${t.ph ? `<span class="soil-history-ph ${this.phColor(t.ph)}">${t.ph}</span>` : ''}
+            </div>
+          `).join('')}
+        ` : ''}
+      </div>
+    `;
+  },
+
+  phColor(ph) {
+    if (ph >= 6.0 && ph <= 7.0) return 'soil-optimal';
+    if (ph >= 5.5 && ph <= 7.5) return 'soil-marginal';
+    return 'soil-critical';
+  },
+
+  phLabel(ph) {
+    if (ph < 5.5) return 'Very Acidic';
+    if (ph < 6.0) return 'Acidic';
+    if (ph <= 7.0) return 'Optimal';
+    if (ph <= 7.5) return 'Slightly Alkaline';
+    return 'Alkaline';
+  },
+
+  nutrientColor(type, val) {
+    const ranges = {
+      n: { low: 20, high: 80 },
+      p: { low: 15, high: 60 },
+      k: { low: 100, high: 250 }
+    };
+    const r = ranges[type];
+    if (!r) return '';
+    if (val < r.low) return 'soil-critical';
+    if (val > r.high) return 'soil-marginal';
+    return 'soil-optimal';
+  },
+
+  async showSoilTestModal(propertyId, editId) {
+    let test = {};
+    if (editId) {
+      try { test = await Api.get(`/api/soil-tests/${editId}`); } catch (e) {}
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>${editId ? 'Edit' : 'Add'} Soil Test</h3>
+          <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <form id="soilTestForm" class="app-form">
+            <input type="hidden" name="property_id" value="${propertyId}">
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Test Date *</label>
+                <input type="date" name="test_date" value="${test.test_date || today}" required>
+              </div>
+              <div class="form-group">
+                <label>Lab Name</label>
+                <input type="text" name="lab_name" value="${this.esc(test.lab_name || '')}" placeholder="e.g. MSU Soil Lab">
+              </div>
+            </div>
+
+            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Primary</div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>pH</label>
+                <input type="number" name="ph" value="${test.ph || ''}" step="0.1" min="0" max="14" placeholder="e.g. 6.5">
+              </div>
+              <div class="form-group">
+                <label>Buffer pH</label>
+                <input type="number" name="buffer_ph" value="${test.buffer_ph || ''}" step="0.1" min="0" max="14">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Organic Matter %</label>
+              <input type="number" name="organic_matter_pct" value="${test.organic_matter_pct || ''}" step="0.1" min="0" max="100" placeholder="e.g. 3.5">
+            </div>
+
+            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Nutrients (ppm)</div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Nitrogen (N)</label>
+                <input type="number" name="nitrogen_ppm" value="${test.nitrogen_ppm || ''}" step="0.1" min="0">
+              </div>
+              <div class="form-group">
+                <label>Phosphorus (P)</label>
+                <input type="number" name="phosphorus_ppm" value="${test.phosphorus_ppm || ''}" step="0.1" min="0">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Potassium (K)</label>
+                <input type="number" name="potassium_ppm" value="${test.potassium_ppm || ''}" step="0.1" min="0">
+              </div>
+              <div class="form-group">
+                <label>CEC</label>
+                <input type="number" name="cec" value="${test.cec || ''}" step="0.1" min="0">
+              </div>
+            </div>
+
+            <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--gray-500);margin:16px 0 8px;">Secondary Nutrients (ppm)</div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Calcium</label>
+                <input type="number" name="calcium_ppm" value="${test.calcium_ppm || ''}" step="0.1" min="0">
+              </div>
+              <div class="form-group">
+                <label>Magnesium</label>
+                <input type="number" name="magnesium_ppm" value="${test.magnesium_ppm || ''}" step="0.1" min="0">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label>Sulfur</label>
+              <input type="number" name="sulfur_ppm" value="${test.sulfur_ppm || ''}" step="0.1" min="0">
+            </div>
+
+            <div class="form-group">
+              <label>Recommendations</label>
+              <textarea name="recommendations" rows="3" placeholder="Lab recommendations...">${this.esc(test.recommendations || '')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Notes</label>
+              <textarea name="notes" rows="2" placeholder="Additional notes...">${this.esc(test.notes || '')}</textarea>
+            </div>
+
+            <button type="submit" class="btn btn-primary btn-full">${editId ? 'Save Changes' : 'Add Soil Test'}</button>
+            ${editId ? `<button type="button" class="btn btn-danger btn-full" style="margin-top:8px;" onclick="PropertiesPage.deleteSoilTest(${editId}, ${propertyId})">Delete Test</button>` : ''}
+          </form>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    document.getElementById('soilTestForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(e.target);
+      const data = Object.fromEntries(formData.entries());
+
+      // Convert numeric fields
+      ['ph', 'buffer_ph', 'organic_matter_pct', 'nitrogen_ppm', 'phosphorus_ppm', 'potassium_ppm',
+       'calcium_ppm', 'magnesium_ppm', 'sulfur_ppm', 'cec'].forEach(f => {
+        if (data[f]) data[f] = Number(data[f]);
+      });
+
+      try {
+        if (editId) {
+          await Api.put(`/api/soil-tests/${editId}`, data);
+          App.toast('Soil test updated', 'success');
+        } else {
+          await Api.post('/api/soil-tests', data);
+          App.toast('Soil test added', 'success');
+        }
+        overlay.remove();
+        this.renderDetail(propertyId);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    });
+  },
+
+  async deleteSoilTest(testId, propertyId) {
+    if (!confirm('Delete this soil test? This cannot be undone.')) return;
+    try {
+      await Api.delete(`/api/soil-tests/${testId}`);
+      App.toast('Soil test deleted', 'success');
+      document.querySelector('.modal-overlay')?.remove();
+      this.renderDetail(propertyId);
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  async showSoilTestDetail(testId) {
+    try {
+      const test = await Api.get(`/api/soil-tests/${testId}`);
+      this.showSoilTestModal(test.property_id, testId);
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  uploadSoilReport(testId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.jpg,.jpeg,.png';
+    input.onchange = async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('report', file);
+      try {
+        const token = localStorage.getItem('token');
+        const resp = await fetch(`/api/soil-tests/${testId}/upload`, {
+          method: 'POST',
+          headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+          body: formData
+        });
+        if (!resp.ok) throw new Error('Upload failed');
+        App.toast('Lab report uploaded', 'success');
+        if (this._currentPropertyId) this.renderDetail(this._currentPropertyId);
+      } catch (err) {
+        App.toast(err.message, 'error');
+      }
+    };
+    input.click();
   },
 
   esc(str) {

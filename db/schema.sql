@@ -222,6 +222,34 @@ CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to);
 -- idx_schedules_program created by migration 7 (safe for existing DBs)
 
+-- Soil Tests (lab results per property)
+CREATE TABLE IF NOT EXISTS soil_tests (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+  test_date DATE NOT NULL,
+  lab_name TEXT,
+  ph REAL,
+  buffer_ph REAL,
+  organic_matter_pct REAL,
+  nitrogen_ppm REAL,
+  phosphorus_ppm REAL,
+  potassium_ppm REAL,
+  calcium_ppm REAL,
+  magnesium_ppm REAL,
+  sulfur_ppm REAL,
+  cec REAL,
+  recommendations TEXT,
+  notes TEXT,
+  file_path TEXT,
+  original_filename TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_soil_tests_property ON soil_tests(property_id);
+CREATE INDEX IF NOT EXISTS idx_soil_tests_date ON soil_tests(test_date);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products
