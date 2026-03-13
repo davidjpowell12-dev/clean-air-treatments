@@ -720,7 +720,7 @@ const PropertiesPage = {
     const phPct = t.ph ? Math.max(0, Math.min(100, ((t.ph - 4) / 6) * 100)) : null;
 
     const hasData = t.ph || t.calcium_lbs_acre || t.potassium_lbs_acre || t.organic_matter_pct ||
-      t.cec || t.base_sat_calcium_pct || t.boron_ppm || t.sulfur_ppm || t.phosphorus_lbs_acre;
+      t.cec || t.base_sat_calcium_pct || t.boron_ppm || t.sulfur_ppm || t.phosphorus_lbs_acre || t.nitrogen_ppm;
 
     // Cation bar helper: found vs desired
     const cationBar = (label, color, found, desired) => {
@@ -776,11 +776,12 @@ const PropertiesPage = {
           </div>
         ` : ''}
 
-        ${(t.organic_matter_pct || t.cec || t.sulfur_ppm || t.phosphorus_lbs_acre) ? `
+        ${(t.organic_matter_pct || t.cec || t.sulfur_ppm || t.phosphorus_lbs_acre || t.nitrogen_ppm) ? `
           <div class="soil-section-title">Primary Results</div>
           <div class="soil-detail-grid">
             ${t.organic_matter_pct != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Organic Matter</span><span class="soil-detail-value">${t.organic_matter_pct}%</span></div>` : ''}
             ${t.cec != null ? `<div class="soil-detail-item"><span class="soil-detail-label">CEC (M.E.)</span><span class="soil-detail-value">${t.cec}</span></div>` : ''}
+            ${t.nitrogen_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Nitrogen</span><span class="soil-detail-value">${t.nitrogen_ppm} ppm</span></div>` : ''}
             ${t.sulfur_ppm != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Sulfur</span><span class="soil-detail-value">${t.sulfur_ppm} ppm</span></div>` : ''}
             ${t.phosphorus_lbs_acre != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Phosphorus (P₂O₅)</span><span class="soil-detail-value">${t.phosphorus_lbs_acre} lbs/ac</span></div>` : ''}
             ${t.buffer_ph != null ? `<div class="soil-detail-item"><span class="soil-detail-label">Buffer pH</span><span class="soil-detail-value">${t.buffer_ph}</span></div>` : ''}
@@ -872,7 +873,7 @@ const PropertiesPage = {
 
   _soilNumericFields: [
     'sample_depth_inches', 'ph', 'buffer_ph', 'organic_matter_pct', 'cec',
-    'sulfur_ppm', 'phosphorus_lbs_acre',
+    'nitrogen_ppm', 'sulfur_ppm', 'phosphorus_lbs_acre',
     'calcium_lbs_acre', 'calcium_desired_lbs_acre',
     'magnesium_lbs_acre', 'magnesium_desired_lbs_acre',
     'potassium_lbs_acre', 'potassium_desired_lbs_acre',
@@ -928,10 +929,14 @@ const PropertiesPage = {
               ${nf('organic_matter_pct', 'Organic Matter %', '7.7')}
             </div>
 
-            ${sect('Anions')}
+            ${sect('Anions / Macro Nutrients')}
             <div class="form-row">
+              ${nf('nitrogen_ppm', 'Nitrogen (ppm)', '25')}
               ${nf('sulfur_ppm', 'Sulfur (ppm)', '15')}
+            </div>
+            <div class="form-row">
               ${nf('phosphorus_lbs_acre', 'Phosphorus P₂O₅ (lbs/ac)', '110')}
+              <div class="form-group"></div>
             </div>
 
             ${sect('Exchangeable Cations (lbs/acre)')}
