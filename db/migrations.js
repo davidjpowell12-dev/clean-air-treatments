@@ -161,6 +161,33 @@ const migrations = [
     for (const col of cols) {
       try { db.exec(`ALTER TABLE soil_tests ADD COLUMN ${col}`); } catch (e) { /* exists */ }
     }
+  },
+  // Migration 11: Create services + pricing_tiers tables for estimates & proposals
+  function createServicesPricingTables(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS services (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_recurring INTEGER DEFAULT 0,
+        rounds INTEGER DEFAULT 1,
+        display_order INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS pricing_tiers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+        min_sqft INTEGER NOT NULL,
+        max_sqft INTEGER,
+        price REAL NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pricing_tiers_service ON pricing_tiers(service_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_pricing_tiers_sqft ON pricing_tiers(min_sqft, max_sqft)');
   }
 ];
 

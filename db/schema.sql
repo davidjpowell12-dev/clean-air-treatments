@@ -272,6 +272,31 @@ CREATE TABLE IF NOT EXISTS soil_tests (
 CREATE INDEX IF NOT EXISTS idx_soil_tests_property ON soil_tests(property_id);
 CREATE INDEX IF NOT EXISTS idx_soil_tests_date ON soil_tests(test_date);
 
+-- Services (offered service types for estimates/proposals)
+CREATE TABLE IF NOT EXISTS services (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  description TEXT,
+  is_recurring INTEGER DEFAULT 0,
+  rounds INTEGER DEFAULT 1,
+  display_order INTEGER DEFAULT 0,
+  is_active INTEGER DEFAULT 1,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Pricing tiers (price brackets by sqft for each service)
+CREATE TABLE IF NOT EXISTS pricing_tiers (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
+  min_sqft INTEGER NOT NULL,
+  max_sqft INTEGER,
+  price REAL NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_pricing_tiers_service ON pricing_tiers(service_id);
+CREATE INDEX IF NOT EXISTS idx_pricing_tiers_sqft ON pricing_tiers(min_sqft, max_sqft);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products

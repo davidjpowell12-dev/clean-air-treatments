@@ -1880,3 +1880,55 @@ body {
 .soil-detail-grid-3 {
   grid-template-columns: repeat(3, 1fr);
 }
+
+/* ===== Pricing Matrix Table ===== */
+.pricing-matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.pricing-matrix-table th {
+  background: var(--gray-50);
+  padding: 10px 12px;
+  text-align: right;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--blue);
+  border-bottom: 2px solid var(--gray-200);
+  white-space: nowrap;
+}
+.pricing-matrix-table th:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: var(--gray-50);
+  z-index: 1;
+}
+.pricing-matrix-table td {
+  padding: 8px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--gray-100);
+  color: var(--gray-700);
+}
+.pricing-matrix-table td:first-child {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: white;
+  z-index: 1;
+  color: var(--gray-900);
+}
+.pricing-matrix-table tbody tr:hover td {
+  background: var(--green-light);
+}
+.pricing-matrix-table tbody tr:hover td:first-child {
+  background: var(--green-light);
+}
+.pricing-cell {
+  cursor: pointer;
+  transition: color var(--transition-fast);
+}
+.pricing-cell:hover {
+  color: var(--green-dark);
+  font-weight: 600;
+}
