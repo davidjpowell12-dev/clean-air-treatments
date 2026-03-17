@@ -583,11 +583,24 @@ const EstimatesPage = {
             </a>
           ` : ''}
           ${est.status === 'draft' ? `
-            <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.markSent(${est.id})">
-              Mark as Sent
-            </button>
+            <div class="card" style="margin-top:12px;border:2px solid var(--green);">
+              <div class="card-body" style="padding:16px;">
+                <label style="font-weight:600;font-size:14px;color:var(--green-dark);display:block;margin-bottom:8px;">Send Proposal to Customer</label>
+                <div style="display:flex;gap:8px;">
+                  <input type="email" id="sendEmailInput" value="${this._esc(est.email || '')}" placeholder="customer@email.com" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;">
+                  <button class="btn btn-primary" style="padding:12px 20px;white-space:nowrap;" onclick="EstimatesPage.sendEstimate(${est.id})" id="sendEstBtn">
+                    Send
+                  </button>
+                </div>
+                <p style="font-size:12px;color:var(--gray-400);margin-top:6px;">Or <a href="#" onclick="EstimatesPage.markSent(${est.id});return false;" style="color:var(--green);">mark as sent</a> if you'll share the link manually</p>
+              </div>
+            </div>
           ` : ''}
           ${est.status === 'sent' || est.status === 'viewed' ? `
+            <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.sendReminder(${est.id})" id="reminderBtn">
+              📧 Send Reminder
+            </button>
+            ${est.reminder_count > 0 ? `<p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">${est.reminder_count} reminder${est.reminder_count > 1 ? 's' : ''} sent${est.last_reminder_at ? ' \u00B7 Last: ' + new Date(est.last_reminder_at).toLocaleDateString() : ''}</p>` : ''}
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.markAccepted(${est.id})">
               Mark as Accepted
             </button>
@@ -613,6 +626,47 @@ const EstimatesPage = {
       App.toast('Proposal link copied!', 'success');
     } catch (e) {
       prompt('Copy this link:', url);
+    }
+  },
+
+  // ─── Send Actions ─────────────────────────────────────────
+  async sendEstimate(id) {
+    const emailInput = document.getElementById('sendEmailInput');
+    const email = emailInput ? emailInput.value.trim() : '';
+    if (!email) {
+      App.toast('Enter the customer email address', 'error');
+      if (emailInput) emailInput.focus();
+      return;
+    }
+
+    const btn = document.getElementById('sendEstBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+      const result = await Api.post(`/api/estimates/${id}/send`, { email });
+      App.toast(result.message || 'Proposal sent!', 'success');
+      this.renderDetail(id);
+    } catch (err) {
+      App.toast(err.message || 'Failed to send', 'error');
+      btn.disabled = false;
+      btn.textContent = 'Send';
+    }
+  },
+
+  async sendReminder(id) {
+    const btn = document.getElementById('reminderBtn');
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+
+    try {
+      const result = await Api.post(`/api/estimates/${id}/send-reminder`);
+      App.toast(result.message || 'Reminder sent!', 'success');
+      this.renderDetail(id);
+    } catch (err) {
+      App.toast(err.message || 'Failed to send reminder', 'error');
+      btn.disabled = false;
+      btn.textContent = '📧 Send Reminder';
     }
   },
 

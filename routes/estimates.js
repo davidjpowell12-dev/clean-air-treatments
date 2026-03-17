@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { logAudit } = require('../db/audit');
 const { requireAuth } = require('../middleware/auth');
+const email = require('../utils/email');
 
 const router = express.Router();
 
@@ -339,6 +340,102 @@ router.put('/:id/items/:itemId/toggle', requireAuth, (req, res) => {
     .run(totalPrice, monthlyPrice, req.params.id);
 
   res.json({ is_included: newIncluded, total_price: totalPrice, monthly_price: monthlyPrice });
+});
+
+// Send estimate to customer via email
+router.post('/:id/send', requireAuth, async (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const toEmail = req.body.email || est.email;
+  if (!toEmail) return res.status(400).json({ error: 'Customer email is required' });
+
+  // Ensure token exists
+  if (!est.token) {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.prepare('UPDATE estimates SET token = ? WHERE id = ?').run(token, est.id);
+    est.token = token;
+  }
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const proposalUrl = `${baseUrl}/proposal/${est.token}`;
+
+  try {
+    await email.sendProposalEmail({
+      to: toEmail,
+      customerName: est.customer_name,
+      monthlyPrice: est.monthly_price,
+      totalPrice: est.total_price,
+      paymentMonths: est.payment_months,
+      proposalUrl,
+      validUntil: est.valid_until
+    });
+
+    // Update status to sent + save the email we sent to
+    db.prepare(`
+      UPDATE estimates SET status = 'sent', sent_at = ?, email = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(new Date().toISOString(), toEmail, est.id);
+
+    logAudit(db, 'estimate', est.id, req.session.userId, 'sent_email', {
+      to: toEmail, customer_name: est.customer_name
+    });
+
+    const updated = db.prepare('SELECT * FROM estimates WHERE id = ?').get(est.id);
+    res.json({ success: true, message: `Proposal sent to ${toEmail}`, estimate: updated });
+  } catch (err) {
+    console.error('[email] Send failed:', err.message);
+    res.status(500).json({ error: 'Failed to send email. ' + (err.message || 'Check email configuration.') });
+  }
+});
+
+// Send reminder email for an estimate
+router.post('/:id/send-reminder', requireAuth, async (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (!est.email) return res.status(400).json({ error: 'No customer email on this estimate' });
+  if (est.status !== 'sent' && est.status !== 'viewed') {
+    return res.status(400).json({ error: 'Can only send reminders for sent/viewed estimates' });
+  }
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const proposalUrl = `${baseUrl}/proposal/${est.token}`;
+
+  try {
+    await email.sendReminderEmail({
+      to: est.email,
+      customerName: est.customer_name,
+      monthlyPrice: est.monthly_price,
+      totalPrice: est.total_price,
+      paymentMonths: est.payment_months,
+      proposalUrl,
+      reminderNumber: est.reminder_count + 1
+    });
+
+    db.prepare(`
+      UPDATE estimates SET
+        last_reminder_at = CURRENT_TIMESTAMP,
+        reminder_count = reminder_count + 1,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(est.id);
+
+    logAudit(db, 'estimate', est.id, req.session.userId, 'reminder_sent', {
+      to: est.email, reminder_number: est.reminder_count + 1
+    });
+
+    const updated = db.prepare('SELECT * FROM estimates WHERE id = ?').get(est.id);
+    res.json({ success: true, message: `Reminder sent to ${est.email}`, estimate: updated });
+  } catch (err) {
+    console.error('[email] Reminder failed:', err.message);
+    res.status(500).json({ error: 'Failed to send reminder. ' + (err.message || 'Check email configuration.') });
+  }
+});
+
+// Check if email is configured
+router.get('/config/email-status', requireAuth, (req, res) => {
+  res.json({ enabled: email.isEnabled() });
 });
 
 // Delete estimate
