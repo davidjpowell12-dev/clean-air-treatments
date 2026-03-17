@@ -1,6 +1,8 @@
 // Versioned schema migrations for existing databases
 // New installs get the full schema from schema.sql; migrations handle ALTER TABLE for existing DBs
 
+const crypto = require('crypto');
+
 const migrations = [
   // Migration 1: Add property_id and retention_years to applications
   function addPropertyColumns(db) {
@@ -240,6 +242,17 @@ const migrations = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_property ON estimates(property_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_status ON estimates(status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_estimate_items_estimate ON estimate_items(estimate_id)');
+  },
+  // Migration 13: Add public token to estimates for client portal access
+  function addEstimateToken(db) {
+    try { db.exec('ALTER TABLE estimates ADD COLUMN token TEXT'); } catch (e) { /* column may already exist */ }
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_estimates_token ON estimates(token)');
+    // Backfill tokens for any existing estimates
+    const rows = db.prepare('SELECT id FROM estimates WHERE token IS NULL').all();
+    for (const row of rows) {
+      const token = crypto.randomBytes(32).toString('hex');
+      db.prepare('UPDATE estimates SET token = ? WHERE id = ?').run(token, row.id);
+    }
   }
 ];
 

@@ -574,12 +574,20 @@ const EstimatesPage = {
           <button class="btn btn-primary btn-full" onclick="App.navigate('estimates', 'edit', ${est.id})">
             Edit Estimate
           </button>
+          ${est.token && est.status !== 'draft' ? `
+            <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.copyProposalLink('${est.token}')">
+              📋 Copy Proposal Link
+            </button>
+            <a href="/proposal/${est.token}" target="_blank" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
+              👁 View as Customer
+            </a>
+          ` : ''}
           ${est.status === 'draft' ? `
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.markSent(${est.id})">
               Mark as Sent
             </button>
           ` : ''}
-          ${est.status === 'sent' ? `
+          ${est.status === 'sent' || est.status === 'viewed' ? `
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.markAccepted(${est.id})">
               Mark as Accepted
             </button>
@@ -594,6 +602,17 @@ const EstimatesPage = {
       `;
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+    }
+  },
+
+  // ─── Copy Proposal Link ────────────────────────────────────
+  async copyProposalLink(token) {
+    const url = `${window.location.origin}/proposal/${token}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      App.toast('Proposal link copied!', 'success');
+    } catch (e) {
+      prompt('Copy this link:', url);
     }
   },
 

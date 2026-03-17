@@ -1,4 +1,5 @@
 const express = require('express');
+const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { logAudit } = require('../db/audit');
 const { requireAuth } = require('../middleware/auth');
@@ -37,6 +38,85 @@ router.get('/', requireAuth, (req, res) => {
   sql += ' ORDER BY e.created_at DESC';
 
   res.json(db.prepare(sql).all(...params));
+});
+
+// ─── Public Endpoints (no auth required) ─────────────────────
+// These must be defined BEFORE /:id routes to avoid route conflicts
+
+// Public: Get proposal by token (customer-facing)
+router.get('/public/:token', (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
+  if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
+
+  // Auto-update status from sent → viewed
+  if (est.status === 'sent') {
+    db.prepare(
+      'UPDATE estimates SET status = ?, viewed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    ).run('viewed', new Date().toISOString(), est.id);
+    est.status = 'viewed';
+    est.viewed_at = new Date().toISOString();
+  }
+
+  // Get included items only
+  const items = db.prepare(
+    'SELECT service_name, description, price, is_recurring, rounds, is_included FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
+  ).all(est.id);
+
+  // Return only client-safe fields (strip internal notes, reminder info, etc.)
+  res.json({
+    id: est.id,
+    customer_name: est.customer_name,
+    address: est.address,
+    city: est.city,
+    state: est.state,
+    zip: est.zip,
+    property_sqft: est.property_sqft,
+    total_price: est.total_price,
+    monthly_price: est.monthly_price,
+    payment_months: est.payment_months,
+    status: est.status,
+    valid_until: est.valid_until,
+    customer_message: est.customer_message,
+    accepted_at: est.accepted_at,
+    items
+  });
+});
+
+// Public: Accept proposal by token
+router.post('/public/:token/accept', (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
+  if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
+
+  if (est.status === 'accepted') {
+    return res.json({ success: true, message: 'Proposal already accepted', accepted_at: est.accepted_at });
+  }
+  if (est.status === 'declined') {
+    return res.status(400).json({ error: 'This proposal is no longer available' });
+  }
+
+  // Check if expired
+  if (est.valid_until) {
+    const now = new Date();
+    const validUntil = new Date(est.valid_until + 'T23:59:59');
+    if (now > validUntil) {
+      db.prepare('UPDATE estimates SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run('expired', est.id);
+      return res.status(400).json({ error: 'This proposal has expired' });
+    }
+  }
+
+  const acceptedAt = new Date().toISOString();
+  db.prepare(
+    'UPDATE estimates SET status = ?, accepted_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).run('accepted', acceptedAt, est.id);
+
+  logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
+    customer_name: est.customer_name
+  });
+
+  res.json({ success: true, message: 'Proposal accepted!', accepted_at: acceptedAt });
 });
 
 // Get single estimate with items
@@ -102,16 +182,18 @@ router.post('/', requireAuth, (req, res) => {
     }, 0);
     const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
 
+    const token = crypto.randomBytes(32).toString('hex');
+
     const result = db.prepare(`
       INSERT INTO estimates (
         property_id, customer_name, address, city, state, zip,
         email, phone, property_sqft, total_price, monthly_price,
-        payment_months, valid_until, notes, customer_message, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_months, token, valid_until, notes, customer_message, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       property_id || null, customer_name, address, city, state || 'MI', zip,
       email, phone, property_sqft, totalPrice, monthlyPrice,
-      months, valid_until || null, notes || null, customer_message || null,
+      months, token, valid_until || null, notes || null, customer_message || null,
       req.session.userId
     );
 
@@ -279,6 +361,12 @@ router.put('/:id/status', requireAuth, (req, res) => {
   const { status } = req.body;
   const validStatuses = ['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'];
   if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  // Ensure token exists when marking as sent (safety net for pre-migration estimates)
+  if (status === 'sent' && !est.token) {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.prepare('UPDATE estimates SET token = ? WHERE id = ?').run(token, est.id);
+  }
 
   const timestamps = {};
   if (status === 'sent') timestamps.sent_at = new Date().toISOString();

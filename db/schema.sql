@@ -313,6 +313,7 @@ CREATE TABLE IF NOT EXISTS estimates (
   monthly_price REAL DEFAULT 0,
   payment_months INTEGER DEFAULT 8,
   status TEXT DEFAULT 'draft',
+  token TEXT UNIQUE,
   valid_until DATE,
   notes TEXT,
   customer_message TEXT,
@@ -330,6 +331,8 @@ CREATE TABLE IF NOT EXISTS estimates (
 
 CREATE INDEX IF NOT EXISTS idx_estimates_property ON estimates(property_id);
 CREATE INDEX IF NOT EXISTS idx_estimates_status ON estimates(status);
+-- Note: idx_estimates_token is created by migration 13 for existing DBs;
+-- for fresh installs, the UNIQUE constraint on the column handles it
 
 -- Estimate line items (services included in a proposal)
 CREATE TABLE IF NOT EXISTS estimate_items (

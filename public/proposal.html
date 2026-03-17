@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Your Lawn Care Proposal | Clean Air</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <style>
+    :root {
+      --green: #4a7c2e;
+      --green-light: #6b9e47;
+      --green-dark: #3a6324;
+      --navy: #1a2744;
+      --navy-light: #243656;
+      --white: #ffffff;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+      --red: #dc2626;
+      --radius: 12px;
+      --radius-lg: 16px;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-900);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .proposal-header {
+      background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+      padding: 32px 20px 40px;
+      text-align: center;
+      color: white;
+    }
+    .proposal-header img {
+      height: 52px;
+      margin-bottom: 8px;
+      filter: brightness(0) invert(1);
+    }
+    .proposal-header h1 {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .proposal-header p {
+      font-size: 14px;
+      opacity: 0.85;
+      margin-top: 4px;
+    }
+
+    .proposal-body {
+      max-width: 520px;
+      margin: -20px auto 0;
+      padding: 0 16px 32px;
+    }
+
+    .proposal-card {
+      background: var(--white);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04);
+      overflow: hidden;
+    }
+
+    .proposal-customer {
+      padding: 24px 24px 16px;
+      text-align: center;
+      border-bottom: 1px solid var(--gray-100);
+    }
+    .proposal-customer h2 {
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--gray-900);
+    }
+    .proposal-customer .address {
+      font-size: 14px;
+      color: var(--gray-500);
+      margin-top: 4px;
+    }
+    .proposal-customer .sqft {
+      display: inline-block;
+      background: var(--gray-100);
+      color: var(--gray-700);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-top: 8px;
+    }
+
+    .proposal-price-hero {
+      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
+      padding: 32px 24px;
+      text-align: center;
+      color: white;
+    }
+    .price-monthly {
+      font-size: 56px;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -2px;
+    }
+    .price-monthly .dollar { font-size: 32px; vertical-align: top; margin-right: 2px; font-weight: 600; }
+    .price-period {
+      font-size: 16px;
+      opacity: 0.8;
+      margin-top: 6px;
+    }
+    .price-total {
+      font-size: 14px;
+      opacity: 0.6;
+      margin-top: 4px;
+    }
+
+    .proposal-services {
+      padding: 24px;
+    }
+    .proposal-services h3 {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--gray-400);
+      margin-bottom: 16px;
+    }
+    .service-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--gray-100);
+    }
+    .service-row:last-child { border-bottom: none; }
+    .service-check {
+      color: var(--green);
+      font-weight: 700;
+      font-size: 16px;
+      margin-right: 12px;
+      flex-shrink: 0;
+    }
+    .service-info { flex: 1; }
+    .service-name {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--gray-900);
+    }
+    .service-detail {
+      font-size: 12px;
+      color: var(--gray-400);
+      margin-top: 2px;
+    }
+    .service-price {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--gray-700);
+      flex-shrink: 0;
+      margin-left: 16px;
+    }
+
+    .proposal-message {
+      padding: 0 24px 24px;
+    }
+    .proposal-message-box {
+      background: var(--gray-50);
+      border-left: 3px solid var(--green);
+      padding: 16px;
+      border-radius: 0 8px 8px 0;
+      font-size: 14px;
+      color: var(--gray-700);
+      line-height: 1.5;
+    }
+
+    .proposal-valid {
+      text-align: center;
+      padding: 12px 24px;
+      font-size: 12px;
+      color: var(--gray-400);
+      border-top: 1px solid var(--gray-100);
+    }
+
+    .proposal-cta {
+      padding: 24px;
+      text-align: center;
+    }
+    .accept-btn {
+      display: block;
+      width: 100%;
+      padding: 18px 24px;
+      background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
+      color: white;
+      border: none;
+      border-radius: var(--radius);
+      font-size: 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s;
+      letter-spacing: 0.3px;
+    }
+    .accept-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(74,124,46,0.4); }
+    .accept-btn:active { transform: translateY(0); }
+    .accept-btn:disabled {
+      background: var(--gray-300);
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    /* States */
+    .proposal-status-banner {
+      padding: 16px 24px;
+      text-align: center;
+      font-weight: 600;
+      font-size: 15px;
+    }
+    .banner-accepted {
+      background: #ecfdf5;
+      color: #065f46;
+    }
+    .banner-expired {
+      background: #fef2f2;
+      color: #991b1b;
+    }
+    .banner-declined {
+      background: var(--gray-100);
+      color: var(--gray-500);
+    }
+
+    .accepted-animation {
+      padding: 32px 24px;
+      text-align: center;
+    }
+    .accepted-animation .check-circle {
+      width: 72px;
+      height: 72px;
+      border-radius: 50%;
+      background: #ecfdf5;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      font-size: 36px;
+    }
+    .accepted-animation h3 {
+      font-size: 20px;
+      color: #065f46;
+      margin-bottom: 8px;
+    }
+    .accepted-animation p {
+      font-size: 14px;
+      color: var(--gray-500);
+    }
+
+    .proposal-footer {
+      text-align: center;
+      padding: 24px 16px;
+      font-size: 12px;
+      color: var(--gray-400);
+    }
+    .proposal-footer a {
+      color: var(--green);
+      text-decoration: none;
+    }
+
+    /* Loading & Error */
+    .loading-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 60vh;
+      padding: 32px;
+    }
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid var(--gray-200);
+      border-top-color: var(--green);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .loading-state p {
+      margin-top: 16px;
+      color: var(--gray-400);
+      font-size: 14px;
+    }
+
+    .error-state {
+      text-align: center;
+      padding: 80px 32px;
+      min-height: 60vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    .error-state .error-icon { font-size: 48px; margin-bottom: 16px; }
+    .error-state h2 { font-size: 20px; color: var(--gray-900); margin-bottom: 8px; }
+    .error-state p { font-size: 14px; color: var(--gray-500); max-width: 300px; }
+
+    @media (min-width: 600px) {
+      .proposal-body { padding: 0 24px 48px; margin-top: -24px; }
+      .proposal-header { padding: 40px 24px 48px; }
+      .proposal-header h1 { font-size: 26px; }
+      .price-monthly { font-size: 64px; }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div class="loading-state">
+      <div class="spinner"></div>
+      <p>Loading your proposal...</p>
+    </div>
+  </div>
+
+  <script>
+    const app = document.getElementById('app');
+
+    // Extract token from URL path
+    const pathParts = window.location.pathname.split('/');
+    const token = pathParts[pathParts.length - 1];
+
+    if (!token || token === 'proposal') {
+      showError('Invalid Link', 'This proposal link appears to be invalid. Please check the link and try again.');
+    } else {
+      loadProposal();
+    }
+
+    async function loadProposal() {
+      try {
+        const resp = await fetch(`/api/estimates/public/${token}`);
+        if (!resp.ok) {
+          if (resp.status === 404) {
+            showError('Proposal Not Found', 'This proposal may have been removed or the link is incorrect. Please contact Clean Air for assistance.');
+          } else {
+            showError('Something Went Wrong', 'We couldn\'t load this proposal. Please try again or contact Clean Air.');
+          }
+          return;
+        }
+
+        const data = await resp.json();
+        renderProposal(data);
+      } catch (err) {
+        showError('Connection Error', 'Please check your internet connection and try again.');
+      }
+    }
+
+    function renderProposal(est) {
+      const items = est.items || [];
+      const isAccepted = est.status === 'accepted';
+      const isExpired = est.status === 'expired';
+      const isDeclined = est.status === 'declined';
+      const isViewable = !isExpired && !isDeclined;
+
+      // Check client-side expiration
+      let expired = isExpired;
+      if (!expired && est.valid_until) {
+        const now = new Date();
+        const validUntil = new Date(est.valid_until + 'T23:59:59');
+        if (now > validUntil) expired = true;
+      }
+
+      const address = [est.address, est.city, est.state].filter(Boolean).join(', ');
+      const zipStr = est.zip ? ' ' + est.zip : '';
+
+      app.innerHTML = `
+        <div class="proposal-header">
+          <img src="/logo.png" alt="Clean Air Lawn Care">
+          <h1>Your Lawn Care Proposal</h1>
+          <p>Prepared for ${esc(est.customer_name)}</p>
+        </div>
+
+        <div class="proposal-body">
+          <div class="proposal-card">
+            ${isAccepted ? `
+              <div class="proposal-status-banner banner-accepted">
+                Proposal Accepted ${est.accepted_at ? ' on ' + new Date(est.accepted_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}
+              </div>
+            ` : ''}
+            ${expired && !isAccepted ? `
+              <div class="proposal-status-banner banner-expired">
+                This proposal has expired
+              </div>
+            ` : ''}
+            ${isDeclined ? `
+              <div class="proposal-status-banner banner-declined">
+                This proposal is no longer available
+              </div>
+            ` : ''}
+
+            <div class="proposal-customer">
+              <h2>${esc(est.customer_name)}</h2>
+              <div class="address">${esc(address)}${esc(zipStr)}</div>
+              ${est.property_sqft ? `<span class="sqft">${Number(est.property_sqft).toLocaleString()} sq ft</span>` : ''}
+            </div>
+
+            <div class="proposal-price-hero">
+              <div class="price-monthly">
+                <span class="dollar">$</span>${Math.round(est.monthly_price)}
+              </div>
+              <div class="price-period">/month over ${est.payment_months} months</div>
+              <div class="price-total">Season Total: $${Math.round(est.total_price).toLocaleString()}</div>
+            </div>
+
+            <div class="proposal-services">
+              <h3>Services Included</h3>
+              ${items.map(item => `
+                <div class="service-row">
+                  <span class="service-check">\u2713</span>
+                  <div class="service-info">
+                    <div class="service-name">${esc(item.service_name)}</div>
+                    ${item.is_recurring ? `<div class="service-detail">${item.rounds} treatments per season</div>` : `<div class="service-detail">One-time service</div>`}
+                  </div>
+                  <div class="service-price">$${Math.round(item.is_recurring ? item.price * item.rounds : item.price).toLocaleString()}</div>
+                </div>
+              `).join('')}
+            </div>
+
+            ${est.customer_message ? `
+              <div class="proposal-message">
+                <div class="proposal-message-box">${esc(est.customer_message)}</div>
+              </div>
+            ` : ''}
+
+            ${est.valid_until && !isAccepted ? `
+              <div class="proposal-valid">
+                This proposal is valid until ${new Date(est.valid_until).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </div>
+            ` : ''}
+
+            ${!isAccepted && !expired && !isDeclined ? `
+              <div class="proposal-cta" id="ctaSection">
+                <button class="accept-btn" id="acceptBtn" onclick="acceptProposal()">
+                  Accept Proposal
+                </button>
+              </div>
+            ` : ''}
+
+            ${isAccepted ? `
+              <div class="accepted-animation">
+                <div class="check-circle">\u2705</div>
+                <h3>Thank You!</h3>
+                <p>Your proposal has been accepted. The Clean Air team will be in touch to schedule your services.</p>
+              </div>
+            ` : ''}
+          </div>
+
+          <div class="proposal-footer">
+            <p>Powered by <strong>Clean Air Lawn Care</strong></p>
+          </div>
+        </div>
+      `;
+    }
+
+    async function acceptProposal() {
+      const btn = document.getElementById('acceptBtn');
+      btn.disabled = true;
+      btn.textContent = 'Accepting...';
+
+      try {
+        const resp = await fetch(`/api/estimates/public/${token}/accept`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await resp.json();
+
+        if (!resp.ok) {
+          btn.disabled = false;
+          btn.textContent = 'Accept Proposal';
+          alert(data.error || 'Something went wrong. Please try again.');
+          return;
+        }
+
+        // Replace CTA with success
+        const cta = document.getElementById('ctaSection');
+        if (cta) {
+          cta.innerHTML = `
+            <div class="accepted-animation">
+              <div class="check-circle">\u2705</div>
+              <h3>Proposal Accepted!</h3>
+              <p>Thank you! The Clean Air team will be in touch to schedule your services.</p>
+            </div>
+          `;
+        }
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Accept Proposal';
+        alert('Connection error. Please check your internet and try again.');
+      }
+    }
+
+    function showError(title, message) {
+      app.innerHTML = `
+        <div class="proposal-header">
+          <img src="/logo.png" alt="Clean Air Lawn Care">
+          <h1>Clean Air Lawn Care</h1>
+        </div>
+        <div class="error-state">
+          <div class="error-icon">\uD83D\uDCC4</div>
+          <h2>${title}</h2>
+          <p>${message}</p>
+        </div>
+      `;
+    }
+
+    function esc(str) {
+      if (!str) return '';
+      const d = document.createElement('div');
+      d.textContent = str;
+      return d.innerHTML;
+    }
+  </script>
+</body>
+</html>

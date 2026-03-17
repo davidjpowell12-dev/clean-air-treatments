@@ -1,23 +1,23 @@
-const CACHE_NAME = 'clean-air-v21';
+const CACHE_NAME = 'clean-air-v22';
 const STATIC_ASSETS = [
   '/',
   '/app',
   '/index.html',
   '/app.html',
-  '/css/styles.css?v=21',
-  '/js/app.js?v=21',
-  '/js/utils/api.js?v=21',
-  '/js/utils/offline.js?v=21',
-  '/js/pages/dashboard.js?v=21',
-  '/js/pages/products.js?v=21',
-  '/js/pages/inventory.js?v=21',
-  '/js/pages/calculator.js?v=21',
-  '/js/pages/applications.js?v=21',
-  '/js/pages/properties.js?v=21',
-  '/js/pages/ipm.js?v=21',
-  '/js/pages/scheduling.js?v=21',
-  '/js/pages/estimates.js?v=21',
-  '/js/pages/settings.js?v=21',
+  '/css/styles.css?v=22',
+  '/js/app.js?v=22',
+  '/js/utils/api.js?v=22',
+  '/js/utils/offline.js?v=22',
+  '/js/pages/dashboard.js?v=22',
+  '/js/pages/products.js?v=22',
+  '/js/pages/inventory.js?v=22',
+  '/js/pages/calculator.js?v=22',
+  '/js/pages/applications.js?v=22',
+  '/js/pages/properties.js?v=22',
+  '/js/pages/ipm.js?v=22',
+  '/js/pages/scheduling.js?v=22',
+  '/js/pages/estimates.js?v=22',
+  '/js/pages/settings.js?v=22',
   '/js/lib/html5-qrcode.min.js',
   '/logo.png',
   '/manifest.json'
@@ -79,7 +79,8 @@ self.addEventListener('fetch', (event) => {
       return caches.match(request).then((cached) => {
         if (cached) return cached;
         // If offline and no cache for a navigation, return app shell
-        if (request.mode === 'navigate') {
+        // (but not for the public proposal page, which is standalone)
+        if (request.mode === 'navigate' && !url.pathname.startsWith('/proposal/')) {
           return caches.match('/app.html');
         }
       });

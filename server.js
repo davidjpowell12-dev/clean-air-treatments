@@ -118,6 +118,11 @@ try {
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Public proposal page (no auth required — customer-facing)
+app.get('/proposal/:token', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'proposal.html'));
+});
+
 // SPA fallback - serve app.html for authenticated routes
 app.get('/app', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app.html'));
