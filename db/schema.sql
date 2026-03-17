@@ -297,6 +297,57 @@ CREATE TABLE IF NOT EXISTS pricing_tiers (
 CREATE INDEX IF NOT EXISTS idx_pricing_tiers_service ON pricing_tiers(service_id);
 CREATE INDEX IF NOT EXISTS idx_pricing_tiers_sqft ON pricing_tiers(min_sqft, max_sqft);
 
+-- Estimates (proposals sent to clients)
+CREATE TABLE IF NOT EXISTS estimates (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER REFERENCES properties(id),
+  customer_name TEXT NOT NULL,
+  address TEXT,
+  city TEXT,
+  state TEXT DEFAULT 'MI',
+  zip TEXT,
+  email TEXT,
+  phone TEXT,
+  property_sqft REAL,
+  total_price REAL DEFAULT 0,
+  monthly_price REAL DEFAULT 0,
+  payment_months INTEGER DEFAULT 8,
+  status TEXT DEFAULT 'draft',
+  valid_until DATE,
+  notes TEXT,
+  customer_message TEXT,
+  sent_at DATETIME,
+  viewed_at DATETIME,
+  accepted_at DATETIME,
+  declined_at DATETIME,
+  last_reminder_at DATETIME,
+  reminder_count INTEGER DEFAULT 0,
+  max_reminders INTEGER DEFAULT 3,
+  created_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_estimates_property ON estimates(property_id);
+CREATE INDEX IF NOT EXISTS idx_estimates_status ON estimates(status);
+
+-- Estimate line items (services included in a proposal)
+CREATE TABLE IF NOT EXISTS estimate_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  estimate_id INTEGER NOT NULL REFERENCES estimates(id) ON DELETE CASCADE,
+  service_id INTEGER REFERENCES services(id),
+  service_name TEXT NOT NULL,
+  description TEXT,
+  price REAL NOT NULL,
+  is_recurring INTEGER DEFAULT 0,
+  rounds INTEGER DEFAULT 1,
+  is_included INTEGER DEFAULT 1,
+  sort_order INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_estimate_items_estimate ON estimate_items(estimate_id);
+
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
 AFTER INSERT ON products

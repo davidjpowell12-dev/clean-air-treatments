@@ -123,6 +123,9 @@ const App = {
       case 'scheduling':
         SchedulingPage.render(action, id ? Number(id) : null);
         break;
+      case 'estimates':
+        EstimatesPage.render(action, id ? Number(id) : null);
+        break;
       case 'settings':
         SettingsPage.render();
         break;
