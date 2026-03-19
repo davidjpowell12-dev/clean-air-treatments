@@ -183,6 +183,55 @@ router.post('/', requireAuth, (req, res) => {
   }
 
   logAudit(db, 'application', result.lastInsertRowid, req.session.userId, 'create', b);
+
+  // ─── Pay-Per-Service Invoice Trigger ─────────────────────
+  // If property has an accepted estimate with per_service payment plan,
+  // auto-create an invoice for this treatment
+  if (b.property_id) {
+    try {
+      const estimate = db.prepare(`
+        SELECT * FROM estimates
+        WHERE property_id = ? AND status = 'accepted' AND payment_plan = 'per_service'
+        ORDER BY accepted_at DESC LIMIT 1
+      `).get(b.property_id);
+
+      if (estimate) {
+        const stripeUtils = require('../utils/stripe');
+        const emailUtils = require('../utils/email');
+
+        // Calculate per-service amount: sum of recurring service per-round prices from estimate
+        const estItems = db.prepare(
+          'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1 AND is_recurring = 1'
+        ).all(estimate.id);
+        const perVisitAmount = estItems.reduce((sum, item) => sum + item.price, 0);
+
+        if (perVisitAmount > 0) {
+          const amountCents = Math.round(perVisitAmount * 100);
+          const desc = `Treatment on ${b.application_date || new Date().toISOString().split('T')[0]}`;
+          const invoice = stripeUtils.createPerServiceInvoice(db, estimate.id, amountCents, desc);
+
+          console.log(`[per-service] Invoice ${invoice.invoice_number} created for $${(amountCents/100).toFixed(2)}`);
+
+          // Send payment request email if email is configured and customer has email
+          if (emailUtils.isEnabled() && estimate.email) {
+            const baseUrl = `${req.protocol}://${req.get('host')}`;
+            emailUtils.sendInvoiceEmail({
+              to: estimate.email,
+              customerName: estimate.customer_name,
+              invoiceNumber: invoice.invoice_number,
+              amount: (amountCents / 100).toFixed(2),
+              dueDate: invoice.due_date,
+              paymentUrl: `${baseUrl}/proposal/${estimate.token}`
+            }).catch(err => console.error('[per-service] Email failed:', err.message));
+          }
+        }
+      }
+    } catch (err) {
+      console.error('[per-service] Invoice trigger error:', err.message);
+      // Non-fatal — don't fail the application creation
+    }
+  }
+
   res.json({ id: result.lastInsertRowid });
 });
 

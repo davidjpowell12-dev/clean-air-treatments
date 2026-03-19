@@ -126,6 +126,9 @@ const App = {
       case 'estimates':
         EstimatesPage.render(action, id ? Number(id) : null);
         break;
+      case 'invoicing':
+        InvoicingPage.render(action, id ? Number(id) : null);
+        break;
       case 'settings':
         SettingsPage.render();
         break;

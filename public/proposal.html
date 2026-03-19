@@ -42,27 +42,11 @@
       text-align: center;
       color: white;
     }
-    .proposal-header img {
-      height: 52px;
-      margin-bottom: 8px;
-      filter: brightness(0) invert(1);
-    }
-    .proposal-header h1 {
-      font-size: 22px;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-    }
-    .proposal-header p {
-      font-size: 14px;
-      opacity: 0.85;
-      margin-top: 4px;
-    }
+    .proposal-header img { height: 52px; margin-bottom: 8px; filter: brightness(0) invert(1); }
+    .proposal-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
+    .proposal-header p { font-size: 14px; opacity: 0.85; margin-top: 4px; }
 
-    .proposal-body {
-      max-width: 520px;
-      margin: -20px auto 0;
-      padding: 0 16px 32px;
-    }
+    .proposal-body { max-width: 520px; margin: -20px auto 0; padding: 0 16px 32px; }
 
     .proposal-card {
       background: var(--white);
@@ -71,240 +55,97 @@
       overflow: hidden;
     }
 
-    .proposal-customer {
-      padding: 24px 24px 16px;
-      text-align: center;
-      border-bottom: 1px solid var(--gray-100);
-    }
-    .proposal-customer h2 {
-      font-size: 20px;
-      font-weight: 700;
-      color: var(--gray-900);
-    }
-    .proposal-customer .address {
-      font-size: 14px;
-      color: var(--gray-500);
-      margin-top: 4px;
-    }
-    .proposal-customer .sqft {
-      display: inline-block;
-      background: var(--gray-100);
-      color: var(--gray-700);
-      font-size: 12px;
-      font-weight: 600;
-      padding: 4px 12px;
-      border-radius: 20px;
-      margin-top: 8px;
-    }
+    .proposal-customer { padding: 24px 24px 16px; text-align: center; border-bottom: 1px solid var(--gray-100); }
+    .proposal-customer h2 { font-size: 20px; font-weight: 700; }
+    .proposal-customer .address { font-size: 14px; color: var(--gray-500); margin-top: 4px; }
+    .proposal-customer .sqft { display: inline-block; background: var(--gray-100); color: var(--gray-700); font-size: 12px; font-weight: 600; padding: 4px 12px; border-radius: 20px; margin-top: 8px; }
 
-    .proposal-price-hero {
-      background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%);
-      padding: 32px 24px;
-      text-align: center;
-      color: white;
-    }
-    .price-monthly {
-      font-size: 56px;
-      font-weight: 800;
-      line-height: 1;
-      letter-spacing: -2px;
-    }
+    .proposal-price-hero { background: linear-gradient(135deg, var(--navy) 0%, var(--navy-light) 100%); padding: 32px 24px; text-align: center; color: white; }
+    .price-monthly { font-size: 56px; font-weight: 800; line-height: 1; letter-spacing: -2px; }
     .price-monthly .dollar { font-size: 32px; vertical-align: top; margin-right: 2px; font-weight: 600; }
-    .price-period {
-      font-size: 16px;
-      opacity: 0.8;
-      margin-top: 6px;
-    }
-    .price-total {
-      font-size: 14px;
-      opacity: 0.6;
-      margin-top: 4px;
-    }
+    .price-period { font-size: 16px; opacity: 0.8; margin-top: 6px; }
+    .price-total { font-size: 14px; opacity: 0.6; margin-top: 4px; }
 
-    .proposal-services {
-      padding: 24px;
-    }
-    .proposal-services h3 {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      color: var(--gray-400);
-      margin-bottom: 16px;
-    }
-    .service-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 12px 0;
-      border-bottom: 1px solid var(--gray-100);
-    }
+    .proposal-services { padding: 24px; }
+    .proposal-services h3 { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--gray-400); margin-bottom: 16px; }
+    .service-row { display: flex; justify-content: space-between; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--gray-100); }
     .service-row:last-child { border-bottom: none; }
-    .service-check {
-      color: var(--green);
-      font-weight: 700;
-      font-size: 16px;
-      margin-right: 12px;
-      flex-shrink: 0;
-    }
+    .service-check { color: var(--green); font-weight: 700; font-size: 16px; margin-right: 12px; flex-shrink: 0; }
     .service-info { flex: 1; }
-    .service-name {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--gray-900);
-    }
-    .service-detail {
-      font-size: 12px;
-      color: var(--gray-400);
-      margin-top: 2px;
-    }
-    .service-price {
-      font-size: 15px;
-      font-weight: 700;
-      color: var(--gray-700);
-      flex-shrink: 0;
-      margin-left: 16px;
-    }
+    .service-name { font-size: 15px; font-weight: 600; }
+    .service-detail { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
+    .service-price { font-size: 15px; font-weight: 700; color: var(--gray-700); flex-shrink: 0; margin-left: 16px; }
 
-    .proposal-message {
-      padding: 0 24px 24px;
-    }
-    .proposal-message-box {
-      background: var(--gray-50);
-      border-left: 3px solid var(--green);
-      padding: 16px;
-      border-radius: 0 8px 8px 0;
-      font-size: 14px;
-      color: var(--gray-700);
-      line-height: 1.5;
-    }
+    .proposal-message { padding: 0 24px 24px; }
+    .proposal-message-box { background: var(--gray-50); border-left: 3px solid var(--green); padding: 16px; border-radius: 0 8px 8px 0; font-size: 14px; color: var(--gray-700); line-height: 1.5; }
 
-    .proposal-valid {
-      text-align: center;
-      padding: 12px 24px;
-      font-size: 12px;
-      color: var(--gray-400);
-      border-top: 1px solid var(--gray-100);
-    }
+    .proposal-valid { text-align: center; padding: 12px 24px; font-size: 12px; color: var(--gray-400); border-top: 1px solid var(--gray-100); }
 
-    .proposal-cta {
-      padding: 24px;
-      text-align: center;
-    }
+    .proposal-cta { padding: 24px; text-align: center; }
     .accept-btn {
-      display: block;
-      width: 100%;
-      padding: 18px 24px;
+      display: block; width: 100%; padding: 18px 24px;
       background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
-      color: white;
-      border: none;
-      border-radius: var(--radius);
-      font-size: 18px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.2s;
-      letter-spacing: 0.3px;
+      color: white; border: none; border-radius: var(--radius);
+      font-size: 18px; font-weight: 700; cursor: pointer;
+      transition: all 0.2s; letter-spacing: 0.3px;
     }
     .accept-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(74,124,46,0.4); }
     .accept-btn:active { transform: translateY(0); }
-    .accept-btn:disabled {
-      background: var(--gray-300);
-      cursor: not-allowed;
-      transform: none;
-      box-shadow: none;
-    }
+    .accept-btn:disabled { background: var(--gray-300); cursor: not-allowed; transform: none; box-shadow: none; }
 
-    /* States */
-    .proposal-status-banner {
-      padding: 16px 24px;
-      text-align: center;
-      font-weight: 600;
-      font-size: 15px;
+    /* Payment Plan Picker */
+    .plan-picker { padding: 24px; }
+    .plan-picker h3 { font-size: 16px; font-weight: 700; color: var(--gray-900); margin-bottom: 4px; text-align: center; }
+    .plan-picker p { font-size: 13px; color: var(--gray-400); margin-bottom: 16px; text-align: center; }
+    .plan-option {
+      display: flex; align-items: center; padding: 16px;
+      border: 2px solid var(--gray-200); border-radius: var(--radius);
+      margin-bottom: 10px; cursor: pointer; transition: all 0.15s;
     }
-    .banner-accepted {
-      background: #ecfdf5;
-      color: #065f46;
+    .plan-option:hover { border-color: var(--green-light); background: #f0fdf4; }
+    .plan-option.selected { border-color: var(--green); background: #f0fdf4; }
+    .plan-radio {
+      width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid var(--gray-300); margin-right: 14px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: center; transition: all 0.15s;
     }
-    .banner-expired {
-      background: #fef2f2;
-      color: #991b1b;
-    }
-    .banner-declined {
-      background: var(--gray-100);
-      color: var(--gray-500);
-    }
+    .plan-option.selected .plan-radio { border-color: var(--green); background: var(--green); }
+    .plan-option.selected .plan-radio::after { content: ''; width: 8px; height: 8px; background: white; border-radius: 50%; }
+    .plan-info { flex: 1; }
+    .plan-title { font-size: 15px; font-weight: 600; color: var(--gray-900); }
+    .plan-desc { font-size: 13px; color: var(--gray-500); margin-top: 2px; }
+    .plan-amount { font-size: 16px; font-weight: 700; color: var(--green-dark); flex-shrink: 0; margin-left: 12px; }
 
-    .accepted-animation {
-      padding: 32px 24px;
-      text-align: center;
+    .plan-confirm-btn {
+      display: block; width: 100%; padding: 16px 24px; margin-top: 16px;
+      background: linear-gradient(135deg, var(--green) 0%, var(--green-light) 100%);
+      color: white; border: none; border-radius: var(--radius);
+      font-size: 16px; font-weight: 700; cursor: pointer; transition: all 0.2s;
     }
-    .accepted-animation .check-circle {
-      width: 72px;
-      height: 72px;
-      border-radius: 50%;
-      background: #ecfdf5;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      margin: 0 auto 16px;
-      font-size: 36px;
-    }
-    .accepted-animation h3 {
-      font-size: 20px;
-      color: #065f46;
-      margin-bottom: 8px;
-    }
-    .accepted-animation p {
-      font-size: 14px;
-      color: var(--gray-500);
-    }
+    .plan-confirm-btn:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(74,124,46,0.4); }
+    .plan-confirm-btn:disabled { background: var(--gray-300); cursor: not-allowed; transform: none; box-shadow: none; }
 
-    .proposal-footer {
-      text-align: center;
-      padding: 24px 16px;
-      font-size: 12px;
-      color: var(--gray-400);
-    }
-    .proposal-footer a {
-      color: var(--green);
-      text-decoration: none;
-    }
+    /* Status banners */
+    .proposal-status-banner { padding: 16px 24px; text-align: center; font-weight: 600; font-size: 15px; }
+    .banner-accepted { background: #ecfdf5; color: #065f46; }
+    .banner-expired { background: #fef2f2; color: #991b1b; }
+    .banner-declined { background: var(--gray-100); color: var(--gray-500); }
 
-    /* Loading & Error */
-    .loading-state {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      min-height: 60vh;
-      padding: 32px;
-    }
-    .spinner {
-      width: 40px;
-      height: 40px;
-      border: 3px solid var(--gray-200);
-      border-top-color: var(--green);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
+    .accepted-animation { padding: 32px 24px; text-align: center; }
+    .accepted-animation .check-circle { width: 72px; height: 72px; border-radius: 50%; background: #ecfdf5; display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; font-size: 36px; }
+    .accepted-animation h3 { font-size: 20px; color: #065f46; margin-bottom: 8px; }
+    .accepted-animation p { font-size: 14px; color: var(--gray-500); }
+
+    .proposal-footer { text-align: center; padding: 24px 16px; font-size: 12px; color: var(--gray-400); }
+
+    .loading-state { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; padding: 32px; }
+    .spinner { width: 40px; height: 40px; border: 3px solid var(--gray-200); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-state p {
-      margin-top: 16px;
-      color: var(--gray-400);
-      font-size: 14px;
-    }
+    .loading-state p { margin-top: 16px; color: var(--gray-400); font-size: 14px; }
 
-    .error-state {
-      text-align: center;
-      padding: 80px 32px;
-      min-height: 60vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-    }
+    .error-state { text-align: center; padding: 80px 32px; min-height: 60vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
     .error-state .error-icon { font-size: 48px; margin-bottom: 16px; }
-    .error-state h2 { font-size: 20px; color: var(--gray-900); margin-bottom: 8px; }
+    .error-state h2 { font-size: 20px; margin-bottom: 8px; }
     .error-state p { font-size: 14px; color: var(--gray-500); max-width: 300px; }
 
     @media (min-width: 600px) {
@@ -325,13 +166,14 @@
 
   <script>
     const app = document.getElementById('app');
+    let proposalData = null;
+    let selectedPlan = 'monthly';
 
-    // Extract token from URL path
     const pathParts = window.location.pathname.split('/');
     const token = pathParts[pathParts.length - 1];
 
     if (!token || token === 'proposal') {
-      showError('Invalid Link', 'This proposal link appears to be invalid. Please check the link and try again.');
+      showError('Invalid Link', 'This proposal link appears to be invalid.');
     } else {
       loadProposal();
     }
@@ -340,16 +182,12 @@
       try {
         const resp = await fetch(`/api/estimates/public/${token}`);
         if (!resp.ok) {
-          if (resp.status === 404) {
-            showError('Proposal Not Found', 'This proposal may have been removed or the link is incorrect. Please contact Clean Air for assistance.');
-          } else {
-            showError('Something Went Wrong', 'We couldn\'t load this proposal. Please try again or contact Clean Air.');
-          }
+          if (resp.status === 404) showError('Proposal Not Found', 'This proposal may have been removed or the link is incorrect.');
+          else showError('Something Went Wrong', 'We couldn\'t load this proposal. Please try again.');
           return;
         }
-
-        const data = await resp.json();
-        renderProposal(data);
+        proposalData = await resp.json();
+        renderProposal(proposalData);
       } catch (err) {
         showError('Connection Error', 'Please check your internet connection and try again.');
       }
@@ -360,9 +198,7 @@
       const isAccepted = est.status === 'accepted';
       const isExpired = est.status === 'expired';
       const isDeclined = est.status === 'declined';
-      const isViewable = !isExpired && !isDeclined;
 
-      // Check client-side expiration
       let expired = isExpired;
       if (!expired && est.valid_until) {
         const now = new Date();
@@ -372,6 +208,7 @@
 
       const address = [est.address, est.city, est.state].filter(Boolean).join(', ');
       const zipStr = est.zip ? ' ' + est.zip : '';
+      const canAccept = !isAccepted && !expired && !isDeclined;
 
       app.innerHTML = `
         <div class="proposal-header">
@@ -382,21 +219,9 @@
 
         <div class="proposal-body">
           <div class="proposal-card">
-            ${isAccepted ? `
-              <div class="proposal-status-banner banner-accepted">
-                Proposal Accepted ${est.accepted_at ? ' on ' + new Date(est.accepted_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}
-              </div>
-            ` : ''}
-            ${expired && !isAccepted ? `
-              <div class="proposal-status-banner banner-expired">
-                This proposal has expired
-              </div>
-            ` : ''}
-            ${isDeclined ? `
-              <div class="proposal-status-banner banner-declined">
-                This proposal is no longer available
-              </div>
-            ` : ''}
+            ${isAccepted ? `<div class="proposal-status-banner banner-accepted">Proposal Accepted${est.accepted_at ? ' on ' + new Date(est.accepted_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : ''}</div>` : ''}
+            ${expired && !isAccepted ? `<div class="proposal-status-banner banner-expired">This proposal has expired</div>` : ''}
+            ${isDeclined ? `<div class="proposal-status-banner banner-declined">This proposal is no longer available</div>` : ''}
 
             <div class="proposal-customer">
               <h2>${esc(est.customer_name)}</h2>
@@ -405,9 +230,7 @@
             </div>
 
             <div class="proposal-price-hero">
-              <div class="price-monthly">
-                <span class="dollar">$</span>${Math.round(est.monthly_price)}
-              </div>
+              <div class="price-monthly"><span class="dollar">$</span>${Math.round(est.monthly_price)}</div>
               <div class="price-period">/month over ${est.payment_months} months</div>
               <div class="price-total">Season Total: $${Math.round(est.total_price).toLocaleString()}</div>
             </div>
@@ -426,11 +249,7 @@
               `).join('')}
             </div>
 
-            ${est.customer_message ? `
-              <div class="proposal-message">
-                <div class="proposal-message-box">${esc(est.customer_message)}</div>
-              </div>
-            ` : ''}
+            ${est.customer_message ? `<div class="proposal-message"><div class="proposal-message-box">${esc(est.customer_message)}</div></div>` : ''}
 
             ${est.valid_until && !isAccepted ? `
               <div class="proposal-valid">
@@ -438,9 +257,9 @@
               </div>
             ` : ''}
 
-            ${!isAccepted && !expired && !isDeclined ? `
+            ${canAccept ? `
               <div class="proposal-cta" id="ctaSection">
-                <button class="accept-btn" id="acceptBtn" onclick="acceptProposal()">
+                <button class="accept-btn" id="acceptBtn" onclick="showPaymentPicker()">
                   Accept Proposal
                 </button>
               </div>
@@ -462,41 +281,133 @@
       `;
     }
 
-    async function acceptProposal() {
-      const btn = document.getElementById('acceptBtn');
+    function showPaymentPicker() {
+      const est = proposalData;
+      const cta = document.getElementById('ctaSection');
+      selectedPlan = 'monthly';
+
+      cta.innerHTML = `
+        <div class="plan-picker">
+          <h3>How would you like to pay?</h3>
+          <p>Select a payment option below</p>
+
+          <div class="plan-option selected" id="plan-monthly" onclick="selectPlan('monthly')">
+            <div class="plan-radio"></div>
+            <div class="plan-info">
+              <div class="plan-title">Monthly Payments</div>
+              <div class="plan-desc">${est.payment_months} equal monthly payments</div>
+            </div>
+            <div class="plan-amount">$${Math.round(est.monthly_price)}/mo</div>
+          </div>
+
+          <div class="plan-option" id="plan-full" onclick="selectPlan('full')">
+            <div class="plan-radio"></div>
+            <div class="plan-info">
+              <div class="plan-title">Pay in Full</div>
+              <div class="plan-desc">One-time payment today</div>
+            </div>
+            <div class="plan-amount">$${Math.round(est.total_price).toLocaleString()}</div>
+          </div>
+
+          <div class="plan-option" id="plan-per_service" onclick="selectPlan('per_service')">
+            <div class="plan-radio"></div>
+            <div class="plan-info">
+              <div class="plan-title">Pay Per Service</div>
+              <div class="plan-desc">Invoiced after each treatment</div>
+            </div>
+            <div class="plan-amount">Per visit</div>
+          </div>
+
+          <button class="plan-confirm-btn" id="confirmPlanBtn" onclick="confirmAcceptance()">
+            Continue
+          </button>
+        </div>
+      `;
+    }
+
+    function selectPlan(plan) {
+      selectedPlan = plan;
+      document.querySelectorAll('.plan-option').forEach(el => el.classList.remove('selected'));
+      document.getElementById('plan-' + plan).classList.add('selected');
+
+      // Update button text
+      const btn = document.getElementById('confirmPlanBtn');
+      if (plan === 'per_service') {
+        btn.textContent = 'Accept & Set Up Billing';
+      } else {
+        btn.textContent = 'Continue to Payment';
+      }
+    }
+
+    async function confirmAcceptance() {
+      const btn = document.getElementById('confirmPlanBtn');
       btn.disabled = true;
-      btn.textContent = 'Accepting...';
+      btn.textContent = 'Processing...';
 
       try {
-        const resp = await fetch(`/api/estimates/public/${token}/accept`, {
+        // Step 1: Accept the proposal with the selected payment plan
+        const acceptResp = await fetch(`/api/estimates/public/${token}/accept`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payment_plan: selectedPlan })
         });
 
-        const data = await resp.json();
+        const acceptData = await acceptResp.json();
 
-        if (!resp.ok) {
+        if (!acceptResp.ok) {
           btn.disabled = false;
-          btn.textContent = 'Accept Proposal';
-          alert(data.error || 'Something went wrong. Please try again.');
+          btn.textContent = 'Continue';
+          alert(acceptData.error || 'Something went wrong.');
           return;
         }
 
-        // Replace CTA with success
-        const cta = document.getElementById('ctaSection');
-        if (cta) {
-          cta.innerHTML = `
-            <div class="accepted-animation">
-              <div class="check-circle">\u2705</div>
-              <h3>Proposal Accepted!</h3>
-              <p>Thank you! The Clean Air team will be in touch to schedule your services.</p>
-            </div>
-          `;
+        // Step 2: For pay-in-full and monthly, redirect to Stripe Checkout
+        if (selectedPlan !== 'per_service' && acceptData.first_invoice) {
+          const checkoutResp = await fetch(`/api/payments/create-checkout/${token}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ invoice_id: acceptData.first_invoice.id })
+          });
+
+          const checkoutData = await checkoutResp.json();
+
+          if (checkoutResp.ok && checkoutData.url) {
+            // Redirect to Stripe Checkout
+            window.location.href = checkoutData.url;
+            return;
+          }
+
+          // If Stripe isn't configured, show success without payment
+          if (checkoutResp.status === 503) {
+            showAcceptedConfirmation();
+            return;
+          }
         }
+
+        // Per-service plan or no Stripe — show confirmation
+        showAcceptedConfirmation();
+
       } catch (err) {
         btn.disabled = false;
-        btn.textContent = 'Accept Proposal';
-        alert('Connection error. Please check your internet and try again.');
+        btn.textContent = 'Continue';
+        alert('Connection error. Please try again.');
+      }
+    }
+
+    function showAcceptedConfirmation() {
+      const cta = document.getElementById('ctaSection');
+      if (cta) {
+        const msg = selectedPlan === 'per_service'
+          ? "You'll be invoiced after each treatment is completed."
+          : "The Clean Air team will be in touch to schedule your services.";
+
+        cta.innerHTML = `
+          <div class="accepted-animation">
+            <div class="check-circle">\u2705</div>
+            <h3>Proposal Accepted!</h3>
+            <p>Thank you! ${msg}</p>
+          </div>
+        `;
       }
     }
 

@@ -21,6 +21,7 @@
     "express": "^4.21.0",
     "express-session": "^1.18.0",
     "multer": "^2.0.2",
+    "stripe": "^20.4.1",
     "uuid": "^9.0.0"
   }
 }

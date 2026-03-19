@@ -253,6 +253,49 @@ const migrations = [
       const token = crypto.randomBytes(32).toString('hex');
       db.prepare('UPDATE estimates SET token = ? WHERE id = ?').run(token, row.id);
     }
+  },
+  // Migration 14: Invoicing & payments system (Stripe integration)
+  function createInvoicingTables(db) {
+    // Invoice counter for sequential numbering per year
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS invoice_counter (
+        year INTEGER PRIMARY KEY,
+        last_number INTEGER NOT NULL DEFAULT 0
+      )
+    `);
+
+    // Invoices table
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS invoices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_number TEXT NOT NULL UNIQUE,
+        estimate_id INTEGER NOT NULL REFERENCES estimates(id),
+        amount_cents INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        payment_plan TEXT NOT NULL,
+        installment_number INTEGER,
+        total_installments INTEGER,
+        due_date DATE,
+        paid_at DATETIME,
+        stripe_checkout_session_id TEXT,
+        stripe_payment_intent_id TEXT,
+        payment_method TEXT,
+        check_number TEXT,
+        check_date DATE,
+        notes TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_estimate ON invoices(estimate_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_invoices_stripe_session ON invoices(stripe_checkout_session_id)');
+
+    // Add payment columns to estimates
+    try { db.exec('ALTER TABLE estimates ADD COLUMN payment_plan TEXT'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE estimates ADD COLUMN stripe_customer_id TEXT'); } catch (e) { /* exists */ }
   }
 ];
 

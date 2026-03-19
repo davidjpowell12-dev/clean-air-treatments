@@ -84,14 +84,22 @@ router.get('/public/:token', (req, res) => {
   });
 });
 
-// Public: Accept proposal by token
-router.post('/public/:token/accept', (req, res) => {
+// Public: Accept proposal by token (with payment plan selection)
+router.post('/public/:token/accept', async (req, res) => {
   const db = getDb();
   const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
   if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
 
   if (est.status === 'accepted') {
-    return res.json({ success: true, message: 'Proposal already accepted', accepted_at: est.accepted_at });
+    // Already accepted — return existing invoices so they can still pay
+    const invoices = db.prepare(
+      "SELECT id, invoice_number, amount_cents, status, due_date FROM invoices WHERE estimate_id = ? AND status = 'pending' ORDER BY due_date LIMIT 1"
+    ).all(est.id);
+    return res.json({
+      success: true, message: 'Proposal already accepted',
+      accepted_at: est.accepted_at, payment_plan: est.payment_plan,
+      first_invoice: invoices[0] || null
+    });
   }
   if (est.status === 'declined') {
     return res.status(400).json({ error: 'This proposal is no longer available' });
@@ -108,16 +116,58 @@ router.post('/public/:token/accept', (req, res) => {
     }
   }
 
-  const acceptedAt = new Date().toISOString();
-  db.prepare(
-    'UPDATE estimates SET status = ?, accepted_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
-  ).run('accepted', acceptedAt, est.id);
+  const paymentPlan = req.body.payment_plan || 'monthly';
+  const validPlans = ['full', 'monthly', 'per_service'];
+  if (!validPlans.includes(paymentPlan)) {
+    return res.status(400).json({ error: 'Invalid payment plan' });
+  }
 
-  logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
-    customer_name: est.customer_name
-  });
+  try {
+    const acceptedAt = new Date().toISOString();
 
-  res.json({ success: true, message: 'Proposal accepted!', accepted_at: acceptedAt });
+    // Create Stripe customer if Stripe is configured
+    const stripeUtils = require('../utils/stripe');
+    let stripeCustomerId = null;
+    if (stripeUtils.isEnabled() && est.email) {
+      try {
+        stripeCustomerId = await stripeUtils.createStripeCustomer(
+          est.email, est.customer_name,
+          { estimate_id: String(est.id) }
+        );
+      } catch (err) {
+        console.error('[accept] Stripe customer creation failed:', err.message);
+        // Non-fatal — continue without Stripe customer
+      }
+    }
+
+    // Update estimate status
+    db.prepare(`
+      UPDATE estimates SET
+        status = 'accepted', accepted_at = ?, payment_plan = ?,
+        stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(acceptedAt, paymentPlan, stripeCustomerId, est.id);
+
+    // Generate invoices based on payment plan
+    const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, paymentPlan);
+
+    logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
+      customer_name: est.customer_name, payment_plan: paymentPlan,
+      invoices_created: invoices.length
+    });
+
+    res.json({
+      success: true,
+      message: 'Proposal accepted!',
+      accepted_at: acceptedAt,
+      payment_plan: paymentPlan,
+      first_invoice: invoices[0] || null,
+      total_invoices: invoices.length
+    });
+  } catch (err) {
+    console.error('[accept] Error:', err.message);
+    res.status(500).json({ error: 'Failed to process acceptance. Please try again.' });
+  }
 });
 
 // Get single estimate with items

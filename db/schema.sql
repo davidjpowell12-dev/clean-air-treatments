@@ -324,6 +324,8 @@ CREATE TABLE IF NOT EXISTS estimates (
   last_reminder_at DATETIME,
   reminder_count INTEGER DEFAULT 0,
   max_reminders INTEGER DEFAULT 3,
+  payment_plan TEXT,
+  stripe_customer_id TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -350,6 +352,39 @@ CREATE TABLE IF NOT EXISTS estimate_items (
 );
 
 CREATE INDEX IF NOT EXISTS idx_estimate_items_estimate ON estimate_items(estimate_id);
+
+-- Invoice counter for sequential numbering (CA-2026-0001, CA-2026-0002, etc.)
+CREATE TABLE IF NOT EXISTS invoice_counter (
+  year INTEGER PRIMARY KEY,
+  last_number INTEGER NOT NULL DEFAULT 0
+);
+
+-- Invoices (tied to estimates, tracked with unique invoice numbers)
+CREATE TABLE IF NOT EXISTS invoices (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  invoice_number TEXT NOT NULL UNIQUE,
+  estimate_id INTEGER NOT NULL REFERENCES estimates(id),
+  amount_cents INTEGER NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  payment_plan TEXT NOT NULL,
+  installment_number INTEGER,
+  total_installments INTEGER,
+  due_date DATE,
+  paid_at DATETIME,
+  stripe_checkout_session_id TEXT,
+  stripe_payment_intent_id TEXT,
+  payment_method TEXT,
+  check_number TEXT,
+  check_date DATE,
+  notes TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_estimate ON invoices(estimate_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
+CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date);
+CREATE INDEX IF NOT EXISTS idx_invoices_stripe_session ON invoices(stripe_checkout_session_id);
 
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert

@@ -51,6 +51,15 @@ try {
   console.error(err.stack);
 }
 
+// Stripe webhook — needs raw body BEFORE express.json() parses it
+try {
+  const paymentsRouter = require('./routes/payments');
+  app.post('/api/payments/webhook', express.raw({ type: 'application/json' }), paymentsRouter.webhookHandler);
+  console.log('[startup] Stripe webhook route registered');
+} catch (err) {
+  console.error('[startup] WARNING: Could not register webhook route:', err.message);
+}
+
 // Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -109,6 +118,7 @@ try {
   app.use('/api/soil-tests', require('./routes/soil-tests'));
   app.use('/api/services', require('./routes/services'));
   app.use('/api/estimates', require('./routes/estimates'));
+  app.use('/api/payments', require('./routes/payments'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);
@@ -121,6 +131,14 @@ app.use(express.static(path.join(__dirname, 'public')));
 // Public proposal page (no auth required — customer-facing)
 app.get('/proposal/:token', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'proposal.html'));
+});
+
+// Payment result pages (no auth — customer sees after Stripe Checkout)
+app.get('/payment/success', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'payment-success.html'));
+});
+app.get('/payment/cancel', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'payment-cancel.html'));
 });
 
 // SPA fallback - serve app.html for authenticated routes
