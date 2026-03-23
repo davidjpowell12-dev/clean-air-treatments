@@ -50,7 +50,7 @@ async function createCheckoutSession({
   const sessionParams = {
     mode: 'payment',
     customer: stripeCustomerId || undefined,
-    customer_email: stripeCustomerId ? undefined : customerEmail,
+    customer_email: stripeCustomerId ? undefined : (customerEmail || undefined),
     payment_method_types: ['card', 'us_bank_account'],
     line_items: [{
       price_data: {

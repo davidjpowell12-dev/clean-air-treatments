@@ -42,7 +42,7 @@
       text-align: center;
       color: white;
     }
-    .proposal-header img { height: 52px; margin-bottom: 8px; filter: brightness(0) invert(1); }
+    .proposal-header img { height: 52px; margin-bottom: 8px; }
     .proposal-header h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; }
     .proposal-header p { font-size: 14px; opacity: 0.85; margin-top: 4px; }
 
@@ -382,9 +382,12 @@
             showAcceptedConfirmation();
             return;
           }
+
+          // If checkout creation failed for another reason, log it and show confirmation
+          console.error('Checkout creation failed:', checkoutData.error);
         }
 
-        // Per-service plan or no Stripe — show confirmation
+        // Per-service plan or no Stripe or checkout failed — show confirmation
         showAcceptedConfirmation();
 
       } catch (err) {

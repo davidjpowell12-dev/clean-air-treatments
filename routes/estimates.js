@@ -494,6 +494,9 @@ router.delete('/:id', requireAuth, (req, res) => {
   const existing = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Estimate not found' });
 
+  // Delete related invoices and estimate items first (FK constraints)
+  db.prepare('DELETE FROM invoices WHERE estimate_id = ?').run(req.params.id);
+  db.prepare('DELETE FROM estimate_items WHERE estimate_id = ?').run(req.params.id);
   db.prepare('DELETE FROM estimates WHERE id = ?').run(req.params.id);
   logAudit(db, 'estimate', req.params.id, req.session.userId, 'delete', existing);
   res.json({ success: true });
