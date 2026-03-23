@@ -1,12 +1,23 @@
 // Stripe payment utilities — invoice numbering, Checkout sessions, customer management
 
-const stripeKey = process.env.STRIPE_SECRET_KEY;
-const stripe = stripeKey ? require('stripe')(stripeKey) : null;
-console.log(`[startup] Stripe configured: ${!!stripeKey} (key starts with: ${stripeKey ? stripeKey.substring(0, 8) + '...' : 'NOT SET'})`);
+// Lazy-load Stripe — some hosting platforms inject env vars after module load
+let _stripe = null;
+function getStripe() {
+  if (_stripe) return _stripe;
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (key) {
+    _stripe = require('stripe')(key);
+  }
+  return _stripe;
+}
 
 function isEnabled() {
-  return !!stripeKey;
+  return !!process.env.STRIPE_SECRET_KEY;
 }
+
+// Log all env var names at startup to debug Railway variable injection
+console.log(`[startup] Stripe configured: ${isEnabled()} (key starts with: ${process.env.STRIPE_SECRET_KEY ? process.env.STRIPE_SECRET_KEY.substring(0, 8) + '...' : 'NOT SET'})`);
+console.log(`[startup] All env vars with STRIPE: ${Object.keys(process.env).filter(k => k.includes('STRIPE')).join(', ') || 'NONE FOUND'}`);
 
 // ─── Invoice Number Generator ─────────────────────────────────
 // Produces globally unique sequential IDs: CA-2026-0001, CA-2026-0002, etc.
@@ -25,6 +36,7 @@ function generateInvoiceNumber(db) {
 
 // ─── Stripe Customer ──────────────────────────────────────────
 async function createStripeCustomer(email, name, metadata = {}) {
+  const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
   const customer = await stripe.customers.create({
     email,
@@ -46,6 +58,7 @@ async function createCheckoutSession({
   cancelUrl,
   savePaymentMethod = false
 }) {
+  const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
 
   const sessionParams = {
@@ -80,7 +93,7 @@ async function createCheckoutSession({
     };
   }
 
-  const session = await stripe.checkout.sessions.create(sessionParams);
+  const session = await getStripe().checkout.sessions.create(sessionParams);
   return session;
 }
 
@@ -162,6 +175,7 @@ function createPerServiceInvoice(db, estimateId, amountCents, description) {
 
 // ─── Verify Webhook Signature ─────────────────────────────────
 function constructWebhookEvent(rawBody, signature) {
+  const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
   const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
   if (!webhookSecret) throw new Error('STRIPE_WEBHOOK_SECRET not set');
@@ -171,16 +185,17 @@ function constructWebhookEvent(rawBody, signature) {
 // ─── Charge Saved Payment Method ──────────────────────────────
 // For auto-charging per-service customers with card on file
 async function chargeCustomer(stripeCustomerId, amountCents, invoiceNumber, description) {
+  const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
 
   // Get the customer's default payment method
-  const customer = await stripe.customers.retrieve(stripeCustomerId);
+  const customer = await getStripe().customers.retrieve(stripeCustomerId);
   const paymentMethod = customer.invoice_settings?.default_payment_method ||
     customer.default_source;
 
   if (!paymentMethod) return null; // No saved payment method
 
-  const paymentIntent = await stripe.paymentIntents.create({
+  const paymentIntent = await getStripe().paymentIntents.create({
     amount: amountCents,
     currency: 'usd',
     customer: stripeCustomerId,
