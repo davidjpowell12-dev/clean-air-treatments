@@ -11,6 +11,8 @@ console.log(`[startup] PORT=${PORT}, NODE_ENV=${process.env.NODE_ENV}`);
 console.log(`[startup] DB_PATH=${process.env.DB_PATH || 'not set'}`);
 console.log(`[startup] DB_DIR=${process.env.DB_DIR || 'not set'}`);
 console.log(`[startup] UPLOADS_DIR=${process.env.UPLOADS_DIR || 'not set'}`);
+console.log(`[startup] Total env vars: ${Object.keys(process.env).length}`);
+console.log(`[startup] Env var names: ${Object.keys(process.env).sort().join(', ')}`);
 
 // Trust Railway's reverse proxy (needed for secure cookies over HTTPS)
 if (process.env.NODE_ENV === 'production') {
