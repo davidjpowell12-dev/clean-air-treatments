@@ -2,6 +2,7 @@
 
 const stripeKey = process.env.STRIPE_SECRET_KEY;
 const stripe = stripeKey ? require('stripe')(stripeKey) : null;
+console.log(`[startup] Stripe configured: ${!!stripeKey} (key starts with: ${stripeKey ? stripeKey.substring(0, 8) + '...' : 'NOT SET'})`);
 
 function isEnabled() {
   return !!stripeKey;
