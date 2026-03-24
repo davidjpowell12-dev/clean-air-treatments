@@ -220,6 +220,7 @@ async function chargeCustomer(stripeCustomerId, amountCents, invoiceNumber, desc
 
 module.exports = {
   isEnabled,
+  getStripeKey,
   generateInvoiceNumber,
   createStripeCustomer,
   createCheckoutSession,

@@ -173,6 +173,123 @@ router.post('/invoices/:id/send-payment-request', requireAuth, async (req, res) 
   }
 });
 
+// Auto-charge due invoices (called by scheduled job or manually)
+router.post('/process-due-invoices', requireAuth, async (req, res) => {
+  if (!stripeUtils.isEnabled()) {
+    return res.status(503).json({ error: 'Stripe not configured' });
+  }
+
+  const db = getDb();
+  const today = new Date().toISOString().split('T')[0];
+
+  // Find pending invoices that are due today or overdue, with a Stripe customer on file
+  const dueInvoices = db.prepare(`
+    SELECT i.*, e.stripe_customer_id, e.customer_name, e.email, e.token as estimate_token
+    FROM invoices i
+    JOIN estimates e ON i.estimate_id = e.id
+    WHERE i.status = 'pending'
+      AND i.due_date <= ?
+      AND e.stripe_customer_id IS NOT NULL
+    ORDER BY i.due_date ASC
+  `).all(today);
+
+  const results = { charged: 0, failed: 0, no_method: 0, errors: [] };
+
+  for (const inv of dueInvoices) {
+    try {
+      const result = await stripeUtils.chargeCustomer(
+        inv.stripe_customer_id,
+        inv.amount_cents,
+        inv.invoice_number,
+        `Clean Air Lawn Care — ${inv.customer_name}`
+      );
+
+      if (!result) {
+        // No saved payment method — send payment request email instead
+        results.no_method++;
+
+        if (email.isEnabled() && inv.email) {
+          const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+            ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+            : 'https://clean-air-treatments-production.up.railway.app';
+
+          try {
+            const session = await stripeUtils.createCheckoutSession({
+              invoiceId: inv.id,
+              invoiceNumber: inv.invoice_number,
+              amountCents: inv.amount_cents,
+              customerName: inv.customer_name,
+              customerEmail: inv.email,
+              stripeCustomerId: inv.stripe_customer_id,
+              successUrl: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
+              cancelUrl: `${baseUrl}/proposal/${inv.estimate_token}`,
+              savePaymentMethod: true
+            });
+
+            db.prepare('UPDATE invoices SET stripe_checkout_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+              .run(session.id, inv.id);
+
+            await email.sendInvoiceEmail({
+              to: inv.email,
+              customerName: inv.customer_name,
+              invoiceNumber: inv.invoice_number,
+              amount: (inv.amount_cents / 100).toFixed(2),
+              dueDate: inv.due_date,
+              paymentUrl: session.url
+            });
+          } catch (emailErr) {
+            console.error(`[auto-charge] Email fallback failed for ${inv.invoice_number}:`, emailErr.message);
+          }
+        }
+        continue;
+      }
+
+      // Payment succeeded
+      db.prepare(`
+        UPDATE invoices SET
+          status = 'paid', paid_at = ?, payment_method = 'card',
+          stripe_payment_intent_id = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(new Date().toISOString(), result.id, inv.id);
+
+      logAudit(db, 'invoice', inv.id, null, 'auto_charged', {
+        invoice_number: inv.invoice_number, amount_cents: inv.amount_cents,
+        payment_intent: result.id
+      });
+
+      // Send receipt
+      if (email.isEnabled() && inv.email) {
+        email.sendPaymentConfirmationEmail({
+          to: inv.email,
+          customerName: inv.customer_name,
+          invoiceNumber: inv.invoice_number,
+          amount: (inv.amount_cents / 100).toFixed(2),
+          paymentMethod: 'card'
+        }).catch(err => console.error('[auto-charge] Receipt email failed:', err.message));
+      }
+
+      results.charged++;
+      console.log(`[auto-charge] ${inv.invoice_number} charged $${(inv.amount_cents / 100).toFixed(2)}`);
+
+    } catch (err) {
+      results.failed++;
+      results.errors.push({ invoice: inv.invoice_number, error: err.message });
+
+      // Mark as failed
+      db.prepare('UPDATE invoices SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run('failed', inv.id);
+
+      console.error(`[auto-charge] ${inv.invoice_number} failed:`, err.message);
+    }
+  }
+
+  res.json({
+    success: true,
+    total_due: dueInvoices.length,
+    ...results
+  });
+});
+
 // Dashboard summary stats
 router.get('/dashboard', requireAuth, (req, res) => {
   const db = getDb();
@@ -237,7 +354,7 @@ router.post('/create-checkout/:token', async (req, res) => {
       stripeCustomerId: est.stripe_customer_id || undefined,
       successUrl: `${baseUrl}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${baseUrl}/proposal/${est.token}`,
-      savePaymentMethod: est.payment_plan === 'per_service'
+      savePaymentMethod: est.payment_plan === 'monthly' || est.payment_plan === 'per_service'
     });
 
     // Store session ID on invoice
@@ -295,12 +412,25 @@ async function webhookHandler(req, res) {
           invoice.id
         );
 
-        // If customer saved payment method, update the Stripe Customer's default
+        // Save Stripe customer ID on the estimate for future auto-charges
         if (session.customer) {
-          const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(invoice.estimate_id);
-          if (est && !est.stripe_customer_id) {
-            db.prepare('UPDATE estimates SET stripe_customer_id = ? WHERE id = ?')
-              .run(session.customer, est.id);
+          db.prepare('UPDATE estimates SET stripe_customer_id = COALESCE(stripe_customer_id, ?) WHERE id = ?')
+            .run(session.customer, invoice.estimate_id);
+        }
+
+        // Save payment method as default on the Stripe customer for auto-charges
+        if (session.customer && session.payment_intent) {
+          try {
+            const stripe = require('stripe')(stripeUtils.getStripeKey());
+            const pi = await stripe.paymentIntents.retrieve(session.payment_intent);
+            if (pi.payment_method) {
+              await stripe.customers.update(session.customer, {
+                invoice_settings: { default_payment_method: pi.payment_method }
+              });
+              console.log(`[webhook] Saved payment method ${pi.payment_method} for customer ${session.customer}`);
+            }
+          } catch (pmErr) {
+            console.error('[webhook] Failed to save payment method:', pmErr.message);
           }
         }
 
