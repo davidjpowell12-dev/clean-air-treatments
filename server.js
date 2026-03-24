@@ -1,4 +1,6 @@
 require('dotenv').config();
+// Also load .env.production for keys that Railway fails to inject
+require('dotenv').config({ path: '.env.production', override: true });
 const express = require('express');
 const session = require('express-session');
 const path = require('path');
