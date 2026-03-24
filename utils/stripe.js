@@ -1,23 +1,27 @@
 // Stripe payment utilities — invoice numbering, Checkout sessions, customer management
 
 // Lazy-load Stripe — some hosting platforms inject env vars after module load
+// Uses STRIPE_SK as fallback because Railway has a caching bug with STRIPE_SECRET_KEY
 let _stripe = null;
+function getStripeKey() {
+  return process.env.STRIPE_SK || process.env.STRIPE_SECRET_KEY;
+}
+
 function getStripe() {
   if (_stripe) return _stripe;
-  const key = process.env.STRIPE_SECRET_KEY;
-  if (key) {
+  const key = getStripeKey();
+  if (key && key !== 'your_key_here') {
     _stripe = require('stripe')(key);
   }
   return _stripe;
 }
 
 function isEnabled() {
-  return !!process.env.STRIPE_SECRET_KEY;
+  const key = getStripeKey();
+  return !!key && key !== 'your_key_here';
 }
 
-// Log all env var names at startup to debug Railway variable injection
-console.log(`[startup] Stripe configured: ${isEnabled()} (key starts with: ${process.env.STRIPE_SECRET_KEY ? process.env.STRIPE_SECRET_KEY.substring(0, 8) + '...' : 'NOT SET'})`);
-console.log(`[startup] All env vars with STRIPE: ${Object.keys(process.env).filter(k => k.includes('STRIPE')).join(', ') || 'NONE FOUND'}`);
+console.log(`[startup] Stripe configured: ${isEnabled()} (key starts with: ${getStripeKey() ? getStripeKey().substring(0, 8) + '...' : 'NOT SET'})`);
 
 // ─── Invoice Number Generator ─────────────────────────────────
 // Produces globally unique sequential IDs: CA-2026-0001, CA-2026-0002, etc.

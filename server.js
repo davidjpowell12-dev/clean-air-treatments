@@ -26,14 +26,14 @@ app.get('/health', (req, res) => {
 
 // Temporary diagnostic — remove after Stripe is confirmed working
 app.get('/debug-stripe', (req, res) => {
-  const key = process.env.STRIPE_SECRET_KEY || '';
+  const key = process.env.STRIPE_SK || process.env.STRIPE_SECRET_KEY || '';
   res.json({
-    hasKey: !!key,
+    hasKey: !!key && key !== 'your_key_here',
     keyLength: key.length,
     first8: key.substring(0, 8),
     last4: key.substring(key.length - 4),
-    publishableFirst8: (process.env.STRIPE_PUBLISHABLE_KEY || '').substring(0, 8),
-    webhookFirst8: (process.env.STRIPE_WEBHOOK_SECRET || '').substring(0, 8)
+    stripe_sk_set: !!process.env.STRIPE_SK,
+    stripe_secret_key_set: !!process.env.STRIPE_SECRET_KEY
   });
 });
 
