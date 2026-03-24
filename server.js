@@ -24,6 +24,19 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
+// Temporary diagnostic — remove after Stripe is confirmed working
+app.get('/debug-stripe', (req, res) => {
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  res.json({
+    hasKey: !!key,
+    keyLength: key.length,
+    first8: key.substring(0, 8),
+    last4: key.substring(key.length - 4),
+    publishableFirst8: (process.env.STRIPE_PUBLISHABLE_KEY || '').substring(0, 8),
+    webhookFirst8: (process.env.STRIPE_WEBHOOK_SECRET || '').substring(0, 8)
+  });
+});
+
 // Ensure data directories exist before anything tries to use them
 try {
   const dbDir = process.env.DB_DIR || path.join(__dirname, 'db');
