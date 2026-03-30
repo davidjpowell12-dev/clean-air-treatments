@@ -296,6 +296,13 @@ const migrations = [
     // Add payment columns to estimates
     try { db.exec('ALTER TABLE estimates ADD COLUMN payment_plan TEXT'); } catch (e) { /* exists */ }
     try { db.exec('ALTER TABLE estimates ADD COLUMN stripe_customer_id TEXT'); } catch (e) { /* exists */ }
+  },
+  // Migration 15: Link applications to scheduled visits
+  function linkApplicationsToSchedules(db) {
+    try { db.exec('ALTER TABLE applications ADD COLUMN schedule_id INTEGER REFERENCES schedules(id)'); } catch (e) { /* exists */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_applications_schedule ON applications(schedule_id)');
+    // Add service_type to schedules so we know what kind of visit it is
+    try { db.exec('ALTER TABLE schedules ADD COLUMN service_type TEXT'); } catch (e) { /* exists */ }
   }
 ];
 

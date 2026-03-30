@@ -255,7 +255,7 @@ const SchedulingPage = {
             ${techOptions}
           </select>
           <div class="schedule-entry-btns">
-            ${e.status !== 'completed' ? `<button class="btn btn-sm btn-primary sched-complete" data-id="${e.id}" title="Complete">&#10003;</button>` : ''}
+            ${e.status !== 'completed' ? `<button class="btn btn-sm btn-primary sched-complete" data-id="${e.id}" data-property-id="${e.property_id}" data-date="${e.scheduled_date}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Complete &amp; Log Application">&#10003;</button>` : ''}
             ${e.status === 'scheduled' ? `<button class="btn btn-sm btn-outline sched-reschedule" data-id="${e.id}" data-name="${e.customer_name}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Reschedule">&#8644;</button>` : ''}
             ${e.status !== 'skipped' ? `<button class="btn btn-sm btn-outline sched-skip" data-id="${e.id}" title="Skip">Skip</button>` : ''}
             ${e.status !== 'scheduled' ? `<button class="btn btn-sm btn-outline sched-reset" data-id="${e.id}" title="Reset">Reset</button>` : ''}
@@ -269,8 +269,15 @@ const SchedulingPage = {
   _bindEntryActions(entries, date) {
     document.querySelectorAll('.sched-complete').forEach(btn => {
       btn.addEventListener('click', async () => {
-        await Api.put(`/api/schedules/${btn.dataset.id}`, { status: 'completed' });
-        this.renderDaily();
+        const scheduleId = btn.dataset.id;
+        const propertyId = btn.dataset.propertyId;
+        const date = btn.dataset.date;
+        const round = btn.dataset.round;
+        const total = btn.dataset.total;
+        // Navigate to application form pre-filled from this schedule entry
+        App.navigate('applications', 'new', null);
+        // Store schedule context for the application form to pick up
+        window._scheduleContext = { scheduleId, propertyId, date, round, total };
       });
     });
 

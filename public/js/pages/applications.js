@@ -221,6 +221,29 @@ const ApplicationsPage = {
       }
     }
 
+    // Check for schedule context (completing a visit from the schedule page)
+    let scheduleContext = null;
+    if (window._scheduleContext) {
+      scheduleContext = window._scheduleContext;
+      delete window._scheduleContext;
+      // Fetch the schedule entry to get property details
+      try {
+        const schedEntry = await Api.get(`/api/schedules/${scheduleContext.scheduleId}`);
+        app.property_id = schedEntry.property_id;
+        app.customer_name = schedEntry.customer_name;
+        app.address = schedEntry.address;
+        app.city = schedEntry.city;
+        app.state = schedEntry.state || 'MI';
+        app.zip = schedEntry.zip;
+        app.property_sqft = schedEntry.sqft;
+        app.application_date = schedEntry.scheduled_date;
+        app._schedule_id = scheduleContext.scheduleId;
+        app._round_info = schedEntry.round_number ? `Round ${schedEntry.round_number} of ${schedEntry.total_rounds}` : null;
+      } catch (e) {
+        console.error('Failed to fetch schedule entry:', e);
+      }
+    }
+
     // Apply prefill from calculator or property page
     if (prefill) {
       if (prefill.productId) app.product_id = prefill.productId;
@@ -248,6 +271,16 @@ const ApplicationsPage = {
         <div class="card-header"><h3>${editId ? 'Edit' : 'New'} Application Record</h3></div>
         <div class="card-body">
           <form id="appForm" class="app-form">
+            <input type="hidden" name="schedule_id" id="scheduleIdField" value="${app._schedule_id || ''}">
+            ${app._schedule_id ? `
+              <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+                <span style="font-size:20px;">📋</span>
+                <div>
+                  <div style="font-weight:600;color:#065f46;font-size:14px;">Completing Scheduled Visit</div>
+                  <div style="font-size:13px;color:#047857;">${app._round_info || 'Service visit'} for ${this.esc(app.customer_name || '')}</div>
+                </div>
+              </div>
+            ` : ''}
             <!-- Property Search -->
             <h3 style="color:var(--blue);margin-bottom:12px;padding-bottom:8px;font-size:15px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid var(--gray-200);">Property</h3>
             <div class="form-group" style="position:relative;">
@@ -565,6 +598,10 @@ const ApplicationsPage = {
 
       // Property ID
       data.property_id = document.getElementById('propIdField').value ? Number(document.getElementById('propIdField').value) : null;
+
+      // Schedule ID (if completing a scheduled visit)
+      const schedIdVal = document.getElementById('scheduleIdField').value;
+      data.schedule_id = schedIdVal ? Number(schedIdVal) : null;
 
       // Applicator info from session
       data.applicator_cert_number = App.user.applicatorCertNumber || '';

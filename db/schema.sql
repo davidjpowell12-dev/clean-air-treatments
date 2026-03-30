@@ -86,6 +86,7 @@ CREATE TABLE IF NOT EXISTS applications (
   labor_cost REAL,
   material_cost REAL,
   revenue REAL,
+  schedule_id INTEGER REFERENCES schedules(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   synced INTEGER DEFAULT 1
 );
@@ -212,6 +213,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   round_number INTEGER,
   total_rounds INTEGER DEFAULT 6,
   program_id TEXT,
+  service_type TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

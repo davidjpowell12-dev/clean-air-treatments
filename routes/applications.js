@@ -147,9 +147,10 @@ router.post('/', requireAuth, (req, res) => {
       temperature_f, wind_speed_mph, wind_direction, weather_conditions,
       lawn_markers_posted, notification_registry_checked, is_restricted_use,
       notes, property_id, retention_years,
-      duration_minutes, labor_cost, material_cost, revenue
+      duration_minutes, labor_cost, material_cost, revenue,
+      schedule_id
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     req.session.userId,
@@ -166,8 +167,16 @@ router.post('/', requireAuth, (req, res) => {
     b.notes || null,
     b.property_id || null,
     retentionYears,
-    b.duration_minutes || null, b.labor_cost || null, b.material_cost || null, b.revenue || null
+    b.duration_minutes || null, b.labor_cost || null, b.material_cost || null, b.revenue || null,
+    b.schedule_id || null
   );
+
+  // Auto-complete the linked schedule entry
+  if (b.schedule_id) {
+    db.prepare(
+      "UPDATE schedules SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'"
+    ).run(b.schedule_id);
+  }
 
   // Auto-deduct inventory
   if (b.product_id && b.total_product_used) {
