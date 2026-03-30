@@ -415,6 +415,121 @@ router.delete('/:id', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
+// Optimize route for a date using Google Distance Matrix API
+router.post('/optimize-route', requireAuth, async (req, res) => {
+  const db = getDb();
+  const { date } = req.body;
+  if (!date) return res.status(400).json({ error: 'date required' });
+
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
+  if (!apiKey) return res.status(400).json({ error: 'GOOGLE_MAPS_API_KEY not configured on server' });
+
+  const homeSetting = db.prepare("SELECT value FROM app_settings WHERE key = 'home_address'").get();
+  if (!homeSetting || !homeSetting.value) {
+    return res.status(400).json({ error: 'Home address not set. Add it in Settings first.' });
+  }
+  const homeAddress = homeSetting.value;
+
+  const entries = db.prepare(`
+    SELECT s.id, s.sort_order, p.id as property_id, p.address, p.city, p.state, p.lat, p.lng
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    WHERE s.scheduled_date = ?
+    ORDER BY s.sort_order, s.id
+  `).all(date);
+
+  if (entries.length < 2) {
+    return res.status(400).json({ error: 'Need at least 2 stops to optimize' });
+  }
+
+  // Geocode a single address string → { lat, lng } or null
+  const geocode = async (address) => {
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+    const r = await fetch(url);
+    const data = await r.json();
+    if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
+    return null;
+  };
+
+  // Geocode home address
+  const homeLoc = await geocode(homeAddress);
+  if (!homeLoc) return res.status(400).json({ error: 'Could not geocode home address. Check the address in Settings.' });
+
+  // Geocode any properties missing coordinates, cache in DB
+  for (const e of entries) {
+    if (e.lat && e.lng) continue;
+    const addr = [e.address, e.city, e.state].filter(Boolean).join(', ');
+    const loc = await geocode(addr);
+    if (loc) {
+      db.prepare('UPDATE properties SET lat = ?, lng = ? WHERE id = ?').run(loc.lat, loc.lng, e.property_id);
+      e.lat = loc.lat;
+      e.lng = loc.lng;
+    }
+  }
+
+  // Build locations array: [home, ...stops]
+  const locations = [homeLoc, ...entries.map(e => ({ lat: e.lat, lng: e.lng }))];
+  const n = locations.length;
+
+  // Call Distance Matrix API — all origins × all destinations in one request
+  const coordStr = locations.map(l => `${l.lat},${l.lng}`).join('|');
+  const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${coordStr}&destinations=${coordStr}&key=${apiKey}&mode=driving`;
+  const dmRes = await fetch(dmUrl);
+  const dmData = await dmRes.json();
+
+  if (dmData.status !== 'OK') {
+    return res.status(400).json({ error: `Distance Matrix API error: ${dmData.status}` });
+  }
+
+  // Build N×N duration matrix (seconds)
+  const dur = dmData.rows.map(row =>
+    row.elements.map(el => el.status === 'OK' ? el.duration.value : 999999)
+  );
+
+  // Nearest-neighbor algorithm starting from home (index 0)
+  const visited = new Set([0]);
+  const route = [0];
+  while (visited.size < n) {
+    const last = route[route.length - 1];
+    let best = -1, bestDur = Infinity;
+    for (let j = 1; j < n; j++) {
+      if (!visited.has(j) && dur[last][j] < bestDur) {
+        bestDur = dur[last][j];
+        best = j;
+      }
+    }
+    visited.add(best);
+    route.push(best);
+  }
+
+  // route[0] = home, route[1..n-1] = stop indices (1-based into entries array)
+  const optimized = route.slice(1).map(idx => entries[idx - 1]);
+
+  // Total drive time along the optimized route
+  let totalSeconds = 0;
+  for (let i = 0; i < route.length - 1; i++) totalSeconds += dur[route[i]][route[i + 1]];
+  const totalMinutes = Math.round(totalSeconds / 60);
+
+  // Update sort_order in DB
+  const updateOrder = db.transaction(() => {
+    optimized.forEach((entry, idx) => {
+      db.prepare('UPDATE schedules SET sort_order = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?').run(idx + 1, entry.id);
+    });
+  });
+  updateOrder();
+
+  // Build Google Maps directions URL
+  const stopAddrs = optimized.map(e => [e.address, e.city, e.state].filter(Boolean).join(', '));
+  const origin = encodeURIComponent(homeAddress);
+  const destination = encodeURIComponent(stopAddrs[stopAddrs.length - 1]);
+  const waypointStr = stopAddrs.slice(0, -1).map(a => encodeURIComponent(a)).join('|');
+  const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointStr ? '&waypoints=' + waypointStr : ''}`;
+
+  logAudit(db, 'schedule', 0, req.session.userId, 'optimize_route', { date, stops: entries.length, total_minutes: totalMinutes });
+
+  res.json({ optimized: true, total_minutes: totalMinutes, stop_count: entries.length, order: optimized.map(e => e.id), maps_url: mapsUrl });
+});
+
 // Assign tech to all entries for a date
 router.put('/assign-all/:date', requireAuth, (req, res) => {
   const db = getDb();

@@ -111,6 +111,8 @@ CREATE TABLE IF NOT EXISTS properties (
   sqft REAL,
   soil_type TEXT,
   notes TEXT,
+  lat REAL,
+  lng REAL,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

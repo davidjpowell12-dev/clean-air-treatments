@@ -303,6 +303,11 @@ const migrations = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_applications_schedule ON applications(schedule_id)');
     // Add service_type to schedules so we know what kind of visit it is
     try { db.exec('ALTER TABLE schedules ADD COLUMN service_type TEXT'); } catch (e) { /* exists */ }
+  },
+  // Migration 16: Add lat/lng to properties for geocode caching (route optimization)
+  function addLatLngToProperties(db) {
+    try { db.exec('ALTER TABLE properties ADD COLUMN lat REAL'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE properties ADD COLUMN lng REAL'); } catch (e) { /* exists */ }
   }
 ];
 

@@ -4,6 +4,7 @@ const SchedulingPage = {
   _selectedDate: null,
   _calYear: null,
   _calMonth: null,
+  _routeResult: null,
 
   async render(action, id) {
     if (action === 'add') return this.renderAddProperties();
@@ -139,6 +140,7 @@ const SchedulingPage = {
         <button id="calendarBtn" class="btn btn-outline btn-sm">Calendar</button>
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
+        ${total >= 2 ? `<button id="optimizeRouteBtn" class="btn btn-outline btn-sm">&#128205; Optimize Route</button>` : ''}
         <div style="display: flex; align-items: center; gap: 6px;">
           <select id="bulkTech" class="form-select-sm">
             <option value="">Assign tech...</option>
@@ -147,6 +149,13 @@ const SchedulingPage = {
           <button id="assignAllBtn" class="btn btn-outline btn-sm">Assign All</button>
         </div>
       </div>
+
+      ${this._routeResult && this._routeResult.date === date ? `
+        <div style="background:var(--green-50,#f0faf0);border:1px solid var(--green-200,#a3d9a5);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:14px;color:var(--green-800,#276749);">&#128694; Route optimized &mdash; ~${this._routeResult.total_minutes} min driving &bull; ${this._routeResult.stop_count} stops</span>
+          <a href="${this._routeResult.maps_url}" target="_blank" rel="noopener" class="btn btn-sm btn-outline" style="white-space:nowrap;">Open in Maps</a>
+        </div>
+      ` : ''}
 
       <div class="card">
         <div class="card-header"><h3>${this._formatDate(date)}</h3></div>
@@ -199,6 +208,24 @@ const SchedulingPage = {
     document.getElementById('seasonOverviewBtn').addEventListener('click', () => App.navigate('scheduling', 'overview'));
     const addEmpty = document.getElementById('addPropsEmpty');
     if (addEmpty) addEmpty.addEventListener('click', () => App.navigate('scheduling', 'add'));
+
+    const optimizeBtn = document.getElementById('optimizeRouteBtn');
+    if (optimizeBtn) {
+      optimizeBtn.addEventListener('click', async () => {
+        optimizeBtn.disabled = true;
+        optimizeBtn.textContent = 'Optimizing...';
+        try {
+          const result = await Api.post('/api/schedules/optimize-route', { date });
+          this._routeResult = { ...result, date };
+          App.toast(`Route optimized! ~${result.total_minutes} min drive time`, 'success');
+          this.renderDaily();
+        } catch (err) {
+          App.toast(err.message || 'Optimization failed', 'error');
+          optimizeBtn.disabled = false;
+          optimizeBtn.innerHTML = '&#128205; Optimize Route';
+        }
+      });
+    }
 
     document.getElementById('assignAllBtn').addEventListener('click', async () => {
       const techId = document.getElementById('bulkTech').value;

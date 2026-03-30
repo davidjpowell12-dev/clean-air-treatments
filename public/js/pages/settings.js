@@ -75,6 +75,20 @@ const SettingsPage = {
         </div>
 
         <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>Route Optimization</h3></div>
+          <div class="card-body">
+            <div class="form-group" style="margin-bottom:0;">
+              <label>Home / Starting Address</label>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <input type="text" id="homeAddressInput" value="${settings.home_address || ''}" placeholder="e.g. 123 Main St, Grand Rapids, MI" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:6px;font-size:16px;">
+                <button class="btn btn-primary btn-sm" onclick="SettingsPage.saveHomeAddress()">Save</button>
+              </div>
+              <p class="form-hint">Your daily route starts from this address. Used by the Optimize Route feature on the Schedule page.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
           <div class="card-header"><h3>Data Export</h3></div>
           <div class="card-body">
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Export application records for MDARD annual reporting (due March 1).</p>
@@ -307,6 +321,17 @@ const SettingsPage = {
         App.toast(err.message, 'error');
       }
     });
+  },
+
+  async saveHomeAddress() {
+    const value = document.getElementById('homeAddressInput').value.trim();
+    if (!value) { App.toast('Enter an address', 'error'); return; }
+    try {
+      await Api.put('/api/settings/home_address', { value });
+      App.toast('Home address saved', 'success');
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
   },
 
   async saveLaborRate() {
