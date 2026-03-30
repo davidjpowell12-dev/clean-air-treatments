@@ -274,10 +274,9 @@ const SchedulingPage = {
         const date = btn.dataset.date;
         const round = btn.dataset.round;
         const total = btn.dataset.total;
-        // Navigate to application form pre-filled from this schedule entry
-        App.navigate('applications', 'new', null);
-        // Store schedule context for the application form to pick up
+        // Store schedule context BEFORE navigating so the application form picks it up
         window._scheduleContext = { scheduleId, propertyId, date, round, total };
+        App.navigate('applications', 'new', null);
       });
     });
 
