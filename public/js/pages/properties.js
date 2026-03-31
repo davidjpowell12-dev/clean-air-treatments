@@ -153,7 +153,7 @@ const PropertiesPage = {
           // Group by service type
           const svcGroups = {};
           scheduleRounds.forEach(r => {
-            const svc = r.service_type || 'General';
+            const svc = r.service_type || 'Scheduled Visit';
             if (!svcGroups[svc]) svcGroups[svc] = [];
             svcGroups[svc].push(r);
           });

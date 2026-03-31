@@ -262,6 +262,15 @@ const SchedulingPage = {
     return 'blue';
   },
 
+  _svcBorderColor(serviceType) {
+    if (!serviceType) return '';
+    const lower = serviceType.toLowerCase();
+    if (lower.includes('fert') || lower.includes('weed')) return '#78be20';
+    if (lower.includes('mosquito') || lower.includes('tick')) return '#7c3aed';
+    if (lower.includes('aerat') || lower.includes('seed') || lower.includes('compost') || lower.includes('topdress')) return '#f59e0b';
+    return '#3b82f6';
+  },
+
   _renderEntry(e, idx, techs) {
     const statusClass = e.status === 'completed' ? 'badge-green' : e.status === 'skipped' ? 'badge-gray' : 'badge-blue';
     const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
@@ -945,11 +954,13 @@ const SchedulingPage = {
               <div class="cal-entries">
                 ${entries.slice(0, 2).map(e => {
                   const isOverdue = e.status === 'scheduled' && dateStr < todayStr;
+                  const svcBorder = this._svcBorderColor(e.service_type);
                   return `
                   <div class="cal-entry cal-entry-${isOverdue ? 'overdue' : e.status}"
                        data-entry-id="${e.id}"
                        data-entry-name="${e.customer_name.replace(/"/g, '&quot;')}"
-                       data-source-date="${dateStr}">
+                       data-source-date="${dateStr}"
+                       ${svcBorder ? `style="border-left-color:${svcBorder}; border-left-width:3px;"` : ''}>
                     <span class="cal-entry-name">${e.customer_name.length > 10 ? e.customer_name.substring(0, 10) + '…' : e.customer_name}</span>
                   </div>
                 `;}).join('')}

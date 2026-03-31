@@ -55,7 +55,7 @@ router.get('/month', requireAuth, (req, res) => {
 
   const entries = db.prepare(`
     SELECT s.id, s.property_id, s.scheduled_date, s.assigned_to, s.status,
-           s.sort_order, s.notes, s.round_number, s.total_rounds, s.program_id,
+           s.sort_order, s.notes, s.round_number, s.total_rounds, s.program_id, s.service_type,
            p.customer_name, p.address, p.city, p.sqft,
            u.full_name as assigned_to_name
     FROM schedules s
