@@ -225,7 +225,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to);
-CREATE INDEX IF NOT EXISTS idx_schedules_estimate ON schedules(estimate_id);
+-- idx_schedules_estimate created by migration 17 (safe for existing DBs)
 -- idx_schedules_program created by migration 7 (safe for existing DBs)
 
 -- Soil Tests (lab results per property — Logan Labs format)
