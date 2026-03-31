@@ -585,14 +585,14 @@ const EstimatesPage = {
           ${est.status === 'draft' ? `
             <div class="card" style="margin-top:12px;border:2px solid var(--green);">
               <div class="card-body" style="padding:16px;">
-                <label style="font-weight:600;font-size:14px;color:var(--green-dark);display:block;margin-bottom:8px;">Send Proposal to Customer</label>
+                <label style="font-weight:600;font-size:14px;color:var(--green-dark);display:block;margin-bottom:8px;">Send Proposal via Text</label>
                 <div style="display:flex;gap:8px;">
-                  <input type="email" id="sendEmailInput" value="${this._esc(est.email || '')}" placeholder="customer@email.com" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;">
-                  <button class="btn btn-primary" style="padding:12px 20px;white-space:nowrap;" onclick="EstimatesPage.sendEstimate(${est.id})" id="sendEstBtn">
-                    Send
+                  <input type="tel" id="sendPhoneInput" value="${this._esc(est.phone || '')}" placeholder="(555) 555-5555" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;">
+                  <button class="btn btn-primary" style="padding:12px 20px;white-space:nowrap;" onclick="EstimatesPage.sendViaSMS(${est.id})" id="sendEstBtn">
+                    Text
                   </button>
                 </div>
-                <p style="font-size:12px;color:var(--gray-400);margin-top:6px;">Or <a href="#" onclick="EstimatesPage.markSent(${est.id});return false;" style="color:var(--green);">mark as sent</a> if you'll share the link manually</p>
+                <p style="font-size:12px;color:var(--gray-400);margin-top:6px;">Opens your Messages app with a pre-written text &middot; <a href="#" onclick="EstimatesPage.markSent(${est.id});return false;" style="color:var(--green);">mark as sent</a> if sharing another way</p>
               </div>
             </div>
           ` : ''}
@@ -602,8 +602,8 @@ const EstimatesPage = {
             </button>
           ` : ''}
           ${est.status === 'sent' || est.status === 'viewed' ? `
-            <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.sendReminder(${est.id})" id="reminderBtn">
-              📧 Send Reminder
+            <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.sendReminderSMS(${est.id})" id="reminderBtn">
+              Send Reminder Text
             </button>
             ${est.reminder_count > 0 ? `<p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">${est.reminder_count} reminder${est.reminder_count > 1 ? 's' : ''} sent${est.last_reminder_at ? ' \u00B7 Last: ' + new Date(est.last_reminder_at).toLocaleDateString() : ''}</p>` : ''}
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.markAccepted(${est.id})">
@@ -635,43 +635,68 @@ const EstimatesPage = {
   },
 
   // ─── Send Actions ─────────────────────────────────────────
-  async sendEstimate(id) {
-    const emailInput = document.getElementById('sendEmailInput');
-    const email = emailInput ? emailInput.value.trim() : '';
-    if (!email) {
-      App.toast('Enter the customer email address', 'error');
-      if (emailInput) emailInput.focus();
+  async sendViaSMS(id) {
+    const phoneInput = document.getElementById('sendPhoneInput');
+    const phone = phoneInput ? phoneInput.value.trim() : '';
+    if (!phone) {
+      App.toast('Enter the customer phone number', 'error');
+      if (phoneInput) phoneInput.focus();
       return;
     }
 
-    const btn = document.getElementById('sendEstBtn');
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
+    // Clean phone number — digits only
+    const cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      App.toast('Enter a valid phone number', 'error');
+      if (phoneInput) phoneInput.focus();
+      return;
+    }
 
     try {
-      const result = await Api.post(`/api/estimates/${id}/send`, { email });
-      App.toast(result.message || 'Proposal sent!', 'success');
-      this.renderDetail(id);
+      // Get the proposal link from the server (ensures token exists)
+      const result = await Api.post(`/api/estimates/${id}/send-sms`, { phone });
+      const proposalUrl = result.proposal_url;
+      const customerName = result.customer_name || 'there';
+      const monthlyPrice = result.monthly_price || 0;
+
+      // Compose the SMS message
+      const message = `Hi ${customerName}, this is Dave from Clean Air Lawn Care. Here's your lawn care proposal — $${Math.round(monthlyPrice)}/month:\n\n${proposalUrl}`;
+
+      // Open native SMS app
+      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
+      window.location.href = smsUrl;
+
+      App.toast('Estimate marked as sent!', 'success');
+      // Re-render after a short delay (user may have left the app to send the text)
+      setTimeout(() => this.renderDetail(id), 1000);
     } catch (err) {
-      App.toast(err.message || 'Failed to send', 'error');
-      btn.disabled = false;
-      btn.textContent = 'Send';
+      App.toast(err.message || 'Failed to prepare SMS', 'error');
     }
   },
 
-  async sendReminder(id) {
-    const btn = document.getElementById('reminderBtn');
-    btn.disabled = true;
-    btn.textContent = 'Sending...';
-
+  async sendReminderSMS(id) {
     try {
-      const result = await Api.post(`/api/estimates/${id}/send-reminder`);
-      App.toast(result.message || 'Reminder sent!', 'success');
-      this.renderDetail(id);
+      const est = await Api.get(`/api/estimates/${id}`);
+      const phone = est.phone;
+      if (!phone) {
+        App.toast('No phone number on this estimate', 'error');
+        return;
+      }
+
+      const cleanPhone = phone.replace(/\D/g, '');
+      const proposalUrl = `${window.location.origin}/proposal/${est.token}`;
+      const message = `Hi ${est.customer_name}, just following up on your Clean Air Lawn Care proposal — $${Math.round(est.monthly_price)}/month. Take a look when you get a chance:\n\n${proposalUrl}`;
+
+      // Open native SMS app
+      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
+      window.location.href = smsUrl;
+
+      // Track the reminder
+      await Api.post(`/api/estimates/${id}/send-reminder-sms`);
+      App.toast('Reminder text ready!', 'success');
+      setTimeout(() => this.renderDetail(id), 1000);
     } catch (err) {
-      App.toast(err.message || 'Failed to send reminder', 'error');
-      btn.disabled = false;
-      btn.textContent = '📧 Send Reminder';
+      App.toast(err.message || 'Failed to prepare reminder', 'error');
     }
   },
 

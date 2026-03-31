@@ -455,6 +455,63 @@ router.post('/:id/send', requireAuth, async (req, res) => {
   }
 });
 
+// Send estimate via SMS (generates token, marks as sent, returns proposal URL)
+router.post('/:id/send-sms', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const phone = req.body.phone;
+  if (!phone) return res.status(400).json({ error: 'Phone number is required' });
+
+  // Ensure token exists
+  if (!est.token) {
+    const token = crypto.randomBytes(32).toString('hex');
+    db.prepare('UPDATE estimates SET token = ? WHERE id = ?').run(token, est.id);
+    est.token = token;
+  }
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+  const proposalUrl = `${baseUrl}/proposal/${est.token}`;
+
+  // Update status to sent + save phone
+  db.prepare(`
+    UPDATE estimates SET status = 'sent', sent_at = CURRENT_TIMESTAMP, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+  `).run(phone, est.id);
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'sent_sms', {
+    phone, customer_name: est.customer_name
+  });
+
+  res.json({
+    success: true,
+    proposal_url: proposalUrl,
+    customer_name: est.customer_name,
+    monthly_price: est.monthly_price
+  });
+});
+
+// Track SMS reminder sent
+router.post('/:id/send-reminder-sms', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  db.prepare(`
+    UPDATE estimates SET
+      last_reminder_at = CURRENT_TIMESTAMP,
+      reminder_count = reminder_count + 1,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(est.id);
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'reminder_sms', {
+    phone: est.phone, reminder_number: est.reminder_count + 1
+  });
+
+  res.json({ success: true });
+});
+
 // Send reminder email for an estimate
 router.post('/:id/send-reminder', requireAuth, async (req, res) => {
   const db = getDb();
