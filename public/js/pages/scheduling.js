@@ -267,6 +267,7 @@ const SchedulingPage = {
           <div class="schedule-entry-info">
             <div class="schedule-entry-name">${e.customer_name}</div>
             <div class="schedule-entry-addr">${e.address}${e.city ? ', ' + e.city : ''}</div>
+            ${e.service_type ? `<div class="schedule-entry-meta" style="color:var(--green);font-weight:600;">${e.service_type}</div>` : ''}
             ${e.sqft ? `<div class="schedule-entry-meta">${Number(e.sqft).toLocaleString()} sq ft</div>` : ''}
             ${e.phone ? `<div class="schedule-entry-meta"><a href="tel:${e.phone}">${e.phone}</a></div>` : ''}
             ${e.notes ? `<div class="schedule-entry-notes">${e.notes}</div>` : ''}

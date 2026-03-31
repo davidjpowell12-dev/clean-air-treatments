@@ -636,62 +636,101 @@ router.get('/reminders/pending', requireAuth, (req, res) => {
   res.json(estimates);
 });
 
-// Schedule job from accepted estimate — creates all round entries
+// Schedule job from accepted estimate — creates per-service schedule entries
 router.post('/:id/schedule', requireAuth, (req, res) => {
   const db = getDb();
   const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
   if (est.status !== 'accepted') return res.status(400).json({ error: 'Only accepted estimates can be scheduled' });
 
-  const { start_date, interval_weeks, assigned_to } = req.body;
-  if (!start_date) return res.status(400).json({ error: 'start_date required' });
-
-  const interval = interval_weeks || 5;
-
-  // Get recurring items to determine round count
-  const items = db.prepare(
-    'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1'
-  ).all(est.id);
-
-  const recurringItems = items.filter(i => i.is_recurring);
-  const totalRounds = recurringItems.length > 0
-    ? Math.max(...recurringItems.map(i => i.rounds || 1))
-    : 1;
-
   if (!est.property_id) {
     return res.status(400).json({ error: 'Estimate has no linked property. Edit the estimate first.' });
   }
 
+  const { services, one_time_services, assigned_to } = req.body;
+
+  // Support legacy single-interval format
+  if (!services && req.body.start_date) {
+    const interval = req.body.interval_weeks || 5;
+    const items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1').all(est.id);
+    const recurringItems = items.filter(i => i.is_recurring);
+    const totalRounds = recurringItems.length > 0 ? Math.max(...recurringItems.map(i => i.rounds || 1)) : 1;
+    const programId = `est_${est.id}_${Date.now()}`;
+    const created = db.transaction(() => {
+      const c = [];
+      for (let round = 1; round <= totalRounds; round++) {
+        const offsetDays = (round - 1) * interval * 7;
+        const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(req.body.start_date, offsetDays);
+        const result = db.prepare(`INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, estimate_id, created_by) VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)`)
+          .run(est.property_id, roundDate.d, assigned_to || null, round, totalRounds, programId, est.id, req.session.userId);
+        c.push({ id: result.lastInsertRowid, round, date: roundDate.d });
+      }
+      return c;
+    })();
+    return res.json({ success: true, total_created: created.length, entries: created });
+  }
+
   const programId = `est_${est.id}_${Date.now()}`;
 
-  const schedule = db.transaction(() => {
+  const allCreated = db.transaction(() => {
     const created = [];
-    for (let round = 1; round <= totalRounds; round++) {
-      const offsetDays = (round - 1) * interval * 7;
-      const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(start_date, offsetDays);
 
-      const result = db.prepare(`
-        INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, estimate_id, created_by)
-        VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
-      `).run(est.property_id, roundDate.d, assigned_to || null, round, totalRounds, programId, est.id, req.session.userId);
+    // Schedule recurring services — each gets its own entries
+    if (services && services.length > 0) {
+      for (const svc of services) {
+        const rounds = svc.rounds || 6;
+        const interval = svc.interval_weeks || 5;
+        const startDate = svc.start_date;
+        if (!startDate) continue;
 
-      created.push({ id: result.lastInsertRowid, round, date: roundDate.d });
+        for (let round = 1; round <= rounds; round++) {
+          const offsetDays = (round - 1) * interval * 7;
+          const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(startDate, offsetDays);
+
+          const result = db.prepare(`
+            INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, estimate_id, service_type, created_by)
+            VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+          `).run(
+            est.property_id, roundDate.d, assigned_to || null,
+            round, rounds, programId, est.id,
+            svc.service_name, req.session.userId
+          );
+
+          created.push({ id: result.lastInsertRowid, service: svc.service_name, round, date: roundDate.d });
+        }
+      }
     }
-    return created;
-  });
 
-  const created = schedule();
+    // Schedule one-time services
+    if (one_time_services && one_time_services.length > 0) {
+      for (const ot of one_time_services) {
+        if (!ot.date) continue;
+        const serviceLabel = (ot.service_names || []).join(', ');
+
+        const result = db.prepare(`
+          INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, estimate_id, service_type, created_by)
+          VALUES (?, ?, ?, 0, 1, 1, ?, ?, ?, ?)
+        `).run(
+          est.property_id, ot.date, assigned_to || null,
+          programId, est.id, serviceLabel, req.session.userId
+        );
+
+        created.push({ id: result.lastInsertRowid, service: serviceLabel, round: 1, date: ot.date });
+      }
+    }
+
+    return created;
+  })();
 
   logAudit(db, 'schedule', 0, req.session.userId, 'schedule_from_estimate', {
     estimate_id: est.id, customer_name: est.customer_name,
-    rounds: totalRounds, interval_weeks: interval, start_date
+    total_created: allCreated.length, program_id: programId
   });
 
   res.json({
     success: true,
-    rounds_created: created.length,
-    total_rounds: totalRounds,
-    entries: created,
+    total_created: allCreated.length,
+    entries: allCreated,
     program_id: programId
   });
 });

@@ -807,14 +807,27 @@ const EstimatesPage = {
   },
 
   // ─── Schedule Job Modal ─────────────────────────────────
+  _schedServiceConfig: [],
+
+  // Default intervals per service type (weeks)
+  _defaultIntervals: {
+    'mosquito': 3, 'tick': 3, 'mosquito & tick': 3, 'mosquito/tick': 3,
+    'fert': 6, 'fertiliz': 6, 'weed': 6, 'fert & weed': 6,
+  },
+
+  _getDefaultInterval(serviceName) {
+    const lower = (serviceName || '').toLowerCase();
+    for (const [key, val] of Object.entries(this._defaultIntervals)) {
+      if (lower.includes(key)) return val;
+    }
+    return 5; // fallback
+  },
+
   async showScheduleModal(estimateId) {
-    // Get estimate to determine round count
     const est = await Api.get(`/api/estimates/${estimateId}`);
     const items = (est.items || []).filter(i => i.is_included);
-    const recurringItems = items.filter(i => i.is_recurring);
-    const totalRounds = recurringItems.length > 0
-      ? Math.max(...recurringItems.map(i => i.rounds || 1))
-      : 1;
+    const recurringItems = items.filter(i => i.is_recurring && (i.rounds || 1) > 1);
+    const oneTimeItems = items.filter(i => !i.is_recurring || (i.rounds || 1) <= 1);
 
     // Default start date: next Monday
     const today = new Date();
@@ -824,28 +837,80 @@ const EstimatesPage = {
     nextMonday.setDate(today.getDate() + daysUntilMonday);
     const defaultStart = nextMonday.toISOString().split('T')[0];
 
+    // Default one-time date: October 1 of current year (fall)
+    const fallDate = new Date(today.getFullYear(), 9, 1); // Oct 1
+    if (fallDate < today) fallDate.setFullYear(fallDate.getFullYear() + 1);
+    const defaultFallDate = fallDate.toISOString().split('T')[0];
+
+    // Build service config for each recurring service
+    this._schedServiceConfig = recurringItems.map(item => ({
+      item_id: item.id,
+      service_name: item.service_name,
+      rounds: item.rounds || 6,
+      interval: this._getDefaultInterval(item.service_name),
+      start_date: defaultStart
+    }));
+
+    this._schedOneTimeItems = oneTimeItems;
+    this._schedBundleOneTime = true;
+    this._schedOneTimeDate = defaultFallDate;
+
     // Build modal overlay
     const overlay = document.createElement('div');
     overlay.id = 'scheduleModal';
     overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;';
     overlay.innerHTML = `
-      <div style="background:white;border-radius:16px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;">
+      <div style="background:white;border-radius:16px;max-width:420px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;" id="schedModalContent">
         <h3 style="margin:0 0 4px;font-size:18px;">Schedule Job</h3>
-        <p style="color:var(--gray-500);font-size:13px;margin:0 0 20px;">${this._esc(est.customer_name)} &middot; ${totalRounds} rounds</p>
+        <p style="color:var(--gray-500);font-size:13px;margin:0 0 20px;">${this._esc(est.customer_name)}</p>
 
-        <div style="margin-bottom:16px;">
-          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">First Visit Date</label>
-          <input type="date" id="schedStartDate" value="${defaultStart}" style="width:100%;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;box-sizing:border-box;">
-        </div>
-
-        <div style="margin-bottom:16px;">
-          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Weeks Between Visits</label>
-          <div style="display:flex;gap:8px;">
-            ${[4,5,6,7,8].map(w => `
-              <button class="sched-interval-btn" data-weeks="${w}" style="flex:1;padding:10px;border:2px solid ${w === 5 ? 'var(--green)' : 'var(--gray-200)'};border-radius:8px;background:${w === 5 ? 'var(--green-light, #f0f9e8)' : 'white'};font-weight:${w === 5 ? '700' : '500'};font-size:14px;cursor:pointer;">${w}w</button>
+        ${recurringItems.length > 0 ? `
+          <div style="margin-bottom:20px;">
+            <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:var(--gray-500);letter-spacing:0.5px;margin-bottom:12px;">Recurring Services</div>
+            ${recurringItems.map((item, idx) => `
+              <div style="background:var(--gray-50, #f8f9fa);border-radius:12px;padding:14px;margin-bottom:10px;" data-svc-idx="${idx}">
+                <div style="font-weight:600;font-size:14px;margin-bottom:8px;">${this._esc(item.service_name)} <span style="color:var(--gray-400);font-weight:400;font-size:12px;">${item.rounds || 6} rounds</span></div>
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <div style="flex:1;">
+                    <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:2px;">Start</label>
+                    <input type="date" class="sched-svc-start" data-idx="${idx}" value="${defaultStart}" style="width:100%;padding:8px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;box-sizing:border-box;">
+                  </div>
+                  <div style="flex:0 0 auto;">
+                    <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:2px;">Every</label>
+                    <div style="display:flex;gap:4px;">
+                      ${[3,4,5,6,7,8].map(w => `
+                        <button class="sched-int-btn" data-idx="${idx}" data-weeks="${w}" style="padding:6px 8px;border:1px solid ${w === this._getDefaultInterval(item.service_name) ? 'var(--green)' : 'var(--gray-200)'};border-radius:6px;background:${w === this._getDefaultInterval(item.service_name) ? 'var(--green-light, #f0f9e8)' : 'white'};font-weight:${w === this._getDefaultInterval(item.service_name) ? '700' : '400'};font-size:12px;cursor:pointer;min-width:30px;">${w}w</button>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+              </div>
             `).join('')}
           </div>
-        </div>
+        ` : ''}
+
+        ${oneTimeItems.length > 0 ? `
+          <div style="margin-bottom:20px;">
+            <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:var(--gray-500);letter-spacing:0.5px;margin-bottom:12px;">One-Time Services</div>
+            <div style="background:var(--gray-50, #f8f9fa);border-radius:12px;padding:14px;">
+              <div style="margin-bottom:10px;">
+                ${oneTimeItems.map(i => `<span style="display:inline-block;background:white;border:1px solid var(--gray-200);border-radius:6px;padding:4px 10px;font-size:13px;margin:2px 4px 2px 0;">${this._esc(i.service_name)}</span>`).join('')}
+              </div>
+              ${oneTimeItems.length > 1 ? `
+                <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:10px;cursor:pointer;">
+                  <input type="checkbox" id="schedBundleCheck" checked style="width:18px;height:18px;accent-color:var(--green);">
+                  <span>Bundle on same visit</span>
+                </label>
+              ` : ''}
+              <div id="schedOneTimeDates">
+                <div style="display:flex;align-items:center;gap:8px;">
+                  <label style="font-size:11px;color:var(--gray-500);white-space:nowrap;">Date</label>
+                  <input type="date" id="schedOneTimeDate" value="${defaultFallDate}" style="flex:1;padding:8px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;box-sizing:border-box;">
+                </div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
 
         <div id="schedPreview" style="background:var(--gray-50, #f8f9fa);border-radius:12px;padding:16px;margin-bottom:20px;">
         </div>
@@ -863,53 +928,151 @@ const EstimatesPage = {
       if (e.target === overlay) overlay.remove();
     });
 
-    // Interval button clicks
-    this._schedInterval = 5;
-    overlay.querySelectorAll('.sched-interval-btn').forEach(btn => {
+    // Interval button clicks for each service
+    overlay.querySelectorAll('.sched-int-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        this._schedInterval = parseInt(btn.dataset.weeks);
-        overlay.querySelectorAll('.sched-interval-btn').forEach(b => {
-          const active = parseInt(b.dataset.weeks) === this._schedInterval;
+        const idx = parseInt(btn.dataset.idx);
+        const weeks = parseInt(btn.dataset.weeks);
+        this._schedServiceConfig[idx].interval = weeks;
+        // Update button styles for this service
+        overlay.querySelectorAll(`.sched-int-btn[data-idx="${idx}"]`).forEach(b => {
+          const active = parseInt(b.dataset.weeks) === weeks;
           b.style.borderColor = active ? 'var(--green)' : 'var(--gray-200)';
           b.style.background = active ? 'var(--green-light, #f0f9e8)' : 'white';
-          b.style.fontWeight = active ? '700' : '500';
+          b.style.fontWeight = active ? '700' : '400';
         });
-        this._updateSchedulePreview(totalRounds);
+        this._updateSchedulePreview();
       });
     });
 
-    // Date change updates preview
-    document.getElementById('schedStartDate').addEventListener('change', () => {
-      this._updateSchedulePreview(totalRounds);
+    // Start date changes for each service
+    overlay.querySelectorAll('.sched-svc-start').forEach(input => {
+      input.addEventListener('change', () => {
+        const idx = parseInt(input.dataset.idx);
+        this._schedServiceConfig[idx].start_date = input.value;
+        this._updateSchedulePreview();
+      });
     });
 
-    // Initial preview
-    this._updateSchedulePreview(totalRounds);
-  },
-
-  _updateSchedulePreview(totalRounds) {
-    const startDate = document.getElementById('schedStartDate').value;
-    if (!startDate) return;
-    const interval = this._schedInterval || 5;
-    const preview = document.getElementById('schedPreview');
-
-    const dates = [];
-    for (let i = 0; i < totalRounds; i++) {
-      const d = new Date(startDate + 'T12:00:00');
-      d.setDate(d.getDate() + (i * interval * 7));
-      dates.push(d);
+    // One-time date change
+    const oneTimeDate = document.getElementById('schedOneTimeDate');
+    if (oneTimeDate) {
+      oneTimeDate.addEventListener('change', () => {
+        this._schedOneTimeDate = oneTimeDate.value;
+        this._updateSchedulePreview();
+      });
     }
 
+    // Bundle checkbox
+    const bundleCheck = document.getElementById('schedBundleCheck');
+    if (bundleCheck) {
+      bundleCheck.addEventListener('change', () => {
+        this._schedBundleOneTime = bundleCheck.checked;
+        const datesDiv = document.getElementById('schedOneTimeDates');
+        if (bundleCheck.checked) {
+          datesDiv.innerHTML = `
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-size:11px;color:var(--gray-500);white-space:nowrap;">Date</label>
+              <input type="date" id="schedOneTimeDate" value="${this._schedOneTimeDate}" style="flex:1;padding:8px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
+          `;
+          datesDiv.querySelector('#schedOneTimeDate').addEventListener('change', (e) => {
+            this._schedOneTimeDate = e.target.value;
+            this._updateSchedulePreview();
+          });
+        } else {
+          datesDiv.innerHTML = this._schedOneTimeItems.map((item, i) => `
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+              <label style="font-size:11px;color:var(--gray-500);white-space:nowrap;min-width:60px;">${this._esc(item.service_name.split(' ')[0])}</label>
+              <input type="date" class="sched-onetime-date" data-idx="${i}" value="${this._schedOneTimeDate}" style="flex:1;padding:8px;border:1px solid var(--gray-200);border-radius:6px;font-size:13px;box-sizing:border-box;">
+            </div>
+          `).join('');
+          datesDiv.querySelectorAll('.sched-onetime-date').forEach(inp => {
+            inp.addEventListener('change', () => this._updateSchedulePreview());
+          });
+        }
+        this._updateSchedulePreview();
+      });
+    }
+
+    // Initial preview
+    this._updateSchedulePreview();
+  },
+
+  _updateSchedulePreview() {
+    const preview = document.getElementById('schedPreview');
+    if (!preview) return;
+
+    // Collect all scheduled visits: { date, services[] }
+    const allVisits = [];
+
+    // Recurring services
+    this._schedServiceConfig.forEach(svc => {
+      for (let r = 0; r < svc.rounds; r++) {
+        const d = new Date(svc.start_date + 'T12:00:00');
+        d.setDate(d.getDate() + (r * svc.interval * 7));
+        allVisits.push({
+          date: d,
+          dateStr: d.toISOString().split('T')[0],
+          label: `${svc.service_name} R${r + 1}`,
+          service_name: svc.service_name,
+          type: 'recurring'
+        });
+      }
+    });
+
+    // One-time services
+    if (this._schedOneTimeItems && this._schedOneTimeItems.length > 0) {
+      if (this._schedBundleOneTime) {
+        const d = new Date(this._schedOneTimeDate + 'T12:00:00');
+        const labels = this._schedOneTimeItems.map(i => i.service_name);
+        allVisits.push({
+          date: d,
+          dateStr: d.toISOString().split('T')[0],
+          label: labels.join(', '),
+          service_name: labels.join(', '),
+          type: 'onetime'
+        });
+      } else {
+        const dateInputs = document.querySelectorAll('.sched-onetime-date');
+        this._schedOneTimeItems.forEach((item, i) => {
+          const dateVal = dateInputs[i] ? dateInputs[i].value : this._schedOneTimeDate;
+          const d = new Date(dateVal + 'T12:00:00');
+          allVisits.push({
+            date: d,
+            dateStr: d.toISOString().split('T')[0],
+            label: item.service_name,
+            service_name: item.service_name,
+            type: 'onetime'
+          });
+        });
+      }
+    }
+
+    // Sort by date
+    allVisits.sort((a, b) => a.date - b.date);
+
+    // Group by date
+    const grouped = {};
+    allVisits.forEach(v => {
+      if (!grouped[v.dateStr]) grouped[v.dateStr] = { date: v.date, services: [] };
+      grouped[v.dateStr].services.push(v.label);
+    });
+
+    const groupedArr = Object.values(grouped).sort((a, b) => a.date - b.date);
+
     preview.innerHTML = `
-      <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--gray-600);">Schedule Preview</div>
-      ${dates.map((d, i) => `
-        <div style="display:flex;justify-content:space-between;padding:6px 0;${i < dates.length - 1 ? 'border-bottom:1px solid var(--gray-200);' : ''}">
-          <span style="font-weight:600;color:var(--green-dark, #2d5a0f);font-size:13px;">Round ${i + 1}</span>
-          <span style="color:var(--gray-600);font-size:13px;">${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
-        </div>
-      `).join('')}
+      <div style="font-weight:600;font-size:13px;margin-bottom:10px;color:var(--gray-600);">Season Preview — ${groupedArr.length} visits</div>
+      <div style="max-height:200px;overflow-y:auto;">
+        ${groupedArr.map((g, i) => `
+          <div style="display:flex;gap:10px;padding:5px 0;${i < groupedArr.length - 1 ? 'border-bottom:1px solid var(--gray-200);' : ''}">
+            <span style="font-size:12px;color:var(--gray-500);min-width:85px;white-space:nowrap;">${g.date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+            <span style="font-size:12px;font-weight:500;color:var(--green-dark, #2d5a0f);">${g.services.join(' + ')}</span>
+          </div>
+        `).join('')}
+      </div>
       <div style="margin-top:10px;padding-top:10px;border-top:2px solid var(--gray-200);text-align:center;font-size:12px;color:var(--gray-500);">
-        ${totalRounds} visits &middot; ${dates[0].toLocaleDateString('en-US', { month: 'short' })} through ${dates[dates.length - 1].toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+        ${allVisits.length} total service visits &middot; ${groupedArr.length > 0 ? groupedArr[0].date.toLocaleDateString('en-US', { month: 'short' }) + ' through ' + groupedArr[groupedArr.length - 1].date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : ''}
       </div>
     `;
   },
@@ -919,14 +1082,46 @@ const EstimatesPage = {
     btn.disabled = true;
     btn.textContent = 'Creating...';
 
+    // Build per-service schedule data
+    const services = this._schedServiceConfig.map(svc => ({
+      service_name: svc.service_name,
+      item_id: svc.item_id,
+      rounds: svc.rounds,
+      interval_weeks: svc.interval,
+      start_date: svc.start_date
+    }));
+
+    // One-time services
+    const oneTimeServices = [];
+    if (this._schedOneTimeItems && this._schedOneTimeItems.length > 0) {
+      if (this._schedBundleOneTime) {
+        oneTimeServices.push({
+          service_names: this._schedOneTimeItems.map(i => i.service_name),
+          item_ids: this._schedOneTimeItems.map(i => i.id),
+          date: this._schedOneTimeDate,
+          bundled: true
+        });
+      } else {
+        const dateInputs = document.querySelectorAll('.sched-onetime-date');
+        this._schedOneTimeItems.forEach((item, i) => {
+          oneTimeServices.push({
+            service_names: [item.service_name],
+            item_ids: [item.id],
+            date: dateInputs[i] ? dateInputs[i].value : this._schedOneTimeDate,
+            bundled: false
+          });
+        });
+      }
+    }
+
     try {
       const result = await Api.post(`/api/estimates/${estimateId}/schedule`, {
-        start_date: document.getElementById('schedStartDate').value,
-        interval_weeks: this._schedInterval || 5
+        services,
+        one_time_services: oneTimeServices
       });
 
       document.getElementById('scheduleModal').remove();
-      App.toast(`${result.rounds_created} visits scheduled!`, 'success');
+      App.toast(`${result.total_created} visits scheduled!`, 'success');
       App.navigate('scheduling');
     } catch (err) {
       App.toast(err.message, 'error');
@@ -934,8 +1129,6 @@ const EstimatesPage = {
       btn.textContent = 'Create Schedule';
     }
   },
-
-  _schedInterval: 5,
 
   // ─── Helpers ──────────────────────────────────────────────
   _defaultValidDate() {
