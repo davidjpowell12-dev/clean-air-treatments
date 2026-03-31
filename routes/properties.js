@@ -222,57 +222,78 @@ router.delete('/:id/zones/:zoneId', requireAuth, (req, res) => {
   res.json({ success: true, total_sqft: total });
 });
 
-// Bulk import properties (admin only)
+// CRM Import — bulk create properties + optionally generate schedules
 router.post('/import', requireAdmin, (req, res) => {
-  const { properties } = req.body;
-  if (!Array.isArray(properties)) {
-    return res.status(400).json({ error: 'Properties array required' });
+  // Support both old format { properties: [...] } and new CRM format { clients: [...] }
+  const clients = req.body.clients || req.body.properties;
+  const createSchedules = req.body.create_schedules || false;
+
+  if (!Array.isArray(clients)) {
+    return res.status(400).json({ error: 'clients or properties array required' });
   }
 
   const db = getDb();
-  const stmt = db.prepare(`
-    INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  const insertProp = db.prepare(`
+    INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // Get existing addresses for dedup
   const existingAddresses = new Set(
     db.prepare('SELECT LOWER(address) as addr FROM properties').all().map(r => r.addr)
   );
 
-  const importMany = db.transaction((props) => {
-    let imported = 0;
+  const importAll = db.transaction(() => {
+    let propertiesCreated = 0;
+    let schedulesCreated = 0;
     let skipped = 0;
-    const errors = [];
-    for (let i = 0; i < props.length; i++) {
-      const p = props[i];
-      if (!p.customer_name || !p.address) {
-        errors.push(`Row ${i + 1}: Missing customer_name or address`);
-        continue;
-      }
-      // Skip duplicates
-      const addrLower = p.address.trim().toLowerCase();
+
+    for (const c of clients) {
+      if (!c.customer_name || !c.address) { skipped++; continue; }
+
+      const addrLower = c.address.trim().toLowerCase();
+      let propertyId;
+
       if (existingAddresses.has(addrLower)) {
+        // Get existing property ID for schedule creation
+        const existing = db.prepare('SELECT id FROM properties WHERE LOWER(address) = ?').get(addrLower);
+        if (existing) propertyId = existing.id;
         skipped++;
-        continue;
+      } else {
+        try {
+          const result = insertProp.run(
+            c.customer_name, c.address, c.city || null, c.state || 'MI',
+            c.zip || null, c.email || null, c.phone || null,
+            c.sqft ? Number(c.sqft) : null
+          );
+          propertyId = result.lastInsertRowid;
+          existingAddresses.add(addrLower);
+          propertiesCreated++;
+        } catch (e) { continue; }
       }
-      try {
-        stmt.run(
-          p.customer_name, p.address, p.city || null, p.state || 'MI',
-          p.zip || null, p.email || null, p.phone || null,
-          p.sqft ? Number(p.sqft) : null, p.soil_type || null, p.notes || null
-        );
-        existingAddresses.add(addrLower);
-        imported++;
-      } catch (e) {
-        errors.push(`Row ${i + 1}: ${e.message}`);
+
+      // Create schedule if requested and we have a start_date
+      if (createSchedules && propertyId && c.start_date) {
+        const rounds = parseInt(c.rounds) || 6;
+        const interval = parseInt(c.interval_weeks) || 5;
+        const programId = `crm_${propertyId}_${Date.now()}`;
+
+        for (let round = 1; round <= rounds; round++) {
+          const offsetDays = (round - 1) * interval * 7;
+          const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(c.start_date, offsetDays);
+          db.prepare(`
+            INSERT INTO schedules (property_id, scheduled_date, sort_order, round_number, total_rounds, program_id, created_by)
+            VALUES (?, ?, 0, ?, ?, ?, ?)
+          `).run(propertyId, roundDate.d, round, rounds, programId, req.session.userId);
+          schedulesCreated++;
+        }
       }
     }
-    return { imported, skipped, errors };
+
+    return { properties_created: propertiesCreated, schedules_created: schedulesCreated, skipped };
   });
 
-  const result = importMany(properties);
-  logAudit(db, 'properties', 0, req.session.userId, 'bulk_import', { count: result.imported });
+  const result = importAll();
+  logAudit(db, 'properties', 0, req.session.userId, 'crm_import', result);
   res.json(result);
 });
 

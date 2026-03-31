@@ -170,6 +170,22 @@ router.post('/public/:token/accept', async (req, res) => {
   }
 });
 
+// Get accepted estimates that need scheduling (for dashboard widget)
+router.get('/needs-scheduling', requireAuth, (req, res) => {
+  const db = getDb();
+  const estimates = db.prepare(`
+    SELECT e.id, e.customer_name, e.address, e.city, e.total_price, e.monthly_price,
+           e.payment_months, e.accepted_at, e.property_id,
+           (SELECT COUNT(*) FROM estimate_items WHERE estimate_id = e.id AND is_included = 1) as item_count,
+           ROUND((julianday('now') - julianday(e.accepted_at))) as days_since_accepted
+    FROM estimates e
+    WHERE e.status = 'accepted'
+      AND e.id NOT IN (SELECT DISTINCT estimate_id FROM schedules WHERE estimate_id IS NOT NULL)
+    ORDER BY e.accepted_at ASC
+  `).all();
+  res.json(estimates);
+});
+
 // Get single estimate with items
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
@@ -561,6 +577,66 @@ router.get('/reminders/pending', requireAuth, (req, res) => {
   `).all();
 
   res.json(estimates);
+});
+
+// Schedule job from accepted estimate — creates all round entries
+router.post('/:id/schedule', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.status !== 'accepted') return res.status(400).json({ error: 'Only accepted estimates can be scheduled' });
+
+  const { start_date, interval_weeks, assigned_to } = req.body;
+  if (!start_date) return res.status(400).json({ error: 'start_date required' });
+
+  const interval = interval_weeks || 5;
+
+  // Get recurring items to determine round count
+  const items = db.prepare(
+    'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1'
+  ).all(est.id);
+
+  const recurringItems = items.filter(i => i.is_recurring);
+  const totalRounds = recurringItems.length > 0
+    ? Math.max(...recurringItems.map(i => i.rounds || 1))
+    : 1;
+
+  if (!est.property_id) {
+    return res.status(400).json({ error: 'Estimate has no linked property. Edit the estimate first.' });
+  }
+
+  const programId = `est_${est.id}_${Date.now()}`;
+
+  const schedule = db.transaction(() => {
+    const created = [];
+    for (let round = 1; round <= totalRounds; round++) {
+      const offsetDays = (round - 1) * interval * 7;
+      const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(start_date, offsetDays);
+
+      const result = db.prepare(`
+        INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, estimate_id, created_by)
+        VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
+      `).run(est.property_id, roundDate.d, assigned_to || null, round, totalRounds, programId, est.id, req.session.userId);
+
+      created.push({ id: result.lastInsertRowid, round, date: roundDate.d });
+    }
+    return created;
+  });
+
+  const created = schedule();
+
+  logAudit(db, 'schedule', 0, req.session.userId, 'schedule_from_estimate', {
+    estimate_id: est.id, customer_name: est.customer_name,
+    rounds: totalRounds, interval_weeks: interval, start_date
+  });
+
+  res.json({
+    success: true,
+    rounds_created: created.length,
+    total_rounds: totalRounds,
+    entries: created,
+    program_id: programId
+  });
 });
 
 // Mark a reminder as sent for an estimate

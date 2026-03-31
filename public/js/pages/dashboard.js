@@ -14,12 +14,13 @@ const DashboardPage = {
     `;
 
     try {
-      const [products, inventory, applications, properties, financials] = await Promise.all([
+      const [products, inventory, applications, properties, financials, needsScheduling] = await Promise.all([
         Api.get('/api/products'),
         Api.get('/api/inventory'),
         Api.get('/api/applications?limit=5'),
         Api.get('/api/properties').catch(() => []),
-        Api.get('/api/applications/stats').catch(() => ({ total_revenue: 0, total_cost: 0, total_margin: 0, margin_pct: 0 }))
+        Api.get('/api/applications/stats').catch(() => ({ total_revenue: 0, total_cost: 0, total_margin: 0, margin_pct: 0 })),
+        Api.get('/api/estimates/needs-scheduling').catch(() => [])
       ]);
 
       const lowStock = inventory.filter(i => i.quantity <= i.reorder_threshold);
@@ -67,6 +68,33 @@ const DashboardPage = {
             <div class="stat-card stat-card-${financials.margin_pct >= 0 ? 'blue' : 'red'}">
               <div class="stat-value" style="font-size:22px;color:${financials.margin_pct >= 0 ? 'var(--green-dark)' : 'var(--red)'};">${financials.margin_pct}%</div>
               <div class="stat-label">Margin %</div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${needsScheduling.length > 0 ? `
+          <div class="card" style="margin-top:12px;border:2px solid var(--green);border-left:6px solid var(--green);">
+            <div class="card-header" style="cursor:pointer;" onclick="this.parentElement.querySelector('.card-body').style.display = this.parentElement.querySelector('.card-body').style.display === 'none' ? '' : 'none'">
+              <h3 style="color:var(--green-dark, #2d5a0f);">📅 Needs Scheduling (${needsScheduling.length})</h3>
+              <span class="badge badge-green" style="font-size:13px;">${needsScheduling.length} job${needsScheduling.length > 1 ? 's' : ''}</span>
+            </div>
+            <div class="card-body" style="padding:0;">
+              ${needsScheduling.map(e => {
+                const days = e.days_since_accepted || 0;
+                const urgencyColor = days >= 5 ? 'var(--red, #e53e3e)' : days >= 2 ? 'var(--orange, #dd6b20)' : 'var(--green)';
+                const urgencyLabel = days >= 5 ? 'Urgent' : days >= 2 ? `${days}d ago` : 'New';
+                return `
+                  <div class="data-row" onclick="App.navigate('estimates', 'view', ${e.id})" style="cursor:pointer;">
+                    <div class="data-row-main">
+                      <h4>${this.escapeHtml(e.customer_name)}</h4>
+                      <p>${this.escapeHtml(e.address || '')}${e.city ? ', ' + this.escapeHtml(e.city) : ''} &middot; $${e.total_price.toFixed(0)}</p>
+                    </div>
+                    <div class="data-row-right">
+                      <span class="badge" style="background:${urgencyColor};color:white;font-size:11px;">${urgencyLabel}</span>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
             </div>
           </div>
         ` : ''}

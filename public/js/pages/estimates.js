@@ -596,6 +596,11 @@ const EstimatesPage = {
               </div>
             </div>
           ` : ''}
+          ${est.status === 'accepted' ? `
+            <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.showScheduleModal(${est.id})" id="scheduleJobBtn">
+              📅 Schedule This Job
+            </button>
+          ` : ''}
           ${est.status === 'sent' || est.status === 'viewed' ? `
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.sendReminder(${est.id})" id="reminderBtn">
               📧 Send Reminder
@@ -775,6 +780,137 @@ const EstimatesPage = {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
   },
+
+  // ─── Schedule Job Modal ─────────────────────────────────
+  async showScheduleModal(estimateId) {
+    // Get estimate to determine round count
+    const est = await Api.get(`/api/estimates/${estimateId}`);
+    const items = (est.items || []).filter(i => i.is_included);
+    const recurringItems = items.filter(i => i.is_recurring);
+    const totalRounds = recurringItems.length > 0
+      ? Math.max(...recurringItems.map(i => i.rounds || 1))
+      : 1;
+
+    // Default start date: next Monday
+    const today = new Date();
+    const dayOfWeek = today.getDay();
+    const daysUntilMonday = dayOfWeek === 0 ? 1 : (8 - dayOfWeek);
+    const nextMonday = new Date(today);
+    nextMonday.setDate(today.getDate() + daysUntilMonday);
+    const defaultStart = nextMonday.toISOString().split('T')[0];
+
+    // Build modal overlay
+    const overlay = document.createElement('div');
+    overlay.id = 'scheduleModal';
+    overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    overlay.innerHTML = `
+      <div style="background:white;border-radius:16px;max-width:400px;width:100%;max-height:90vh;overflow-y:auto;padding:24px;">
+        <h3 style="margin:0 0 4px;font-size:18px;">Schedule Job</h3>
+        <p style="color:var(--gray-500);font-size:13px;margin:0 0 20px;">${this._esc(est.customer_name)} &middot; ${totalRounds} rounds</p>
+
+        <div style="margin-bottom:16px;">
+          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">First Visit Date</label>
+          <input type="date" id="schedStartDate" value="${defaultStart}" style="width:100%;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;box-sizing:border-box;">
+        </div>
+
+        <div style="margin-bottom:16px;">
+          <label style="font-weight:600;font-size:14px;display:block;margin-bottom:6px;">Weeks Between Visits</label>
+          <div style="display:flex;gap:8px;">
+            ${[4,5,6,7,8].map(w => `
+              <button class="sched-interval-btn" data-weeks="${w}" style="flex:1;padding:10px;border:2px solid ${w === 5 ? 'var(--green)' : 'var(--gray-200)'};border-radius:8px;background:${w === 5 ? 'var(--green-light, #f0f9e8)' : 'white'};font-weight:${w === 5 ? '700' : '500'};font-size:14px;cursor:pointer;">${w}w</button>
+            `).join('')}
+          </div>
+        </div>
+
+        <div id="schedPreview" style="background:var(--gray-50, #f8f9fa);border-radius:12px;padding:16px;margin-bottom:20px;">
+        </div>
+
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-outline" style="flex:1;" onclick="document.getElementById('scheduleModal').remove()">Cancel</button>
+          <button class="btn btn-primary" style="flex:1;background:var(--green);" id="confirmScheduleBtn" onclick="EstimatesPage.scheduleFromEstimate(${estimateId})">Create Schedule</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // Close on backdrop click
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+
+    // Interval button clicks
+    this._schedInterval = 5;
+    overlay.querySelectorAll('.sched-interval-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._schedInterval = parseInt(btn.dataset.weeks);
+        overlay.querySelectorAll('.sched-interval-btn').forEach(b => {
+          const active = parseInt(b.dataset.weeks) === this._schedInterval;
+          b.style.borderColor = active ? 'var(--green)' : 'var(--gray-200)';
+          b.style.background = active ? 'var(--green-light, #f0f9e8)' : 'white';
+          b.style.fontWeight = active ? '700' : '500';
+        });
+        this._updateSchedulePreview(totalRounds);
+      });
+    });
+
+    // Date change updates preview
+    document.getElementById('schedStartDate').addEventListener('change', () => {
+      this._updateSchedulePreview(totalRounds);
+    });
+
+    // Initial preview
+    this._updateSchedulePreview(totalRounds);
+  },
+
+  _updateSchedulePreview(totalRounds) {
+    const startDate = document.getElementById('schedStartDate').value;
+    if (!startDate) return;
+    const interval = this._schedInterval || 5;
+    const preview = document.getElementById('schedPreview');
+
+    const dates = [];
+    for (let i = 0; i < totalRounds; i++) {
+      const d = new Date(startDate + 'T12:00:00');
+      d.setDate(d.getDate() + (i * interval * 7));
+      dates.push(d);
+    }
+
+    preview.innerHTML = `
+      <div style="font-weight:600;font-size:13px;margin-bottom:8px;color:var(--gray-600);">Schedule Preview</div>
+      ${dates.map((d, i) => `
+        <div style="display:flex;justify-content:space-between;padding:6px 0;${i < dates.length - 1 ? 'border-bottom:1px solid var(--gray-200);' : ''}">
+          <span style="font-weight:600;color:var(--green-dark, #2d5a0f);font-size:13px;">Round ${i + 1}</span>
+          <span style="color:var(--gray-600);font-size:13px;">${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+        </div>
+      `).join('')}
+      <div style="margin-top:10px;padding-top:10px;border-top:2px solid var(--gray-200);text-align:center;font-size:12px;color:var(--gray-500);">
+        ${totalRounds} visits &middot; ${dates[0].toLocaleDateString('en-US', { month: 'short' })} through ${dates[dates.length - 1].toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+      </div>
+    `;
+  },
+
+  async scheduleFromEstimate(estimateId) {
+    const btn = document.getElementById('confirmScheduleBtn');
+    btn.disabled = true;
+    btn.textContent = 'Creating...';
+
+    try {
+      const result = await Api.post(`/api/estimates/${estimateId}/schedule`, {
+        start_date: document.getElementById('schedStartDate').value,
+        interval_weeks: this._schedInterval || 5
+      });
+
+      document.getElementById('scheduleModal').remove();
+      App.toast(`${result.rounds_created} visits scheduled!`, 'success');
+      App.navigate('scheduling');
+    } catch (err) {
+      App.toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = 'Create Schedule';
+    }
+  },
+
+  _schedInterval: 5,
 
   // ─── Helpers ──────────────────────────────────────────────
   _defaultValidDate() {

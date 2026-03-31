@@ -308,6 +308,11 @@ const migrations = [
   function addLatLngToProperties(db) {
     try { db.exec('ALTER TABLE properties ADD COLUMN lat REAL'); } catch (e) { /* exists */ }
     try { db.exec('ALTER TABLE properties ADD COLUMN lng REAL'); } catch (e) { /* exists */ }
+  },
+  // Migration 17: Link schedules to estimates for estimate→schedule pipeline
+  function linkSchedulesToEstimates(db) {
+    try { db.exec('ALTER TABLE schedules ADD COLUMN estimate_id INTEGER REFERENCES estimates(id)'); } catch (e) { /* exists */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_estimate ON schedules(estimate_id)');
   }
 ];
 

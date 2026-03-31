@@ -89,6 +89,21 @@ const SettingsPage = {
         </div>
 
         <div class="card" style="margin-top:16px;">
+          <div class="card-header">
+            <h3>CRM Import</h3>
+          </div>
+          <div class="card-body">
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:8px;">Import clients and schedules from your existing CRM via CSV.</p>
+            <p style="font-size:12px;color:var(--gray-400);margin-bottom:16px;">CSV must include columns: <strong>customer_name, address, city, zip</strong>. Optional: <strong>state, email, phone, sqft, start_date, interval_weeks, rounds</strong>.</p>
+            <label class="btn btn-primary btn-full" style="cursor:pointer;text-align:center;display:block;">
+              Upload CRM CSV
+              <input type="file" accept=".csv" style="display:none;" onchange="SettingsPage.importCRM(this)">
+            </label>
+            <div id="crmImportPreview"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
           <div class="card-header"><h3>Data Export</h3></div>
           <div class="card-body">
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Export application records for MDARD annual reporting (due March 1).</p>
@@ -346,6 +361,79 @@ const SettingsPage = {
     } catch (err) {
       App.toast(err.message, 'error');
     }
+  },
+
+  async importCRM(input) {
+    const file = input.files[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+      if (lines.length < 2) { App.toast('CSV must have a header + at least one row', 'error'); return; }
+
+      // Parse header
+      const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const vals = lines[i].match(/(".*?"|[^,]+)/g)?.map(v => v.replace(/^"|"$/g, '').trim()) || [];
+        const obj = {};
+        headers.forEach((h, idx) => { obj[h] = vals[idx] || ''; });
+        if (obj.customer_name && obj.address) rows.push(obj);
+      }
+
+      if (rows.length === 0) { App.toast('No valid rows found. Need customer_name and address columns.', 'error'); return; }
+
+      // Show preview
+      const preview = document.getElementById('crmImportPreview');
+      preview.innerHTML = `
+        <div style="margin-top:16px;background:var(--gray-50, #f8f9fa);border-radius:12px;padding:16px;">
+          <h4 style="margin:0 0 8px;">Preview: ${rows.length} clients found</h4>
+          <div style="max-height:200px;overflow-y:auto;">
+            ${rows.slice(0, 10).map(r => `
+              <div style="padding:6px 0;border-bottom:1px solid var(--gray-200);font-size:13px;">
+                <strong>${r.customer_name}</strong> &middot; ${r.address}, ${r.city || ''} ${r.zip || ''}
+                ${r.sqft ? ' &middot; ' + r.sqft + ' sqft' : ''}
+              </div>
+            `).join('')}
+            ${rows.length > 10 ? `<div style="padding:6px 0;font-size:12px;color:var(--gray-400);">...and ${rows.length - 10} more</div>` : ''}
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:13px;">
+              <input type="checkbox" id="crmCreateSchedules" ${rows[0]?.start_date ? 'checked' : ''}>
+              Also create schedules (needs start_date column)
+            </label>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;">
+            <button class="btn btn-outline" style="flex:1;" onclick="document.getElementById('crmImportPreview').innerHTML=''">Cancel</button>
+            <button class="btn btn-primary" style="flex:1;background:var(--green);" id="confirmCrmImport">Import ${rows.length} Clients</button>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('confirmCrmImport').addEventListener('click', async () => {
+        const btn = document.getElementById('confirmCrmImport');
+        btn.disabled = true;
+        btn.textContent = 'Importing...';
+        const createSchedules = document.getElementById('crmCreateSchedules').checked;
+
+        try {
+          const result = await Api.post('/api/properties/import', {
+            clients: rows,
+            create_schedules: createSchedules
+          });
+          App.toast(`Imported ${result.properties_created} clients${result.schedules_created ? ', ' + result.schedules_created + ' schedule entries' : ''}`, 'success');
+          preview.innerHTML = '';
+        } catch (err) {
+          App.toast('Import failed: ' + err.message, 'error');
+          btn.disabled = false;
+          btn.textContent = `Import ${rows.length} Clients`;
+        }
+      });
+    } catch (err) {
+      App.toast('Failed to read CSV: ' + err.message, 'error');
+    }
+    input.value = '';
   },
 
   async deleteUser(id) {

@@ -216,6 +216,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   total_rounds INTEGER DEFAULT 6,
   program_id TEXT,
   service_type TEXT,
+  estimate_id INTEGER REFERENCES estimates(id),
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -224,6 +225,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE INDEX IF NOT EXISTS idx_schedules_date ON schedules(scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_schedules_property ON schedules(property_id);
 CREATE INDEX IF NOT EXISTS idx_schedules_assigned ON schedules(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_schedules_estimate ON schedules(estimate_id);
 -- idx_schedules_program created by migration 7 (safe for existing DBs)
 
 -- Soil Tests (lab results per property — Logan Labs format)
