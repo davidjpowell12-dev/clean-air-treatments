@@ -600,6 +600,9 @@ const EstimatesPage = {
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.showScheduleModal(${est.id})" id="scheduleJobBtn">
               📅 Schedule This Job
             </button>
+            <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
+              Cancel Job &amp; Remove Schedule
+            </button>
           ` : ''}
           ${est.status === 'sent' || est.status === 'viewed' ? `
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.sendReminderSMS(${est.id})" id="reminderBtn">
@@ -722,6 +725,15 @@ const EstimatesPage = {
     try {
       await Api.put(`/api/estimates/${id}/status`, { status: 'declined' });
       App.toast('Estimate declined', 'success');
+      this.renderDetail(id);
+    } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  async cancelJob(id) {
+    if (!confirm('Cancel this job? This will remove ALL scheduled visits for this client from the calendar.')) return;
+    try {
+      const result = await Api.post(`/api/estimates/${id}/cancel`);
+      App.toast(`Job cancelled — ${result.removed_count} visit${result.removed_count !== 1 ? 's' : ''} removed from schedule`, 'success');
       this.renderDetail(id);
     } catch (err) { App.toast(err.message, 'error'); }
   },

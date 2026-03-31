@@ -149,23 +149,54 @@ const PropertiesPage = {
           const total = scheduleRounds.length;
           const pct = Math.round((done / total) * 100);
           const today = new Date().toISOString().slice(0, 10);
+
+          // Group by service type
+          const svcGroups = {};
+          scheduleRounds.forEach(r => {
+            const svc = r.service_type || 'General';
+            if (!svcGroups[svc]) svcGroups[svc] = [];
+            svcGroups[svc].push(r);
+          });
+
+          const svcColorMap = (svc) => {
+            const lower = svc.toLowerCase();
+            if (lower.includes('fert') || lower.includes('weed')) return { bg: '#e8f5d8', text: '#3d7a0f', border: '#78be20' };
+            if (lower.includes('mosquito') || lower.includes('tick')) return { bg: '#ede9fe', text: '#5b21b6', border: '#7c3aed' };
+            if (lower.includes('aerat') || lower.includes('seed') || lower.includes('compost') || lower.includes('topdress')) return { bg: '#fef3c7', text: '#92400e', border: '#f59e0b' };
+            return { bg: '#dbeafe', text: '#1e40af', border: '#3b82f6' };
+          };
+
           return `
             <div class="card" style="margin-bottom:12px;">
-              <div class="card-header"><h3 style="font-size:16px;">Season Progress</h3><span class="badge ${done === total ? 'badge-green' : 'badge-blue'}">${done}/${total}</span></div>
+              <div class="card-header"><h3 style="font-size:16px;">Season Schedule</h3><span class="badge ${done === total ? 'badge-green' : 'badge-blue'}">${done}/${total} complete</span></div>
               <div class="card-body">
                 <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-                <div style="margin-top:10px;">
-                  ${scheduleRounds.map(r => {
-                    const statusIcon = r.status === 'completed' ? '&#10003;' : r.status === 'skipped' ? '&mdash;' : '&#9679;';
-                    const statusColor = r.status === 'completed' ? 'var(--green)' : r.status === 'skipped' ? 'var(--gray-500)' : (r.scheduled_date < today ? 'var(--red)' : 'var(--blue)');
-                    const d = new Date(r.scheduled_date + 'T12:00:00');
-                    const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-                    return `<div class="detail-row" style="cursor:pointer;" onclick="App.navigate('scheduling')">
-                      <span class="detail-label" style="color:${statusColor};font-weight:600;">Round ${r.round_number} ${statusIcon}</span>
-                      <span class="detail-value">${dateStr} &mdash; ${r.status}${r.status === 'scheduled' && r.scheduled_date < today ? ' (overdue)' : ''}</span>
-                    </div>`;
-                  }).join('')}
-                </div>
+
+                ${Object.entries(svcGroups).map(([svc, rounds]) => {
+                  const c = svcColorMap(svc);
+                  const svcDone = rounds.filter(r => r.status === 'completed').length;
+                  return `
+                    <div style="margin-top:14px;border-left:4px solid ${c.border};padding-left:12px;">
+                      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                        <span style="font-weight:700;font-size:14px;color:${c.text};">${this.esc(svc)}</span>
+                        <span style="font-size:12px;color:var(--gray-500);">${svcDone}/${rounds.length}</span>
+                      </div>
+                      <div style="display:flex;flex-wrap:wrap;gap:6px;">
+                        ${rounds.map(r => {
+                          const d = new Date(r.scheduled_date + 'T12:00:00');
+                          const dateStr = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                          const isOverdue = r.status === 'scheduled' && r.scheduled_date < today;
+                          const bgColor = r.status === 'completed' ? '#dcf5c8' : r.status === 'skipped' ? 'var(--gray-100)' : isOverdue ? '#fdd' : c.bg;
+                          const txtColor = r.status === 'completed' ? '#2d6a1e' : r.status === 'skipped' ? 'var(--gray-500)' : isOverdue ? '#b91c1c' : c.text;
+                          const icon = r.status === 'completed' ? '✓ ' : r.status === 'skipped' ? '— ' : isOverdue ? '! ' : '';
+                          return `<div style="background:${bgColor};color:${txtColor};padding:4px 10px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;" onclick="App.navigate('scheduling')" title="${r.status}${isOverdue ? ' (overdue)' : ''}">
+                            ${icon}${r.round_number ? 'R' + r.round_number + ' ' : ''}${dateStr}
+                          </div>`;
+                        }).join('')}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             </div>
           `;

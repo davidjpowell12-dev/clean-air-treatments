@@ -253,21 +253,31 @@ const SchedulingPage = {
     });
   },
 
+  _svcColor(serviceType) {
+    if (!serviceType) return '';
+    const lower = serviceType.toLowerCase();
+    if (lower.includes('fert') || lower.includes('weed')) return 'green';
+    if (lower.includes('mosquito') || lower.includes('tick')) return 'purple';
+    if (lower.includes('aerat') || lower.includes('seed') || lower.includes('compost') || lower.includes('topdress')) return 'amber';
+    return 'blue';
+  },
+
   _renderEntry(e, idx, techs) {
     const statusClass = e.status === 'completed' ? 'badge-green' : e.status === 'skipped' ? 'badge-gray' : 'badge-blue';
     const statusLabel = e.status.charAt(0).toUpperCase() + e.status.slice(1);
     const techOptions = techs.map(t =>
       `<option value="${t.id}" ${e.assigned_to === t.id ? 'selected' : ''}>${t.full_name}</option>`
     ).join('');
+    const svcColor = this._svcColor(e.service_type);
 
     return `
-      <div class="schedule-entry ${e.status === 'completed' ? 'schedule-entry-done' : ''}" data-id="${e.id}">
+      <div class="schedule-entry ${e.status === 'completed' ? 'schedule-entry-done' : ''}" data-id="${e.id}" ${svcColor ? `data-svc-color="${svcColor}"` : ''}>
         <div class="schedule-entry-main">
           <div class="schedule-entry-order">${idx + 1}</div>
           <div class="schedule-entry-info">
             <div class="schedule-entry-name">${e.customer_name}</div>
             <div class="schedule-entry-addr">${e.address}${e.city ? ', ' + e.city : ''}</div>
-            ${e.service_type ? `<div class="schedule-entry-meta" style="color:var(--green);font-weight:600;">${e.service_type}</div>` : ''}
+            ${e.service_type ? `<div style="margin-top:2px;"><span class="svc-pill svc-pill-${svcColor || 'blue'}">${e.service_type}</span></div>` : ''}
             ${e.sqft ? `<div class="schedule-entry-meta">${Number(e.sqft).toLocaleString()} sq ft</div>` : ''}
             ${e.phone ? `<div class="schedule-entry-meta"><a href="tel:${e.phone}">${e.phone}</a></div>` : ''}
             ${e.notes ? `<div class="schedule-entry-notes">${e.notes}</div>` : ''}

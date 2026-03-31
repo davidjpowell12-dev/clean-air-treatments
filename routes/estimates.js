@@ -757,4 +757,32 @@ router.post('/:id/reminder-sent', requireAuth, (req, res) => {
   res.json(updated);
 });
 
+// Cancel job — decline estimate and remove all linked schedule entries
+router.post('/:id/cancel', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const result = db.transaction(() => {
+    // Remove all non-completed schedule entries linked to this estimate
+    const removed = db.prepare(
+      "DELETE FROM schedules WHERE estimate_id = ? AND status != 'completed'"
+    ).run(est.id);
+
+    // Mark estimate as declined
+    db.prepare(
+      "UPDATE estimates SET status = 'declined', declined_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP WHERE id = ?"
+    ).run(est.id);
+
+    return removed.changes;
+  })();
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'job_cancelled', {
+    customer_name: est.customer_name,
+    schedule_entries_removed: result
+  });
+
+  res.json({ success: true, removed_count: result });
+});
+
 module.exports = router;

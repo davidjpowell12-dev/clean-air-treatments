@@ -1230,6 +1230,25 @@ body {
 .schedule-entry:last-child { border-bottom: none; }
 .schedule-entry-done { opacity: 0.55; }
 
+/* Service type color accents */
+.schedule-entry[data-svc-color="green"] { border-left: 4px solid #78be20; }
+.schedule-entry[data-svc-color="purple"] { border-left: 4px solid #7c3aed; }
+.schedule-entry[data-svc-color="amber"] { border-left: 4px solid #f59e0b; }
+.schedule-entry[data-svc-color="blue"] { border-left: 4px solid #3b82f6; }
+
+.svc-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.svc-pill-green { background: #e8f5d8; color: #3d7a0f; }
+.svc-pill-purple { background: #ede9fe; color: #5b21b6; }
+.svc-pill-amber { background: #fef3c7; color: #92400e; }
+.svc-pill-blue { background: #dbeafe; color: #1e40af; }
+
 .schedule-entry-main {
   display: flex;
   align-items: flex-start;
