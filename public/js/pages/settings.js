@@ -122,9 +122,19 @@ const SettingsPage = {
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Create and download SQLite database backups. Last 30 are kept automatically.</p>
             <div style="display:flex;gap:8px;margin-bottom:16px;">
               <button class="btn btn-primary" id="createBackupBtn" onclick="SettingsPage.createBackup()">Create Backup Now</button>
-              <button class="btn btn-outline" onclick="SettingsPage.downloadLatestBackup()">Download Latest</button>
+              <button class="btn btn-outline" onclick="SettingsPage.downloadDatabase()">Download Database</button>
             </div>
             <div id="backupsList" style="margin-bottom:20px;"></div>
+
+            <h4 style="margin:0 0 8px;font-size:14px;">Google Drive Backup</h4>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:8px;">Backup database to Google Drive. Automatic backups run every 24 hours.</p>
+            <div id="driveBackupStatus" style="margin-bottom:12px;padding:10px;border-radius:8px;background:var(--gray-50, #f8f9fa);font-size:13px;color:var(--gray-500);">
+              Checking backup status...
+            </div>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+              <button class="btn btn-primary" id="driveBackupBtn" onclick="SettingsPage.backupToDrive()">Backup to Google Drive Now</button>
+            </div>
+            <div id="driveBackupsList" style="margin-bottom:20px;"></div>
 
             <h4 style="margin:0 0 8px;font-size:14px;">CSV Exports</h4>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Download your data as CSV spreadsheets.</p>
@@ -505,28 +515,75 @@ const SettingsPage = {
 
       if (backups.length === 0) {
         container.innerHTML = '<p style="font-size:13px;color:var(--gray-400);">No backups yet.</p>';
-        return;
+      } else {
+        container.innerHTML = `
+          <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;">
+            ${backups.slice(0, 10).map(b => {
+              const sizeKB = (b.size / 1024).toFixed(1);
+              return `<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+                <div>
+                  <span style="font-weight:500;">${this.esc(b.filename)}</span>
+                  <span style="color:var(--gray-400);margin-left:8px;">${sizeKB} KB</span>
+                </div>
+                <a href="/api/admin/backups/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-outline" style="padding:2px 10px;font-size:12px;">Download</a>
+              </div>`;
+            }).join('')}
+            ${backups.length > 10 ? `<div style="padding:6px 12px;font-size:12px;color:var(--gray-400);">...and ${backups.length - 10} more</div>` : ''}
+          </div>
+        `;
       }
-
-      container.innerHTML = `
-        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;">
-          ${backups.slice(0, 10).map(b => {
-            const sizeKB = (b.size / 1024).toFixed(1);
-            const date = new Date(b.created).toLocaleString();
-            return `<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;font-size:13px;">
-              <div>
-                <span style="font-weight:500;">${this.esc(b.filename)}</span>
-                <span style="color:var(--gray-400);margin-left:8px;">${sizeKB} KB</span>
-              </div>
-              <a href="/api/admin/backups/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-outline" style="padding:2px 10px;font-size:12px;">Download</a>
-            </div>`;
-          }).join('')}
-          ${backups.length > 10 ? `<div style="padding:6px 12px;font-size:12px;color:var(--gray-400);">...and ${backups.length - 10} more</div>` : ''}
-        </div>
-      `;
     } catch (err) {
       const container = document.getElementById('backupsList');
       if (container) container.innerHTML = '<p style="font-size:13px;color:var(--gray-400);">Could not load backups.</p>';
+    }
+
+    // Load Drive backup status and history
+    try {
+      const status = await Api.get('/api/backup/status');
+      const statusEl = document.getElementById('driveBackupStatus');
+      if (statusEl) {
+        if (!status.driveConfigured) {
+          statusEl.style.background = 'var(--yellow-50, #fefce8)';
+          statusEl.style.color = 'var(--yellow-700, #a16207)';
+          statusEl.textContent = 'Google Drive not configured. Add GOOGLE_DRIVE_CREDENTIALS to enable cloud backups.';
+        } else if (status.lastBackupTime) {
+          statusEl.style.background = 'var(--green-50, #ecfdf5)';
+          statusEl.style.color = 'var(--green-700, #15803d)';
+          statusEl.textContent = 'Last backup: ' + new Date(status.lastBackupTime).toLocaleString() +
+            ' | ' + status.driveBackups.length + ' backups on Drive' +
+            (status.dbSize ? ' | DB size: ' + (status.dbSize / 1024).toFixed(1) + ' KB' : '');
+        } else {
+          statusEl.style.color = 'var(--gray-500)';
+          statusEl.textContent = 'No backups yet this session. ' + status.driveBackups.length + ' backups on Drive.' +
+            (status.dbSize ? ' DB size: ' + (status.dbSize / 1024).toFixed(1) + ' KB' : '');
+        }
+      }
+
+      const driveList = document.getElementById('driveBackupsList');
+      if (driveList && status.driveBackups && status.driveBackups.length > 0) {
+        const recent = status.driveBackups.slice(0, 5);
+        driveList.innerHTML = `
+          <div style="border:1px solid var(--gray-200);border-radius:8px;">
+            ${recent.map(b => {
+              const sizeKB = b.size ? (b.size / 1024).toFixed(1) : '?';
+              const date = new Date(b.createdTime).toLocaleString();
+              return `<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+                <div>
+                  <span style="font-weight:500;">${this.esc(b.name)}</span>
+                  <span style="color:var(--gray-400);margin-left:8px;">${sizeKB} KB</span>
+                </div>
+                <span style="color:var(--gray-400);font-size:12px;">${date}</span>
+              </div>`;
+            }).join('')}
+            ${status.driveBackups.length > 5 ? `<div style="padding:6px 12px;font-size:12px;color:var(--gray-400);">...and ${status.driveBackups.length - 5} more on Drive</div>` : ''}
+          </div>
+        `;
+      } else if (driveList) {
+        driveList.innerHTML = '<p style="font-size:13px;color:var(--gray-400);">No Drive backups yet.</p>';
+      }
+    } catch (err) {
+      const statusEl = document.getElementById('driveBackupStatus');
+      if (statusEl) { statusEl.textContent = 'Could not check Drive backup status'; statusEl.style.color = 'var(--gray-400)'; }
     }
   },
 
@@ -545,12 +602,36 @@ const SettingsPage = {
     }
   },
 
+  downloadDatabase() {
+    window.location.href = '/api/backup/download';
+  },
+
   downloadLatestBackup() {
     window.location.href = '/api/admin/backup/latest';
   },
 
+  async backupToDrive() {
+    const btn = document.getElementById('driveBackupBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Backing up...'; }
+    try {
+      const result = await Api.post('/api/backup/now');
+      if (result.drive) {
+        App.toast('Backup uploaded to Google Drive', 'success');
+      } else if (result.error) {
+        App.toast('Local backup saved. Drive upload failed: ' + result.error, 'warning');
+      } else {
+        App.toast('Backup saved locally', 'success');
+      }
+      this.loadBackupsSection();
+    } catch (err) {
+      App.toast('Backup failed: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Backup to Google Drive Now'; }
+    }
+  },
+
   exportCSV(type) {
-    window.location.href = `/api/admin/export/${type}`;
+    window.location.href = `/api/export/${type}`;
   },
 
   exportAll() {

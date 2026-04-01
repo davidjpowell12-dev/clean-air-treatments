@@ -137,6 +137,8 @@ try {
   app.use('/api/estimates', require('./routes/estimates'));
   app.use('/api/payments', require('./routes/payments'));
   app.use('/api/admin', require('./routes/admin'));
+  app.use('/api/backup', require('./routes/backup'));
+  app.use('/api/export', require('./routes/backup'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);
@@ -175,4 +177,26 @@ app.get('/', (req, res) => {
 // Start the server — this MUST succeed for Railway to see the app as alive
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`[startup] Clean Air Treatments running on port ${PORT}`);
+
+  // Schedule automatic backup every 24 hours
+  const BACKUP_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
+  setTimeout(() => {
+    // Run first backup 5 minutes after startup to avoid boot contention
+    try {
+      const { runFullBackup } = require('./utils/backup');
+      runFullBackup().catch(err => console.error('[backup] Scheduled backup failed:', err.message));
+    } catch (err) {
+      console.error('[backup] Could not load backup module:', err.message);
+    }
+  }, 5 * 60 * 1000);
+
+  setInterval(() => {
+    try {
+      const { runFullBackup } = require('./utils/backup');
+      runFullBackup().catch(err => console.error('[backup] Scheduled backup failed:', err.message));
+    } catch (err) {
+      console.error('[backup] Could not load backup module:', err.message);
+    }
+  }, BACKUP_INTERVAL);
+  console.log('[startup] Automatic backup scheduled every 24 hours');
 });
