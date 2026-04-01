@@ -136,6 +136,7 @@ try {
   app.use('/api/services', require('./routes/services'));
   app.use('/api/estimates', require('./routes/estimates'));
   app.use('/api/payments', require('./routes/payments'));
+  app.use('/api/admin', require('./routes/admin'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);

@@ -110,7 +110,38 @@ const SettingsPage = {
             <button class="btn btn-secondary btn-full" onclick="ApplicationsPage.exportCSV()">Download Application CSV</button>
           </div>
         </div>
+
+        <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>Data &amp; Backups</h3></div>
+          <div class="card-body">
+            <div id="dbHealthStatus" style="margin-bottom:16px;padding:12px;border-radius:8px;background:var(--gray-50, #f8f9fa);font-size:13px;color:var(--gray-500);">
+              Checking database health...
+            </div>
+
+            <h4 style="margin:0 0 8px;font-size:14px;">Database Backups</h4>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Create and download SQLite database backups. Last 30 are kept automatically.</p>
+            <div style="display:flex;gap:8px;margin-bottom:16px;">
+              <button class="btn btn-primary" id="createBackupBtn" onclick="SettingsPage.createBackup()">Create Backup Now</button>
+              <button class="btn btn-outline" onclick="SettingsPage.downloadLatestBackup()">Download Latest</button>
+            </div>
+            <div id="backupsList" style="margin-bottom:20px;"></div>
+
+            <h4 style="margin:0 0 8px;font-size:14px;">CSV Exports</h4>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Download your data as CSV spreadsheets.</p>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('properties')">Properties</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('schedules')">Schedule</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('applications')">Applications</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('estimates')">Estimates</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('invoices')">Invoices</button>
+            </div>
+            <button class="btn btn-secondary btn-full" onclick="SettingsPage.exportAll()">Download All Exports</button>
+          </div>
+        </div>
       `;
+
+      // Load backups section asynchronously after render
+      this.loadBackupsSection();
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
@@ -446,6 +477,88 @@ const SettingsPage = {
     } catch (err) {
       App.toast(err.message, 'error');
     }
+  },
+
+  async loadBackupsSection() {
+    // Health check
+    try {
+      const health = await Api.get('/api/admin/health');
+      const el = document.getElementById('dbHealthStatus');
+      if (el) {
+        const sizeKB = health.database_size ? (health.database_size / 1024).toFixed(1) : '?';
+        el.style.background = health.status === 'ok' ? 'var(--green-50, #ecfdf5)' : 'var(--red-50, #fef2f2)';
+        el.style.color = health.status === 'ok' ? 'var(--green-700, #15803d)' : 'var(--red-700, #b91c1c)';
+        el.textContent = health.status === 'ok'
+          ? `Database healthy (${sizeKB} KB)`
+          : `Database issue: ${health.integrity_check}`;
+      }
+    } catch (err) {
+      const el = document.getElementById('dbHealthStatus');
+      if (el) { el.textContent = 'Could not check database health'; el.style.color = 'var(--gray-400)'; }
+    }
+
+    // Load backups list
+    try {
+      const backups = await Api.get('/api/admin/backups');
+      const container = document.getElementById('backupsList');
+      if (!container) return;
+
+      if (backups.length === 0) {
+        container.innerHTML = '<p style="font-size:13px;color:var(--gray-400);">No backups yet.</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <div style="max-height:200px;overflow-y:auto;border:1px solid var(--gray-200);border-radius:8px;">
+          ${backups.slice(0, 10).map(b => {
+            const sizeKB = (b.size / 1024).toFixed(1);
+            const date = new Date(b.created).toLocaleString();
+            return `<div style="padding:8px 12px;border-bottom:1px solid var(--gray-100);display:flex;justify-content:space-between;align-items:center;font-size:13px;">
+              <div>
+                <span style="font-weight:500;">${this.esc(b.filename)}</span>
+                <span style="color:var(--gray-400);margin-left:8px;">${sizeKB} KB</span>
+              </div>
+              <a href="/api/admin/backups/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-outline" style="padding:2px 10px;font-size:12px;">Download</a>
+            </div>`;
+          }).join('')}
+          ${backups.length > 10 ? `<div style="padding:6px 12px;font-size:12px;color:var(--gray-400);">...and ${backups.length - 10} more</div>` : ''}
+        </div>
+      `;
+    } catch (err) {
+      const container = document.getElementById('backupsList');
+      if (container) container.innerHTML = '<p style="font-size:13px;color:var(--gray-400);">Could not load backups.</p>';
+    }
+  },
+
+  async createBackup() {
+    const btn = document.getElementById('createBackupBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating...'; }
+    try {
+      const result = await Api.post('/api/admin/backup');
+      const sizeKB = (result.size / 1024).toFixed(1);
+      App.toast(`Backup created: ${result.filename} (${sizeKB} KB)`, 'success');
+      this.loadBackupsSection();
+    } catch (err) {
+      App.toast('Backup failed: ' + err.message, 'error');
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Create Backup Now'; }
+    }
+  },
+
+  downloadLatestBackup() {
+    window.location.href = '/api/admin/backup/latest';
+  },
+
+  exportCSV(type) {
+    window.location.href = `/api/admin/export/${type}`;
+  },
+
+  exportAll() {
+    const types = ['properties', 'schedules', 'applications', 'estimates', 'invoices'];
+    types.forEach((type, i) => {
+      setTimeout(() => { this.exportCSV(type); }, i * 500);
+    });
+    App.toast('Downloading all exports...', 'success');
   },
 
   esc(str) {

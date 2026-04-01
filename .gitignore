@@ -5,3 +5,4 @@ db/clean-air.db-shm
 db/sessions.sqlite
 .env
 uploads/
+backups/
