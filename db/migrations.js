@@ -313,6 +313,28 @@ const migrations = [
   function linkSchedulesToEstimates(db) {
     try { db.exec('ALTER TABLE schedules ADD COLUMN estimate_id INTEGER REFERENCES estimates(id)'); } catch (e) { /* exists */ }
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_estimate ON schedules(estimate_id)');
+  },
+  // Migration 18: Add Mowing service with pricing tiers
+  function addMowingService(db) {
+    // Check if Mowing already exists
+    const existing = db.prepare("SELECT id FROM services WHERE name = 'Mowing'").get();
+    if (existing) return;
+
+    const result = db.prepare(
+      "INSERT INTO services (name, description, is_recurring, rounds, display_order, is_active) VALUES ('Mowing', 'Weekly lawn mowing service', 1, 28, 0, 1)"
+    ).run();
+    const serviceId = result.lastInsertRowid;
+
+    const tiers = [
+      [1000, 55], [2000, 55], [3000, 55], [4000, 55], [5000, 55],
+      [6000, 60], [7000, 65], [8000, 70], [9000, 75], [10000, 80],
+      [12000, 88], [15000, 100], [20000, 120], [25000, 135],
+      [30000, 150], [40000, 180], [50000, 210]
+    ];
+    const insert = db.prepare('INSERT INTO pricing_tiers (service_id, min_sqft, price) VALUES (?, ?, ?)');
+    for (const [sqft, price] of tiers) {
+      insert.run(serviceId, sqft, price);
+    }
   }
 ];
 
