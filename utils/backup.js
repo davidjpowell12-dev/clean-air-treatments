@@ -73,7 +73,7 @@ function getDriveClient() {
 
   const auth = new google.auth.GoogleAuth({
     credentials: creds,
-    scopes: ['https://www.googleapis.com/auth/drive.file']
+    scopes: ['https://www.googleapis.com/auth/drive']
   });
 
   return google.drive({ version: 'v3', auth });
@@ -82,18 +82,22 @@ function getDriveClient() {
 // ── Find or Create Drive Folder ───────────────────────────────────────
 
 async function getOrCreateFolder(drive) {
-  // Search for existing folder
+  // Search for folders shared with this service account (including shared drives)
   const res = await drive.files.list({
     q: `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     fields: 'files(id, name)',
-    spaces: 'drive'
+    spaces: 'drive',
+    includeItemsFromAllDrives: true,
+    supportsAllDrives: true
   });
 
   if (res.data.files && res.data.files.length > 0) {
+    console.log(`[backup] Found Drive folder: ${res.data.files[0].name} (${res.data.files[0].id})`);
     return res.data.files[0].id;
   }
 
-  // Create folder
+  // If shared folder not found, create one (will be in service account's own drive)
+  console.log(`[backup] Folder "${FOLDER_NAME}" not found, creating...`);
   const folder = await drive.files.create({
     requestBody: {
       name: FOLDER_NAME,
@@ -127,7 +131,8 @@ async function backupToDrive() {
   const uploaded = await drive.files.create({
     requestBody: fileMetadata,
     media: media,
-    fields: 'id, name, size, createdTime'
+    fields: 'id, name, size, createdTime',
+    supportsAllDrives: true
   });
 
   // Clean up old Drive backups (older than 30 days)
@@ -186,7 +191,9 @@ async function listDriveBackups() {
     fields: 'files(id, name, size, createdTime)',
     spaces: 'drive',
     orderBy: 'createdTime desc',
-    pageSize: 50
+    pageSize: 50,
+    includeItemsFromAllDrives: true,
+    supportsAllDrives: true
   });
 
   return res.data.files || [];
