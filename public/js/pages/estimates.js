@@ -678,8 +678,9 @@ const EstimatesPage = {
       const customerName = result.customer_name || 'there';
       const monthlyPrice = result.monthly_price || 0;
 
-      // Compose the SMS message
-      const message = `Hi ${customerName}, this is Dave from Clean Air Lawn Care. Here's your lawn care proposal — $${Math.round(monthlyPrice)}/month:\n\n${proposalUrl}`;
+      // Compose the SMS message — warm, personal first contact
+      const firstName = customerName.split(' ')[0];
+      const message = `Hi ${firstName}, this is Dave with Clean Air Lawn Care. I put together a custom lawn care program for your property. Take a look when you get a chance and feel free to call or text me with any questions!\n\n${proposalUrl}`;
 
       // Open native SMS app
       const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
@@ -704,7 +705,8 @@ const EstimatesPage = {
 
       const cleanPhone = phone.replace(/\D/g, '');
       const proposalUrl = `${window.location.origin}/proposal/${est.token}`;
-      const message = `Hi ${est.customer_name}, just following up on your Clean Air Lawn Care proposal — $${Math.round(est.monthly_price)}/month. Take a look when you get a chance:\n\n${proposalUrl}`;
+      const firstName = est.customer_name.split(' ')[0];
+      const message = `Hi ${firstName}, just following up on the lawn care proposal I sent over. Happy to answer any questions — feel free to call or text me anytime!\n\n${proposalUrl}`;
 
       // Open native SMS app
       const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;

@@ -229,6 +229,8 @@
               ${est.property_sqft ? `<span class="sqft">${Number(est.property_sqft).toLocaleString()} sq ft</span>` : ''}
             </div>
 
+            ${est.customer_message ? `<div class="proposal-message" style="margin-bottom:0;"><div class="proposal-message-box">${esc(est.customer_message)}</div></div>` : ''}
+
             <div class="proposal-price-hero">
               <div class="price-monthly"><span class="dollar">$</span>${Math.round(est.monthly_price)}</div>
               <div class="price-period">/month over ${est.payment_months} months</div>
@@ -249,13 +251,28 @@
               `).join('')}
             </div>
 
-            ${est.customer_message ? `<div class="proposal-message"><div class="proposal-message-box">${esc(est.customer_message)}</div></div>` : ''}
-
             ${est.valid_until && !isAccepted ? `
               <div class="proposal-valid">
                 This proposal is valid until ${new Date(est.valid_until).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
               </div>
             ` : ''}
+
+            <div style="padding:20px 24px;border-top:1px solid #eee;">
+              <div style="display:flex;align-items:flex-start;gap:12px;">
+                <div style="flex-shrink:0;width:40px;height:40px;border-radius:50%;background:#78be20;display:flex;align-items:center;justify-content:center;">
+                  <span style="color:white;font-size:16px;font-weight:700;">CA</span>
+                </div>
+                <div style="flex:1;">
+                  <p style="margin:0 0 4px;font-size:14px;font-weight:600;color:#333;">Clean Air Lawn Care of Grand Rapids</p>
+                  <p style="margin:0 0 8px;font-size:13px;color:#666;line-height:1.4;">Grand Rapids' leading organic lawn care company. We're committed to creating safe, healthy lawns through sustainable practices — better for your family, your pets, and the environment.</p>
+                  <div style="display:flex;gap:16px;flex-wrap:wrap;">
+                    <a href="tel:6168225876" style="font-size:13px;color:#78be20;text-decoration:none;font-weight:600;">&#128222; (616) 822-5876</a>
+                    <a href="mailto:dave@cleanairlawncare.com" style="font-size:13px;color:#78be20;text-decoration:none;font-weight:600;">&#9993; dave@cleanairlawncare.com</a>
+                  </div>
+                  <p style="margin:8px 0 0;font-size:12px;color:#999;">Questions? Call or text Dave anytime.</p>
+                </div>
+              </div>
+            </div>
 
             ${canAccept ? `
               <div class="proposal-cta" id="ctaSection">
