@@ -108,10 +108,19 @@ async function createCheckoutSession({
 
 // ─── Create Invoices for Estimate ─────────────────────────────
 // Generates the correct set of invoice rows based on payment plan
-function createInvoicesForEstimate(db, estimateId, paymentPlan) {
+// Card processing fee rate (3.5% covers Stripe's 2.9% + $0.30 with margin)
+const CARD_FEE_RATE = 0.035;
+
+function applyCardFee(amountCents, paymentMethodPref) {
+  if (paymentMethodPref !== 'card') return amountCents;
+  return Math.round(amountCents * (1 + CARD_FEE_RATE));
+}
+
+function createInvoicesForEstimate(db, estimateId, paymentPlan, paymentMethodPref) {
   const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(estimateId);
   if (!est) throw new Error('Estimate not found');
 
+  const method = paymentMethodPref || est.payment_method_preference || 'card';
   const totalCents = Math.round(est.total_price * 100);
 
   const createAll = db.transaction(() => {
@@ -121,10 +130,11 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan) {
       // Single invoice for total, due immediately
       const invoiceNumber = generateInvoiceNumber(db);
       const today = new Date().toISOString().split('T')[0];
+      const amount = applyCardFee(totalCents, method);
       db.prepare(`
         INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
         VALUES (?, ?, ?, 'pending', 'full', ?)
-      `).run(invoiceNumber, estimateId, totalCents, today);
+      `).run(invoiceNumber, estimateId, amount, today);
 
       const inv = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);
       invoices.push(inv);
@@ -132,9 +142,11 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan) {
     } else if (paymentPlan === 'monthly') {
       // N invoices, each for monthly_price, due on 1st of successive months
       const months = est.payment_months || 8;
-      const monthlyCents = Math.round(est.monthly_price * 100);
+      const baseMonthlyCents = Math.round(est.monthly_price * 100);
+      const monthlyCents = applyCardFee(baseMonthlyCents, method);
+      const totalWithFee = applyCardFee(totalCents, method);
       // Adjust last installment to account for rounding
-      let remaining = totalCents;
+      let remaining = totalWithFee;
 
       const now = new Date();
       for (let i = 0; i < months; i++) {
@@ -173,11 +185,16 @@ function createPerServiceInvoice(db, estimateId, amountCents, description) {
   const invoiceNumber = generateInvoiceNumber(db);
   const today = new Date().toISOString().split('T')[0];
 
+  // Apply card fee if client pays by card
+  const est = db.prepare('SELECT payment_method_preference FROM estimates WHERE id = ?').get(estimateId);
+  const method = est?.payment_method_preference || 'card';
+  const finalAmount = applyCardFee(amountCents, method);
+
   db.prepare(`
     INSERT INTO invoices (
       invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, notes
     ) VALUES (?, ?, ?, 'pending', 'per_service', ?, ?)
-  `).run(invoiceNumber, estimateId, amountCents, today, description || null);
+  `).run(invoiceNumber, estimateId, finalAmount, today, description || null);
 
   return db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);
 }

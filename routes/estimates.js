@@ -117,6 +117,7 @@ router.post('/public/:token/accept', async (req, res) => {
   }
 
   const paymentPlan = req.body.payment_plan || 'monthly';
+  const paymentMethodPref = req.body.payment_method_preference || 'card';
   const validPlans = ['full', 'monthly', 'per_service'];
   if (!validPlans.includes(paymentPlan)) {
     return res.status(400).json({ error: 'Invalid payment plan' });
@@ -158,12 +159,13 @@ router.post('/public/:token/accept', async (req, res) => {
     db.prepare(`
       UPDATE estimates SET
         status = 'accepted', accepted_at = ?, payment_plan = ?,
-        stripe_customer_id = ?, property_id = ?, updated_at = CURRENT_TIMESTAMP
+        payment_method_preference = ?, stripe_customer_id = ?, property_id = ?,
+        updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(acceptedAt, paymentPlan, stripeCustomerId, propertyId, est.id);
+    `).run(acceptedAt, paymentPlan, paymentMethodPref, stripeCustomerId, propertyId, est.id);
 
-    // Generate invoices based on payment plan
-    const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, paymentPlan);
+    // Generate invoices based on payment plan (with card fee if applicable)
+    const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, paymentPlan, paymentMethodPref);
 
     logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
       customer_name: est.customer_name, payment_plan: paymentPlan,

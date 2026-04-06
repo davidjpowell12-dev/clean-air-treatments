@@ -318,16 +318,43 @@
             <div class="plan-amount">Per visit</div>
           </div>
 
+          <div id="methodPicker" style="margin-top:16px;display:none;">
+            <p style="font-weight:600;font-size:14px;margin-bottom:8px;color:#333;">Payment Method</p>
+
+            <div class="plan-option selected" id="method-card" onclick="selectMethod('card')" style="margin-bottom:8px;">
+              <div class="plan-radio"></div>
+              <div class="plan-info">
+                <div class="plan-title">Credit/Debit Card</div>
+                <div class="plan-desc" id="cardFeeDesc">Includes 3.5% processing fee</div>
+              </div>
+            </div>
+
+            <div class="plan-option" id="method-check" onclick="selectMethod('check')">
+              <div class="plan-radio"></div>
+              <div class="plan-info">
+                <div class="plan-title">Check</div>
+                <div class="plan-desc">No processing fee</div>
+              </div>
+            </div>
+
+            <div id="feeSummary" style="margin-top:12px;padding:12px;background:#f8f9fa;border-radius:8px;font-size:13px;color:#666;"></div>
+          </div>
+
           <button class="plan-confirm-btn" id="confirmPlanBtn" onclick="confirmAcceptance()">
             Continue
           </button>
         </div>
       `;
+
+      // Show method picker and update fee summary
+      updateMethodPicker();
     }
+
+    let selectedMethod = 'card';
 
     function selectPlan(plan) {
       selectedPlan = plan;
-      document.querySelectorAll('.plan-option').forEach(el => el.classList.remove('selected'));
+      document.querySelectorAll('.plan-option:not([id^="method-"])').forEach(el => el.classList.remove('selected'));
       document.getElementById('plan-' + plan).classList.add('selected');
 
       // Update button text
@@ -338,6 +365,55 @@
         btn.textContent = 'Accept & Confirm Program';
       } else {
         btn.textContent = 'Continue to Payment';
+      }
+
+      updateMethodPicker();
+    }
+
+    function selectMethod(method) {
+      selectedMethod = method;
+      document.querySelectorAll('[id^="method-"]').forEach(el => el.classList.remove('selected'));
+      document.getElementById('method-' + method).classList.add('selected');
+      updateFeeSummary();
+    }
+
+    function updateMethodPicker() {
+      const picker = document.getElementById('methodPicker');
+      if (picker) {
+        picker.style.display = 'block';
+        updateFeeSummary();
+      }
+    }
+
+    function updateFeeSummary() {
+      const est = proposalData;
+      const summary = document.getElementById('feeSummary');
+      if (!summary) return;
+
+      if (selectedMethod === 'check') {
+        if (selectedPlan === 'monthly') {
+          summary.innerHTML = '<strong>$' + Math.round(est.monthly_price) + '/mo</strong> x ' + est.payment_months + ' months = <strong>$' + Math.round(est.total_price).toLocaleString() + '</strong>';
+        } else if (selectedPlan === 'full') {
+          summary.innerHTML = 'Total: <strong>$' + Math.round(est.total_price).toLocaleString() + '</strong>';
+        } else {
+          summary.innerHTML = 'Invoiced per visit — no processing fee';
+        }
+      } else {
+        // Card: add 3.5% fee (covers Stripe 2.9% + $0.30 rounded up)
+        const feeRate = 0.035;
+        if (selectedPlan === 'monthly') {
+          const base = est.monthly_price;
+          const withFee = Math.round(base * (1 + feeRate) * 100) / 100;
+          const fee = withFee - base;
+          summary.innerHTML = '$' + Math.round(base) + '/mo + $' + fee.toFixed(2) + ' processing fee = <strong>$' + withFee.toFixed(2) + '/mo</strong>';
+        } else if (selectedPlan === 'full') {
+          const base = est.total_price;
+          const withFee = Math.round(base * (1 + feeRate) * 100) / 100;
+          const fee = withFee - base;
+          summary.innerHTML = '$' + Math.round(base).toLocaleString() + ' + $' + fee.toFixed(2) + ' processing fee = <strong>$' + withFee.toFixed(2) + '</strong>';
+        } else {
+          summary.innerHTML = 'Processing fee (3.5%) added to each invoice';
+        }
       }
     }
 
@@ -351,7 +427,7 @@
         const acceptResp = await fetch(`/api/estimates/public/${token}/accept`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payment_plan: selectedPlan })
+          body: JSON.stringify({ payment_plan: selectedPlan, payment_method_preference: selectedMethod })
         });
 
         const acceptData = await acceptResp.json();

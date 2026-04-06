@@ -314,7 +314,11 @@ const migrations = [
     try { db.exec('ALTER TABLE schedules ADD COLUMN estimate_id INTEGER REFERENCES estimates(id)'); } catch (e) { /* exists */ }
     db.exec('CREATE INDEX IF NOT EXISTS idx_schedules_estimate ON schedules(estimate_id)');
   },
-  // Migration 18: Add Mowing service with pricing tiers
+  // Migration 18: Add payment_method_preference to estimates (card vs check)
+  function addPaymentMethodPreference(db) {
+    try { db.exec("ALTER TABLE estimates ADD COLUMN payment_method_preference TEXT DEFAULT 'card'"); } catch (e) { /* exists */ }
+  },
+  // Migration 19: Add Mowing service with pricing tiers
   function addMowingService(db) {
     // Check if Mowing already exists
     const existing = db.prepare("SELECT id FROM services WHERE name = 'Mowing'").get();
