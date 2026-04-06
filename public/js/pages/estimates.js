@@ -282,7 +282,7 @@ const EstimatesPage = {
             </div>
             <div class="form-group">
               <label>Customer Message (shown on proposal)</label>
-              <textarea id="estMessage" rows="3" class="est-input" placeholder="Thank you for choosing Clean Air Lawn Care...">${this._esc(estimate?.customer_message || '')}</textarea>
+              <textarea id="estMessage" rows="3" class="est-input" placeholder="Thank you for choosing Clean Air Lawn Care...">${this._esc(estimate?.customer_message || this._defaultMessage(cust))}</textarea>
             </div>
             <div class="form-group">
               <label>Internal Notes</label>
@@ -1161,6 +1161,14 @@ const EstimatesPage = {
   },
 
   // ─── Helpers ──────────────────────────────────────────────
+  _defaultMessage(cust) {
+    if (!cust || !cust.customer_name) return '';
+    const firstName = (cust.customer_name || '').split(' ')[0];
+    const street = (cust.address || '').replace(/\d+\s*/, '').trim(); // Remove house number
+    const streetPart = street ? ` for your home on ${street}` : '';
+    return `Hi ${firstName}, thanks for your interest in lawn care${streetPart}. I'd love to help keep your lawn safe and healthy this season.`;
+  },
+
   _defaultValidDate() {
     const d = new Date();
     d.setDate(d.getDate() + 30);
