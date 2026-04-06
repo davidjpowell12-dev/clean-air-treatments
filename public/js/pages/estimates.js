@@ -94,7 +94,7 @@ const EstimatesPage = {
     `;
   },
 
-  // ─── Start New Estimate (property picker) ────────────────
+  // ─── Start New Estimate (property picker or new lead) ────
   async startNewEstimate() {
     const main = document.getElementById('mainContent');
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -105,8 +105,20 @@ const EstimatesPage = {
       main.innerHTML = `
         <div class="page-header">
           <button class="btn btn-sm btn-outline" onclick="App.navigate('estimates')">← Back</button>
-          <h2>Select Property</h2>
+          <h2>New Estimate</h2>
         </div>
+
+        <div class="card" style="margin-bottom:16px;border:2px solid var(--green);cursor:pointer;" onclick="App.navigate('estimates', 'new', null)">
+          <div class="card-body" style="padding:16px;display:flex;align-items:center;gap:12px;">
+            <div style="width:44px;height:44px;border-radius:50%;background:var(--green);display:flex;align-items:center;justify-content:center;color:white;font-size:20px;font-weight:700;">+</div>
+            <div>
+              <h4 style="margin:0;font-size:16px;">New Lead</h4>
+              <p style="margin:0;font-size:13px;color:var(--gray-500);">Enter customer info manually</p>
+            </div>
+          </div>
+        </div>
+
+        <p style="font-size:13px;color:var(--gray-400);text-align:center;margin-bottom:12px;">Or select an existing property</p>
 
         <div class="form-group" style="margin-bottom:16px;">
           <input type="text" id="propSearch" placeholder="Search customers..." style="padding:14px 16px;border:2px solid var(--gray-200);border-radius:var(--radius);font-size:16px;width:100%;box-sizing:border-box;">
@@ -149,9 +161,13 @@ const EstimatesPage = {
       let items = [];
 
       if (isNew && editId) {
-        // Building new estimate for a property
+        // Building new estimate for an existing property
         const buildData = await Api.get(`/api/estimates/build/${editId}`);
         property = buildData.property;
+        items = buildData.items;
+      } else if (isNew && !editId) {
+        // New lead — no property, load default services
+        const buildData = await Api.get('/api/estimates/build/new-lead');
         items = buildData.items;
       } else if (editId) {
         // Editing existing estimate

@@ -140,13 +140,27 @@ router.post('/public/:token/accept', async (req, res) => {
       }
     }
 
-    // Update estimate status
+    // Auto-create property if estimate has no property_id
+    let propertyId = est.property_id;
+    if (!propertyId && est.customer_name) {
+      const result = db.prepare(`
+        INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        est.customer_name, est.address || '', est.city || '', est.state || 'MI',
+        est.zip || '', est.email || '', est.phone || '', est.property_sqft || null
+      );
+      propertyId = result.lastInsertRowid;
+      console.log(`[accept] Auto-created property ${propertyId} for ${est.customer_name}`);
+    }
+
+    // Update estimate status (and link to property if just created)
     db.prepare(`
       UPDATE estimates SET
         status = 'accepted', accepted_at = ?, payment_plan = ?,
-        stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP
+        stripe_customer_id = ?, property_id = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
-    `).run(acceptedAt, paymentPlan, stripeCustomerId, est.id);
+    `).run(acceptedAt, paymentPlan, stripeCustomerId, propertyId, est.id);
 
     // Generate invoices based on payment plan
     const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, paymentPlan);
@@ -200,6 +214,28 @@ router.get('/:id', requireAuth, (req, res) => {
 });
 
 // Build estimate for a property — returns services with auto-priced items
+// Build estimate for a new lead (no property yet)
+router.get('/build/new-lead', requireAuth, (req, res) => {
+  const db = getDb();
+  const services = db.prepare(
+    'SELECT * FROM services WHERE is_active = 1 ORDER BY display_order, id'
+  ).all();
+
+  const items = services.map((svc, i) => ({
+    service_id: svc.id,
+    service_name: svc.name,
+    description: svc.description,
+    is_recurring: svc.is_recurring,
+    rounds: svc.rounds,
+    price: 0,
+    is_included: 1,
+    sort_order: i
+  }));
+
+  res.json({ property: null, items });
+});
+
+// Build estimate for an existing property
 router.get('/build/:propertyId', requireAuth, (req, res) => {
   const db = getDb();
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.propertyId);
