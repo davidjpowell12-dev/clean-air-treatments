@@ -383,13 +383,47 @@ router.put('/:id', requireAuth, (req, res) => {
     WHERE s.id = ?
   `).get(req.params.id);
 
-  // ─── Billing Activation: activate scheduled invoices on first visit completion ───
+  // ─── Billing: activate monthly invoices OR create per-service invoice ───
   if (status === 'completed' && existing.status !== 'completed' && existing.estimate_id) {
     try {
-      const { activateBillingForEstimate } = require('../utils/billing');
-      activateBillingForEstimate(db, existing.estimate_id);
+      const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(existing.estimate_id);
+
+      if (estimate && estimate.payment_plan === 'monthly') {
+        const { activateBillingForEstimate } = require('../utils/billing');
+        activateBillingForEstimate(db, existing.estimate_id);
+
+      } else if (estimate && estimate.payment_plan === 'per_service') {
+        const { createPerServiceInvoice } = require('../utils/stripe');
+        const serviceType = existing.service_type || 'Service';
+
+        const item = db.prepare(
+          "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
+        ).get(existing.estimate_id, serviceType);
+
+        if (item) {
+          const amountCents = Math.round(item.price * 100);
+          const roundInfo = existing.round_number ? ` (Round ${existing.round_number}/${existing.total_rounds})` : '';
+          const description = `${serviceType}${roundInfo} — ${estimate.customer_name}`;
+          const invoice = createPerServiceInvoice(db, existing.estimate_id, amountCents, description);
+          console.log(`[per-service] Invoice ${invoice.invoice_number} created: $${(amountCents / 100).toFixed(2)} for ${description}`);
+        } else {
+          const serviceNames = serviceType.split(', ').map(s => s.trim());
+          let totalCents = 0;
+          for (const name of serviceNames) {
+            const bundledItem = db.prepare(
+              "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
+            ).get(existing.estimate_id, name);
+            if (bundledItem) totalCents += Math.round(bundledItem.price * 100);
+          }
+          if (totalCents > 0) {
+            const description = `${serviceType} — ${estimate.customer_name}`;
+            const invoice = createPerServiceInvoice(db, existing.estimate_id, totalCents, description);
+            console.log(`[per-service] Invoice ${invoice.invoice_number} created: $${(totalCents / 100).toFixed(2)} for ${description}`);
+          }
+        }
+      }
     } catch (err) {
-      console.error('[billing-activation] Error:', err.message);
+      console.error('[billing] Error:', err.message);
     }
   }
 
