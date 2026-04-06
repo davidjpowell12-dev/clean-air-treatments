@@ -14,13 +14,14 @@ const DashboardPage = {
     `;
 
     try {
-      const [products, inventory, applications, properties, financials, needsScheduling] = await Promise.all([
+      const [products, inventory, applications, properties, financials, needsScheduling, billingStats] = await Promise.all([
         Api.get('/api/products'),
         Api.get('/api/inventory'),
         Api.get('/api/applications?limit=5'),
         Api.get('/api/properties').catch(() => []),
         Api.get('/api/applications/stats').catch(() => ({ total_revenue: 0, total_cost: 0, total_margin: 0, margin_pct: 0 })),
-        Api.get('/api/estimates/needs-scheduling').catch(() => [])
+        Api.get('/api/estimates/needs-scheduling').catch(() => []),
+        Api.get('/api/payments/dashboard').catch(() => ({ failed_count: 0, scheduled_count: 0 }))
       ]);
 
       const lowStock = inventory.filter(i => i.quantity <= i.reorder_threshold);
@@ -68,6 +69,18 @@ const DashboardPage = {
             <div class="stat-card stat-card-${financials.margin_pct >= 0 ? 'blue' : 'red'}">
               <div class="stat-value" style="font-size:22px;color:${financials.margin_pct >= 0 ? 'var(--green-dark)' : 'var(--red)'};">${financials.margin_pct}%</div>
               <div class="stat-label">Margin %</div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${billingStats.failed_count > 0 ? `
+          <div class="card" style="margin-top:12px;border:2px solid #dc2626;border-left:6px solid #dc2626;cursor:pointer;" onclick="App.navigate('invoicing');setTimeout(()=>{const t=document.querySelector('.est-tab[data-filter=failed]');if(t)t.click();},100);">
+            <div class="card-header">
+              <h3 style="color:#dc2626;">Failed Payments</h3>
+              <span class="badge badge-red" style="font-size:14px;padding:6px 14px;">${billingStats.failed_count}</span>
+            </div>
+            <div class="card-body" style="padding:12px 16px;">
+              <p style="font-size:14px;color:var(--gray-700);">${billingStats.failed_count} invoice${billingStats.failed_count > 1 ? 's have' : ' has'} failed payment. Click to review and retry.</p>
             </div>
           </div>
         ` : ''}

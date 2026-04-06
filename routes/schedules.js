@@ -383,6 +383,16 @@ router.put('/:id', requireAuth, (req, res) => {
     WHERE s.id = ?
   `).get(req.params.id);
 
+  // ─── Billing Activation: activate scheduled invoices on first visit completion ───
+  if (status === 'completed' && existing.status !== 'completed' && existing.estimate_id) {
+    try {
+      const { activateBillingForEstimate } = require('../utils/billing');
+      activateBillingForEstimate(db, existing.estimate_id);
+    } catch (err) {
+      console.error('[billing-activation] Error:', err.message);
+    }
+  }
+
   logAudit(db, 'schedule', req.params.id, req.session.userId, 'update', { before: existing, after: updated });
   res.json(updated);
 });

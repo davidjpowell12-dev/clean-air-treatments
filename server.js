@@ -199,4 +199,30 @@ app.listen(PORT, '0.0.0.0', () => {
     }
   }, BACKUP_INTERVAL);
   console.log('[startup] Automatic backup scheduled every 24 hours');
+
+  // ─── Auto-charge due invoices daily ─────────────────────────
+  let lastChargeDate = null;
+  setInterval(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (lastChargeDate === today) return; // Already ran today
+
+    const hour = new Date().getHours();
+    if (hour < 8) return; // Don't run before 8 AM
+
+    lastChargeDate = today;
+    try {
+      const paymentsRouter = require('./routes/payments');
+      // Call with sendEmailOnNoMethod=false so cron doesn't spam — admin can handle manually
+      paymentsRouter.processDueInvoices({ sendEmailOnNoMethod: false })
+        .then(result => {
+          console.log(`[cron] Auto-charge complete:`, JSON.stringify(result));
+        })
+        .catch(err => {
+          console.error('[cron] Auto-charge failed:', err.message);
+        });
+    } catch (err) {
+      console.error('[cron] Could not load payments module:', err.message);
+    }
+  }, 60 * 60 * 1000); // Check every hour
+  console.log('[startup] Daily auto-charge cron scheduled (runs after 8 AM)');
 });

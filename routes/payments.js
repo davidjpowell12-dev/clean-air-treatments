@@ -173,10 +173,12 @@ router.post('/invoices/:id/send-payment-request', requireAuth, async (req, res) 
   }
 });
 
-// Auto-charge due invoices (called by scheduled job or manually)
-router.post('/process-due-invoices', requireAuth, async (req, res) => {
+// ─── Reusable auto-charge logic (called by route AND daily cron) ───
+async function processDueInvoices(options = {}) {
+  const { sendEmailOnNoMethod = true } = options;
+
   if (!stripeUtils.isEnabled()) {
-    return res.status(503).json({ error: 'Stripe not configured' });
+    return { success: false, error: 'Stripe not configured' };
   }
 
   const db = getDb();
@@ -193,7 +195,7 @@ router.post('/process-due-invoices', requireAuth, async (req, res) => {
     ORDER BY i.due_date ASC
   `).all(today);
 
-  const results = { charged: 0, failed: 0, no_method: 0, errors: [] };
+  const results = { charged: 0, failed: 0, no_method: 0, skipped: 0, errors: [] };
 
   for (const inv of dueInvoices) {
     try {
@@ -205,10 +207,10 @@ router.post('/process-due-invoices', requireAuth, async (req, res) => {
       );
 
       if (!result) {
-        // No saved payment method — send payment request email instead
+        // No saved payment method
         results.no_method++;
 
-        if (email.isEnabled() && inv.email) {
+        if (sendEmailOnNoMethod && email.isEnabled() && inv.email) {
           const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
             ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
             : 'https://clean-air-treatments-production.up.railway.app';
@@ -240,6 +242,9 @@ router.post('/process-due-invoices', requireAuth, async (req, res) => {
           } catch (emailErr) {
             console.error(`[auto-charge] Email fallback failed for ${inv.invoice_number}:`, emailErr.message);
           }
+        } else if (!sendEmailOnNoMethod) {
+          results.skipped++;
+          console.log(`[auto-charge] ${inv.invoice_number} skipped — no saved payment method`);
         }
         continue;
       }
@@ -283,11 +288,17 @@ router.post('/process-due-invoices', requireAuth, async (req, res) => {
     }
   }
 
-  res.json({
-    success: true,
-    total_due: dueInvoices.length,
-    ...results
-  });
+  console.log(`[auto-charge] Complete — ${results.charged} charged, ${results.failed} failed, ${results.no_method} no method, ${results.skipped} skipped`);
+  return { success: true, total_due: dueInvoices.length, ...results };
+}
+
+// Auto-charge due invoices (called by scheduled job or manually)
+router.post('/process-due-invoices', requireAuth, async (req, res) => {
+  const result = await processDueInvoices({ sendEmailOnNoMethod: true });
+  if (!result.success) {
+    return res.status(503).json({ error: result.error });
+  }
+  res.json(result);
 });
 
 // Dashboard summary stats
@@ -316,6 +327,12 @@ router.get('/dashboard', requireAuth, (req, res) => {
     ).get().count,
     paid_count: db.prepare(
       "SELECT COUNT(*) as count FROM invoices WHERE status = 'paid'"
+    ).get().count,
+    failed_count: db.prepare(
+      "SELECT COUNT(*) as count FROM invoices WHERE status = 'failed'"
+    ).get().count,
+    scheduled_count: db.prepare(
+      "SELECT COUNT(*) as count FROM invoices WHERE status = 'scheduled'"
     ).get().count
   };
 
@@ -482,4 +499,5 @@ async function webhookHandler(req, res) {
 }
 
 router.webhookHandler = webhookHandler;
+router.processDueInvoices = processDueInvoices;
 module.exports = router;

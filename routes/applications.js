@@ -176,6 +176,18 @@ router.post('/', requireAuth, (req, res) => {
     db.prepare(
       "UPDATE schedules SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'"
     ).run(b.schedule_id);
+
+    // ─── Billing Activation: activate scheduled invoices on first visit ───
+    try {
+      const schedule = db.prepare('SELECT * FROM schedules WHERE id = ?').get(b.schedule_id);
+      if (schedule && schedule.estimate_id) {
+        const { activateBillingForEstimate } = require('../utils/billing');
+        activateBillingForEstimate(db, schedule.estimate_id);
+      }
+    } catch (err) {
+      console.error('[billing-activation] Error:', err.message);
+      // Non-fatal — don't fail the application creation
+    }
   }
 
   // Auto-deduct inventory

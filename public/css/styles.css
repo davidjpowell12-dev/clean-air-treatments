@@ -557,6 +557,7 @@ body {
 .badge-red { background: #fdd; color: #b91c1c; }
 .badge-orange { background: #fee4b8; color: #92400e; }
 .badge-gray { background: var(--gray-100); color: var(--gray-700); }
+.badge-muted { background: #e5e7eb; color: #6b7280; }
 
 /* ===== Stat Cards ===== */
 .stat-grid {

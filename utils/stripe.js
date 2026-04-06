@@ -150,7 +150,7 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan) {
           INSERT INTO invoices (
             invoice_number, estimate_id, amount_cents, status, payment_plan,
             installment_number, total_installments, due_date
-          ) VALUES (?, ?, ?, 'pending', 'monthly', ?, ?, ?)
+          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?)
         `).run(invoiceNumber, estimateId, installmentAmount, i + 1, months, dueDateStr);
 
         const inv = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);

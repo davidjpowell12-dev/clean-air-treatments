@@ -46,7 +46,9 @@ const InvoicingPage = {
           <div class="est-status-tabs">
             <button class="est-tab active" data-filter="all">All <span class="est-tab-count">${invoices.length}</span></button>
             <button class="est-tab" data-filter="pending">Pending <span class="est-tab-count">${invoices.filter(i => i.status === 'pending').length}</span></button>
+            <button class="est-tab" data-filter="scheduled">Scheduled <span class="est-tab-count">${invoices.filter(i => i.status === 'scheduled').length}</span></button>
             <button class="est-tab" data-filter="paid">Paid <span class="est-tab-count">${invoices.filter(i => i.status === 'paid').length}</span></button>
+            <button class="est-tab" data-filter="failed">Failed <span class="est-tab-count">${invoices.filter(i => i.status === 'failed').length}</span></button>
             <button class="est-tab" data-filter="overdue">Overdue <span class="est-tab-count">${invoices.filter(i => i.status === 'pending' && i.due_date < today).length}</span></button>
           </div>
         ` : ''}
@@ -78,6 +80,13 @@ const InvoicingPage = {
           });
         });
       });
+
+      // Auto-filter if URL hash contains a filter hint (e.g., from dashboard failed alert)
+      const hashFilter = window.location.hash.split('?filter=')[1];
+      if (hashFilter) {
+        const tab = main.querySelector(`.est-tab[data-filter="${hashFilter}"]`);
+        if (tab) tab.click();
+      }
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
@@ -89,7 +98,8 @@ const InvoicingPage = {
       pending: { label: isOverdue ? 'Overdue' : 'Pending', class: isOverdue ? 'badge-red' : 'badge-orange' },
       paid: { label: 'Paid', class: 'badge-green' },
       failed: { label: 'Failed', class: 'badge-red' },
-      void: { label: 'Void', class: 'badge-gray' }
+      void: { label: 'Void', class: 'badge-gray' },
+      scheduled: { label: 'Scheduled', class: 'badge-muted' }
     };
     const s = statusConfig[inv.status] || statusConfig.pending;
     const amount = (inv.amount_cents / 100).toFixed(2);
@@ -113,7 +123,7 @@ const InvoicingPage = {
           </div>
           <div class="est-list-card-meta">
             ${inv.payment_method ? `<span style="text-transform:capitalize;">${inv.payment_method}</span>` : ''}
-            ${inv.status === 'paid' ? `<span>Paid ${paidStr}</span>` : `<span>Due ${dueStr}</span>`}
+            ${inv.status === 'paid' ? `<span>Paid ${paidStr}</span>` : inv.status === 'scheduled' ? `<span style="color:var(--gray-400);font-style:italic;">Activates when service begins</span>` : `<span>Due ${dueStr}</span>`}
           </div>
         </div>
       </div>
@@ -135,7 +145,8 @@ const InvoicingPage = {
         pending: { label: 'Pending', class: 'badge-orange' },
         paid: { label: 'Paid', class: 'badge-green' },
         failed: { label: 'Failed', class: 'badge-red' },
-        void: { label: 'Void', class: 'badge-gray' }
+        void: { label: 'Void', class: 'badge-gray' },
+        scheduled: { label: 'Scheduled', class: 'badge-muted' }
       };
       const s = statusConfig[inv.status] || statusConfig.pending;
 
@@ -150,7 +161,7 @@ const InvoicingPage = {
             <div style="font-family:monospace;font-size:18px;font-weight:700;letter-spacing:1px;color:var(--navy);margin-bottom:4px;">${this._esc(inv.invoice_number)}</div>
             <div style="font-size:36px;font-weight:800;color:var(--green-dark);margin:8px 0;">$${amount}</div>
             <div style="font-size:14px;color:var(--gray-500);">
-              ${inv.status === 'paid' ? `Paid on ${paidStr}${inv.payment_method ? ' via ' + inv.payment_method : ''}` : `Due: ${dueStr}`}
+              ${inv.status === 'paid' ? `Paid on ${paidStr}${inv.payment_method ? ' via ' + inv.payment_method : ''}` : inv.status === 'scheduled' ? 'Activates when service begins' : `Due: ${dueStr}`}
             </div>
             ${inv.check_number ? `<div style="font-size:13px;color:var(--gray-400);margin-top:4px;">Check #${this._esc(inv.check_number)}</div>` : ''}
           </div>
@@ -187,7 +198,7 @@ const InvoicingPage = {
                   </div>
                   <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;">$${(ri.amount_cents / 100).toFixed(2)}</span>
-                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.due_date ? new Date(ri.due_date).toLocaleDateString() : 'Pending'}</span>
+                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.status === 'scheduled' ? 'Scheduled' : ri.due_date ? new Date(ri.due_date).toLocaleDateString() : 'Pending'}</span>
                   </div>
                 </div>
               `).join('')}

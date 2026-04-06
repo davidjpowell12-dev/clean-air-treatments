@@ -334,6 +334,8 @@
       const btn = document.getElementById('confirmPlanBtn');
       if (plan === 'per_service') {
         btn.textContent = 'Accept & Set Up Billing';
+      } else if (plan === 'monthly') {
+        btn.textContent = 'Accept & Confirm Program';
       } else {
         btn.textContent = 'Continue to Payment';
       }
@@ -361,8 +363,8 @@
           return;
         }
 
-        // Step 2: For pay-in-full and monthly, redirect to Stripe Checkout
-        if (selectedPlan !== 'per_service' && acceptData.first_invoice) {
+        // Step 2: For pay-in-full, redirect to Stripe Checkout
+        if (selectedPlan === 'full' && acceptData.first_invoice) {
           const checkoutResp = await fetch(`/api/payments/create-checkout/${token}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -387,7 +389,7 @@
           console.error('Checkout creation failed:', checkoutData.error);
         }
 
-        // Per-service plan or no Stripe or checkout failed — show confirmation
+        // Monthly, per-service, or no Stripe or checkout failed — show confirmation
         showAcceptedConfirmation();
 
       } catch (err) {
@@ -400,9 +402,14 @@
     function showAcceptedConfirmation() {
       const cta = document.getElementById('ctaSection');
       if (cta) {
-        const msg = selectedPlan === 'per_service'
-          ? "You'll be invoiced after each treatment is completed."
-          : "The Clean Air team will be in touch to schedule your services.";
+        let msg;
+        if (selectedPlan === 'per_service') {
+          msg = "You'll be invoiced after each treatment is completed.";
+        } else if (selectedPlan === 'monthly') {
+          msg = "Your lawn care program is confirmed! You'll be billed monthly once services begin.";
+        } else {
+          msg = "The Clean Air team will be in touch to schedule your services.";
+        }
 
         cta.innerHTML = `
           <div class="accepted-animation">
