@@ -103,21 +103,62 @@ async function createSetupCheckoutSession({
 
 // After a setup session completes, attach the saved card as the customer's
 // default payment method so future off-session charges work.
-async function attachSetupIntentToCustomer(setupIntentId) {
+// Handles three scenarios:
+//   1. SetupIntent has both payment_method and customer → set as default
+//   2. SetupIntent missing payment_method (e.g. customer already had a card)
+//      → look up customer's existing payment methods and set the most recent
+//   3. Truly nothing on file → throw with a clear message
+async function attachSetupIntentToCustomer(setupIntentOrId) {
   const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
 
-  const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
-  if (!setupIntent.payment_method || !setupIntent.customer) {
-    throw new Error('Setup intent has no payment method or customer');
+  // Accept either an ID or a pre-fetched SetupIntent object
+  let setupIntent;
+  if (typeof setupIntentOrId === 'string') {
+    setupIntent = await stripe.setupIntents.retrieve(setupIntentOrId, {
+      expand: ['payment_method']
+    });
+  } else {
+    setupIntent = setupIntentOrId;
   }
 
-  await stripe.customers.update(setupIntent.customer, {
-    invoice_settings: { default_payment_method: setupIntent.payment_method }
+  console.log('[stripe] SetupIntent state:', {
+    id: setupIntent.id,
+    status: setupIntent.status,
+    has_payment_method: !!setupIntent.payment_method,
+    has_customer: !!setupIntent.customer
   });
 
-  console.log(`[stripe] Attached payment method ${setupIntent.payment_method} as default for customer ${setupIntent.customer}`);
-  return { customerId: setupIntent.customer, paymentMethodId: setupIntent.payment_method };
+  let paymentMethodId = typeof setupIntent.payment_method === 'string'
+    ? setupIntent.payment_method
+    : (setupIntent.payment_method && setupIntent.payment_method.id);
+  const customerId = setupIntent.customer;
+
+  if (!customerId) {
+    throw new Error('SetupIntent has no associated customer');
+  }
+
+  // Fallback: if no payment method on the SetupIntent, look up what's
+  // already attached to the customer and pick the most recent card.
+  if (!paymentMethodId) {
+    console.log('[stripe] SetupIntent has no payment_method; checking customer payment methods');
+    const list = await stripe.paymentMethods.list({ customer: customerId, type: 'card', limit: 10 });
+    if (list.data && list.data.length > 0) {
+      paymentMethodId = list.data[0].id;
+      console.log(`[stripe] Falling back to existing customer payment method ${paymentMethodId}`);
+    }
+  }
+
+  if (!paymentMethodId) {
+    throw new Error('No payment method available to set as default');
+  }
+
+  await stripe.customers.update(customerId, {
+    invoice_settings: { default_payment_method: paymentMethodId }
+  });
+
+  console.log(`[stripe] Attached payment method ${paymentMethodId} as default for customer ${customerId}`);
+  return { customerId, paymentMethodId };
 }
 
 // Check if a customer has a saved default payment method.

@@ -161,9 +161,24 @@ app.get('/proposal/:token/card-saved', async (req, res) => {
   try {
     const stripeUtils = require('./utils/stripe');
     const stripe = require('stripe')(stripeUtils.getStripeKey());
-    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    // Expand setup_intent and its payment_method so we don't need a second fetch
+    const session = await stripe.checkout.sessions.retrieve(sessionId, {
+      expand: ['setup_intent', 'setup_intent.payment_method']
+    });
+    console.log('[card-saved] session retrieved:', {
+      mode: session.mode,
+      has_setup_intent: !!session.setup_intent,
+      has_customer: !!session.customer
+    });
     if (session.setup_intent) {
       await stripeUtils.attachSetupIntentToCustomer(session.setup_intent);
+    } else if (session.customer) {
+      // No setup_intent? Try to attach an existing payment method on the customer.
+      await stripeUtils.attachSetupIntentToCustomer({
+        id: 'no-setup-intent',
+        customer: session.customer,
+        payment_method: null
+      });
     }
     res.redirect(`/proposal/${req.params.token}?card=saved`);
   } catch (err) {

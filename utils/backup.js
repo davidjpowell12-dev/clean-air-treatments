@@ -115,7 +115,28 @@ function parseDriveCredentials(raw) {
   try {
     const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
     if (decoded.trim().startsWith('{')) {
-      return JSON.parse(decoded);
+      // Try plain JSON.parse first
+      try {
+        return JSON.parse(decoded);
+      } catch (err) {
+        console.log('[backup] base64 decode plain JSON.parse failed:', err.message);
+        // Try scrubbing control chars inside string values
+        try {
+          return JSON.parse(scrubControlCharsInJsonStrings(decoded));
+        } catch (err2) {
+          console.log('[backup] base64 decode scrubbed JSON.parse failed:', err2.message);
+          // Brute force: replace all real newlines/CRs/tabs anywhere
+          try {
+            const brute = decoded
+              .replace(/\r/g, '')
+              .replace(/\n/g, '\\n')
+              .replace(/\t/g, '\\t');
+            return JSON.parse(brute);
+          } catch (err3) {
+            console.log('[backup] base64 decode brute JSON.parse failed:', err3.message);
+          }
+        }
+      }
     }
   } catch (err) {
     console.log('[backup] base64 decode failed:', err.message);

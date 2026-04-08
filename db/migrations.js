@@ -358,6 +358,26 @@ function runMigrations(db) {
     db.prepare('UPDATE schema_version SET version = ?').run(i + 1);
     console.log(`Migration ${i + 1} complete`);
   }
+
+  // ── Idempotent schema repairs ───────────────────────────────────────
+  // These run on EVERY startup to heal databases where migrations were
+  // skipped or schema_version got out of sync with reality. Each guard
+  // is safe to run repeatedly.
+  ensureColumn(db, 'estimates', 'payment_method_preference', "TEXT DEFAULT 'card'");
+  ensureColumn(db, 'estimates', 'stripe_customer_id', 'TEXT');
+}
+
+// Add a column if it doesn't already exist. Safe to call repeatedly.
+function ensureColumn(db, table, column, type) {
+  try {
+    const cols = db.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some(c => c.name === column)) {
+      console.log(`[schema-repair] Adding ${table}.${column}`);
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
+  } catch (err) {
+    console.error(`[schema-repair] Failed to ensure ${table}.${column}:`, err.message);
+  }
 }
 
 module.exports = { runMigrations };
