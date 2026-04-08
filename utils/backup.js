@@ -69,21 +69,44 @@ function parseDriveCredentials(raw) {
   }
 
   const trimmed = raw.trim();
+  const diagnostics = {
+    length: trimmed.length,
+    startsWith: trimmed.slice(0, 30),
+    endsWith: trimmed.slice(-30),
+    hasRealNewlines: /\n/.test(trimmed),
+    hasLiteralBackslashN: /\\n/.test(trimmed),
+    hasTabs: /\t/.test(trimmed),
+    hasCR: /\r/.test(trimmed),
+    around169: trimmed.slice(150, 200)
+  };
+  console.log('[backup] credentials diagnostics:', JSON.stringify(diagnostics));
 
   // Attempt 1: raw JSON (most common — user pasted the file contents)
   if (trimmed.startsWith('{')) {
     try {
       return JSON.parse(trimmed);
-    } catch (err) {
-      // Private keys often contain literal newlines that break JSON.parse
-      // when pasted directly. Try escaping them inside string values.
+    } catch (err1) {
+      console.log('[backup] raw JSON.parse failed:', err1.message);
+      // Attempt 1b: scrub control chars inside string values.
+      // Service account private keys contain real newlines when pasted,
+      // which breaks JSON. Replace newlines, CRs, and tabs inside string
+      // values with their escaped equivalents.
       try {
-        const escaped = trimmed.replace(/"([^"]*?)"/gs, (match, inner) =>
-          '"' + inner.replace(/\r?\n/g, '\\n') + '"'
-        );
-        return JSON.parse(escaped);
+        const scrubbed = scrubControlCharsInJsonStrings(trimmed);
+        return JSON.parse(scrubbed);
       } catch (err2) {
-        // Fall through to try base64
+        console.log('[backup] scrubbed JSON.parse failed:', err2.message);
+        // Attempt 1c: brute force — replace ALL real newlines/CRs/tabs
+        // anywhere in the string with their escaped form.
+        try {
+          const brute = trimmed
+            .replace(/\r/g, '')
+            .replace(/\n/g, '\\n')
+            .replace(/\t/g, '\\t');
+          return JSON.parse(brute);
+        } catch (err3) {
+          console.log('[backup] brute JSON.parse failed:', err3.message);
+        }
       }
     }
   }
@@ -95,12 +118,49 @@ function parseDriveCredentials(raw) {
       return JSON.parse(decoded);
     }
   } catch (err) {
-    // Fall through
+    console.log('[backup] base64 decode failed:', err.message);
   }
 
   throw new Error(
     'GOOGLE_DRIVE_CREDENTIALS could not be parsed. Paste the raw service account JSON file contents, or a base64-encoded version of it.'
   );
+}
+
+// Walk a JSON-ish string and escape control chars that appear inside string
+// values (between unescaped double quotes). Leaves keys/structure alone.
+function scrubControlCharsInJsonStrings(input) {
+  let out = '';
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      if (escaped) {
+        out += ch;
+        escaped = false;
+      } else if (ch === '\\') {
+        out += ch;
+        escaped = true;
+      } else if (ch === '"') {
+        out += ch;
+        inString = false;
+      } else if (ch === '\n') {
+        out += '\\n';
+      } else if (ch === '\r') {
+        out += '\\r';
+      } else if (ch === '\t') {
+        out += '\\t';
+      } else {
+        out += ch;
+      }
+    } else {
+      if (ch === '"') {
+        inString = true;
+      }
+      out += ch;
+    }
+  }
+  return out;
 }
 
 function getDriveClient() {
