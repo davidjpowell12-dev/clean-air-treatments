@@ -30,17 +30,24 @@ router.get('/download', requireAdmin, (req, res) => {
 
 // ── Trigger immediate backup to Google Drive ──────────────────────────
 router.post('/now', requireAdmin, async (req, res) => {
+  console.log('[backup] /api/backup/now triggered by', req.user && req.user.email);
   try {
     const result = await backup.runFullBackup();
+    console.log('[backup] /api/backup/now success:', {
+      hasLocal: !!result.local,
+      hasDrive: !!result.drive,
+      error: result.error || null
+    });
     res.json({
       success: true,
-      local: result.local,
+      local: result.local || null,
       drive: result.drive || null,
       error: result.error || null,
       timestamp: new Date().toISOString()
     });
   } catch (err) {
-    res.status(500).json({ error: 'Backup failed: ' + err.message });
+    console.error('[backup] /api/backup/now failed:', err && err.stack || err);
+    res.status(500).json({ error: 'Backup failed: ' + (err && err.message || String(err)) });
   }
 });
 
