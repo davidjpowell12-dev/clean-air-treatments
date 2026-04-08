@@ -616,12 +616,10 @@ const EstimatesPage = {
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.showScheduleModal(${est.id})" id="scheduleJobBtn">
               📅 Schedule This Job
             </button>
-            ${est.payment_plan === 'monthly' && est.payment_method_preference === 'card' ? `
-              <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.sendCardSaveLink(${est.id})" id="cardSaveBtn">
-                💳 Send Card-Save Link via SMS
-              </button>
-              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use this if the customer hasn't yet saved a card on file</p>
-            ` : ''}
+            <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.sendCardSaveLink(${est.id})" id="cardSaveBtn">
+              💳 Send Card-Save Link via SMS
+            </button>
+            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use if customer needs to save a card on file</p>
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
