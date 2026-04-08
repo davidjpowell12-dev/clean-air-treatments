@@ -63,13 +63,53 @@ async function backupToLocal() {
 
 // ── Google Drive Auth ─────────────────────────────────────────────────
 
-function getDriveClient() {
-  const credsBase64 = process.env.GOOGLE_DRIVE_CREDENTIALS;
-  if (!credsBase64) {
+function parseDriveCredentials(raw) {
+  if (!raw) {
     throw new Error('GOOGLE_DRIVE_CREDENTIALS environment variable not set');
   }
 
-  const creds = JSON.parse(Buffer.from(credsBase64, 'base64').toString('utf8'));
+  const trimmed = raw.trim();
+
+  // Attempt 1: raw JSON (most common — user pasted the file contents)
+  if (trimmed.startsWith('{')) {
+    try {
+      return JSON.parse(trimmed);
+    } catch (err) {
+      // Private keys often contain literal newlines that break JSON.parse
+      // when pasted directly. Try escaping them inside string values.
+      try {
+        const escaped = trimmed.replace(/"([^"]*?)"/gs, (match, inner) =>
+          '"' + inner.replace(/\r?\n/g, '\\n') + '"'
+        );
+        return JSON.parse(escaped);
+      } catch (err2) {
+        // Fall through to try base64
+      }
+    }
+  }
+
+  // Attempt 2: base64-encoded JSON
+  try {
+    const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+    if (decoded.trim().startsWith('{')) {
+      return JSON.parse(decoded);
+    }
+  } catch (err) {
+    // Fall through
+  }
+
+  throw new Error(
+    'GOOGLE_DRIVE_CREDENTIALS could not be parsed. Paste the raw service account JSON file contents, or a base64-encoded version of it.'
+  );
+}
+
+function getDriveClient() {
+  const creds = parseDriveCredentials(process.env.GOOGLE_DRIVE_CREDENTIALS);
+
+  // Service account private keys must contain real newlines, not literal \n
+  if (creds.private_key && creds.private_key.includes('\\n')) {
+    creds.private_key = creds.private_key.replace(/\\n/g, '\n');
+  }
 
   const auth = new google.auth.GoogleAuth({
     credentials: creds,
