@@ -82,31 +82,44 @@ function getDriveClient() {
 // ── Find or Create Drive Folder ───────────────────────────────────────
 
 async function getOrCreateFolder(drive) {
-  // Search for folders shared with this service account (including shared drives)
+  // Preferred: explicit folder ID via env var (most reliable)
+  if (process.env.GOOGLE_DRIVE_FOLDER_ID) {
+    const folderId = process.env.GOOGLE_DRIVE_FOLDER_ID.trim();
+    try {
+      const meta = await drive.files.get({
+        fileId: folderId,
+        fields: 'id, name, driveId',
+        supportsAllDrives: true
+      });
+      console.log(`[backup] Using Drive folder by ID: ${meta.data.name} (${meta.data.id})`);
+      return folderId;
+    } catch (err) {
+      console.error(`[backup] GOOGLE_DRIVE_FOLDER_ID set but folder not accessible: ${err.message}`);
+      throw new Error(`Drive folder ${folderId} not accessible by service account. Make sure you shared the folder with the service account email as Editor.`);
+    }
+  }
+
+  // Fallback: search by name (including shared drives)
   const res = await drive.files.list({
     q: `name='${FOLDER_NAME}' and mimeType='application/vnd.google-apps.folder' and trashed=false`,
-    fields: 'files(id, name)',
+    fields: 'files(id, name, ownedByMe)',
     spaces: 'drive',
+    corpora: 'allDrives',
     includeItemsFromAllDrives: true,
     supportsAllDrives: true
   });
 
   if (res.data.files && res.data.files.length > 0) {
-    console.log(`[backup] Found Drive folder: ${res.data.files[0].name} (${res.data.files[0].id})`);
-    return res.data.files[0].id;
+    // Prefer folders NOT owned by the service account (i.e. shared in by user)
+    const shared = res.data.files.find(f => f.ownedByMe === false) || res.data.files[0];
+    console.log(`[backup] Found Drive folder by name: ${shared.name} (${shared.id})`);
+    return shared.id;
   }
 
-  // If shared folder not found, create one (will be in service account's own drive)
-  console.log(`[backup] Folder "${FOLDER_NAME}" not found, creating...`);
-  const folder = await drive.files.create({
-    requestBody: {
-      name: FOLDER_NAME,
-      mimeType: 'application/vnd.google-apps.folder'
-    },
-    fields: 'id'
-  });
-
-  return folder.data.id;
+  // No folder found — refuse to create one silently in the service account's private drive
+  throw new Error(
+    `Drive folder "${FOLDER_NAME}" not found. Either (1) share a folder with that exact name with the service account email as Editor, or (2) set GOOGLE_DRIVE_FOLDER_ID to the folder's ID.`
+  );
 }
 
 // ── Upload to Drive ───────────────────────────────────────────────────
