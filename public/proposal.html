@@ -282,13 +282,7 @@
               </div>
             ` : ''}
 
-            ${isAccepted ? `
-              <div class="accepted-animation">
-                <div class="check-circle">\u2705</div>
-                <h3>Thank You!</h3>
-                <p>Your proposal has been accepted. The Clean Air team will be in touch to schedule your services.</p>
-              </div>
-            ` : ''}
+            ${isAccepted ? renderAcceptedSection(est) : ''}
           </div>
 
           <div class="proposal-footer">
@@ -467,27 +461,100 @@
           const checkoutData = await checkoutResp.json();
 
           if (checkoutResp.ok && checkoutData.url) {
-            // Redirect to Stripe Checkout
             window.location.href = checkoutData.url;
             return;
           }
-
-          // If Stripe isn't configured, show success without payment
           if (checkoutResp.status === 503) {
             showAcceptedConfirmation();
             return;
           }
-
-          // If checkout creation failed for another reason, log it and show confirmation
           console.error('Checkout creation failed:', checkoutData.error);
         }
 
-        // Monthly, per-service, or no Stripe or checkout failed — show confirmation
+        // Step 2 (alternative): For monthly + card, redirect to Stripe SETUP mode
+        // to securely save card. No charge today — billing starts after first visit.
+        if (selectedPlan === 'monthly' && selectedMethod === 'card') {
+          try {
+            const setupResp = await fetch(`/api/estimates/public/${token}/setup-card`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' }
+            });
+            const setupData = await setupResp.json();
+            if (setupResp.ok && setupData.url) {
+              window.location.href = setupData.url;
+              return;
+            }
+            console.error('Setup checkout creation failed:', setupData.error);
+          } catch (setupErr) {
+            console.error('Setup checkout error:', setupErr);
+          }
+          // Fall through to confirmation if setup fails
+        }
+
+        // Monthly+check, per-service, or fallback — show confirmation
         showAcceptedConfirmation();
 
       } catch (err) {
         btn.disabled = false;
         btn.textContent = 'Continue';
+        alert('Connection error. Please try again.');
+      }
+    }
+
+    function renderAcceptedSection(est) {
+      const params = new URLSearchParams(window.location.search);
+      const cardStatus = params.get('card');
+      const wantsCardSave = params.get('save_card') === '1';
+      const isMonthlyCard = est.payment_plan === 'monthly' && est.payment_method_preference === 'card';
+
+      // Successfully saved card
+      if (cardStatus === 'saved') {
+        return `
+          <div class="accepted-animation">
+            <div class="check-circle">\u2705</div>
+            <h3>Card Saved Successfully</h3>
+            <p>You're all set! Your first payment will process after your first service visit, then monthly going forward. Dave will be in touch shortly to schedule.</p>
+          </div>
+        `;
+      }
+
+      // Card save was cancelled or failed, OR they came in via "save your card" link
+      if ((isMonthlyCard && (cardStatus === 'cancelled' || cardStatus === 'error' || wantsCardSave))) {
+        return `
+          <div class="accepted-animation">
+            <div class="check-circle">\u2705</div>
+            <h3>Proposal Accepted</h3>
+            <p>One last step — securely save your card so we can bill you automatically. <strong>No charge today.</strong> Your first payment will process after your first service visit, then monthly going forward.</p>
+            <button class="accept-btn" style="margin-top:16px;" onclick="startCardSave()">Save Card Securely</button>
+            ${cardStatus === 'cancelled' ? '<p style="color:#999;font-size:12px;margin-top:8px;">Card setup was cancelled.</p>' : ''}
+            ${cardStatus === 'error' ? '<p style="color:#c00;font-size:12px;margin-top:8px;">There was a problem saving your card. Please try again or contact Dave.</p>' : ''}
+          </div>
+        `;
+      }
+
+      // Default accepted state
+      return `
+        <div class="accepted-animation">
+          <div class="check-circle">\u2705</div>
+          <h3>Thank You!</h3>
+          <p>Your proposal has been accepted. The Clean Air team will be in touch to schedule your services.</p>
+        </div>
+      `;
+    }
+
+    async function startCardSave() {
+      try {
+        const resp = await fetch(`/api/estimates/public/${token}/setup-card`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await resp.json();
+        if (resp.ok && data.url) {
+          window.location.href = data.url;
+        } else {
+          alert(data.error || 'Could not start card setup. Please contact Dave.');
+        }
+      } catch (err) {
         alert('Connection error. Please try again.');
       }
     }
@@ -499,7 +566,7 @@
         if (selectedPlan === 'per_service') {
           msg = "You'll be invoiced after each treatment is completed.";
         } else if (selectedPlan === 'monthly') {
-          msg = "Your lawn care program is confirmed! You'll be billed monthly once services begin.";
+          msg = "Your lawn care program is confirmed. Your first payment will process after your first service visit, then monthly going forward.";
         } else {
           msg = "The Clean Air team will be in touch to schedule your services.";
         }

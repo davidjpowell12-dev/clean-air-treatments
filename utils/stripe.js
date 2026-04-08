@@ -44,15 +44,93 @@ function generateInvoiceNumber(db) {
 }
 
 // ─── Stripe Customer ──────────────────────────────────────────
-async function createStripeCustomer(email, name, metadata = {}) {
+// Find existing customer by email, or create a new one. Avoids creating
+// duplicate Stripe customer records on retried accept attempts.
+async function findOrCreateStripeCustomer(email, name, metadata = {}) {
   const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
-  const customer = await stripe.customers.create({
-    email,
-    name,
-    metadata
-  });
+
+  if (email) {
+    try {
+      const existing = await stripe.customers.list({ email, limit: 1 });
+      if (existing.data && existing.data.length > 0) {
+        console.log(`[stripe] Reusing existing customer ${existing.data[0].id} for ${email}`);
+        return existing.data[0].id;
+      }
+    } catch (err) {
+      console.error('[stripe] Customer lookup failed, will create new:', err.message);
+    }
+  }
+
+  const customer = await stripe.customers.create({ email, name, metadata });
+  console.log(`[stripe] Created new customer ${customer.id} for ${email || name}`);
   return customer.id;
+}
+
+// Legacy alias — kept so existing call sites keep working but now de-dupes.
+async function createStripeCustomer(email, name, metadata = {}) {
+  return findOrCreateStripeCustomer(email, name, metadata);
+}
+
+// ─── Stripe Setup Mode Checkout (collect card without charging) ─
+async function createSetupCheckoutSession({
+  estimateId,
+  customerName,
+  customerEmail,
+  stripeCustomerId,
+  successUrl,
+  cancelUrl
+}) {
+  const stripe = getStripe();
+  if (!stripe) throw new Error('Stripe is not configured');
+
+  const session = await stripe.checkout.sessions.create({
+    mode: 'setup',
+    customer: stripeCustomerId || undefined,
+    customer_email: stripeCustomerId ? undefined : (customerEmail || undefined),
+    payment_method_types: ['card'],
+    client_reference_id: String(estimateId),
+    metadata: {
+      estimate_id: String(estimateId),
+      customer_name: customerName || ''
+    },
+    success_url: successUrl,
+    cancel_url: cancelUrl
+  });
+
+  return session;
+}
+
+// After a setup session completes, attach the saved card as the customer's
+// default payment method so future off-session charges work.
+async function attachSetupIntentToCustomer(setupIntentId) {
+  const stripe = getStripe();
+  if (!stripe) throw new Error('Stripe is not configured');
+
+  const setupIntent = await stripe.setupIntents.retrieve(setupIntentId);
+  if (!setupIntent.payment_method || !setupIntent.customer) {
+    throw new Error('Setup intent has no payment method or customer');
+  }
+
+  await stripe.customers.update(setupIntent.customer, {
+    invoice_settings: { default_payment_method: setupIntent.payment_method }
+  });
+
+  console.log(`[stripe] Attached payment method ${setupIntent.payment_method} as default for customer ${setupIntent.customer}`);
+  return { customerId: setupIntent.customer, paymentMethodId: setupIntent.payment_method };
+}
+
+// Check if a customer has a saved default payment method.
+async function customerHasPaymentMethod(stripeCustomerId) {
+  const stripe = getStripe();
+  if (!stripe || !stripeCustomerId) return false;
+  try {
+    const customer = await stripe.customers.retrieve(stripeCustomerId);
+    return !!(customer.invoice_settings && customer.invoice_settings.default_payment_method);
+  } catch (err) {
+    console.error('[stripe] customerHasPaymentMethod failed:', err.message);
+    return false;
+  }
 }
 
 // ─── Stripe Checkout Session ──────────────────────────────────
@@ -240,7 +318,11 @@ module.exports = {
   getStripeKey,
   generateInvoiceNumber,
   createStripeCustomer,
+  findOrCreateStripeCustomer,
   createCheckoutSession,
+  createSetupCheckoutSession,
+  attachSetupIntentToCustomer,
+  customerHasPaymentMethod,
   createInvoicesForEstimate,
   createPerServiceInvoice,
   constructWebhookEvent,

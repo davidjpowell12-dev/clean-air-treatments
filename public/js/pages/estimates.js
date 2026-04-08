@@ -616,6 +616,12 @@ const EstimatesPage = {
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.showScheduleModal(${est.id})" id="scheduleJobBtn">
               📅 Schedule This Job
             </button>
+            ${est.payment_plan === 'monthly' && est.payment_method_preference === 'card' ? `
+              <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.sendCardSaveLink(${est.id})" id="cardSaveBtn">
+                💳 Send Card-Save Link via SMS
+              </button>
+              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use this if the customer hasn't yet saved a card on file</p>
+            ` : ''}
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
@@ -691,6 +697,26 @@ const EstimatesPage = {
       setTimeout(() => this.renderDetail(id), 1000);
     } catch (err) {
       App.toast(err.message || 'Failed to prepare SMS', 'error');
+    }
+  },
+
+  async sendCardSaveLink(id) {
+    try {
+      const est = await Api.get(`/api/estimates/${id}`);
+      if (!est.phone) {
+        App.toast('No phone number on this estimate', 'error');
+        return;
+      }
+      const linkResp = await Api.post(`/api/estimates/${id}/card-save-link`);
+      const url = linkResp.url;
+      const cleanPhone = est.phone.replace(/\D/g, '');
+      const firstName = (est.customer_name || 'there').split(' ')[0];
+      const message = `Hi ${firstName}! Last quick step — tap this link to securely save your card for billing. No charge today. Your first payment will process after your first service visit, then monthly going forward:\n\n${url}`;
+      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
+      window.location.href = smsUrl;
+      App.toast('Card-save text ready!', 'success');
+    } catch (err) {
+      App.toast(err.message || 'Failed to prepare card-save link', 'error');
     }
   },
 

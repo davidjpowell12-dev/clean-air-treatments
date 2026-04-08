@@ -233,6 +233,92 @@ router.post('/public/:token/accept', async (req, res) => {
   }
 });
 
+// Public: Create Stripe Setup Mode Checkout to securely save a card
+// (no charge today). Used after a customer accepts a monthly plan with card.
+router.post('/public/:token/setup-card', async (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
+  if (!est) return res.status(404).json({ error: 'Proposal not found' });
+  if (est.status !== 'accepted') {
+    return res.status(400).json({ error: 'Proposal must be accepted before saving a card' });
+  }
+
+  const stripeUtils = require('../utils/stripe');
+  if (!stripeUtils.isEnabled()) {
+    return res.status(503).json({ error: 'Payments are not configured' });
+  }
+
+  try {
+    // Reuse existing Stripe customer from estimate, or look up / create one
+    let stripeCustomerId = est.stripe_customer_id;
+    if (!stripeCustomerId && est.email) {
+      stripeCustomerId = await stripeUtils.findOrCreateStripeCustomer(
+        est.email, est.customer_name, { estimate_id: String(est.id) }
+      );
+      db.prepare('UPDATE estimates SET stripe_customer_id = ? WHERE id = ?')
+        .run(stripeCustomerId, est.id);
+    }
+
+    const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+    const host = req.headers['x-forwarded-host'] || req.get('host');
+    const baseUrl = `${proto}://${host}`;
+
+    const session = await stripeUtils.createSetupCheckoutSession({
+      estimateId: est.id,
+      customerName: est.customer_name,
+      customerEmail: est.email,
+      stripeCustomerId,
+      successUrl: `${baseUrl}/proposal/${req.params.token}/card-saved?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${baseUrl}/proposal/${req.params.token}?card=cancelled`
+    });
+
+    res.json({ success: true, url: session.url, session_id: session.id });
+  } catch (err) {
+    console.error('[setup-card] Failed:', err && err.stack || err);
+    res.status(500).json({ error: 'Could not create card setup session', debug_message: err.message });
+  }
+});
+
+// Public: Card-saved success page (Stripe redirects here after setup mode)
+// Attaches the saved payment method as the customer's default and redirects
+// back to the proposal page with a flag so the success state is shown.
+router.get('/public/:token/card-saved', async (req, res) => {
+  const sessionId = req.query.session_id;
+  if (!sessionId) return res.redirect(`/proposal/${req.params.token}`);
+
+  try {
+    const stripeUtils = require('../utils/stripe');
+    const stripe = require('stripe')(stripeUtils.getStripeKey());
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.setup_intent) {
+      await stripeUtils.attachSetupIntentToCustomer(session.setup_intent);
+    }
+    res.redirect(`/proposal/${req.params.token}?card=saved`);
+  } catch (err) {
+    console.error('[card-saved] Failed to attach payment method:', err.message);
+    res.redirect(`/proposal/${req.params.token}?card=error`);
+  }
+});
+
+// Authenticated: regenerate a card-save link for a specific estimate (e.g. for Melissa)
+// Returns a URL the user can SMS to a customer who hasn't saved a card yet.
+router.post('/:id/card-save-link', requireAuth, async (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (!est.token) return res.status(400).json({ error: 'Estimate has no public token' });
+
+  const proto = req.headers['x-forwarded-proto'] || req.protocol || 'https';
+  const host = req.headers['x-forwarded-host'] || req.get('host');
+  const baseUrl = `${proto}://${host}`;
+
+  // The customer flow: open the proposal page; it will detect accepted+no-card
+  // and surface a "Save your card" button. For simplicity we just return the
+  // proposal URL plus a hint flag.
+  const url = `${baseUrl}/proposal/${est.token}?save_card=1`;
+  res.json({ success: true, url });
+});
+
 // Get accepted estimates that need scheduling (for dashboard widget)
 router.get('/needs-scheduling', requireAuth, (req, res) => {
   const db = getDb();
