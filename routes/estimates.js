@@ -123,10 +123,24 @@ router.post('/public/:token/accept', async (req, res) => {
     return res.status(400).json({ error: 'Invalid payment plan' });
   }
 
+  console.log('[accept] Starting:', {
+    estimate_id: est.id,
+    customer: est.customer_name,
+    paymentPlan,
+    paymentMethodPref,
+    has_email: !!est.email,
+    has_property_id: !!est.property_id,
+    monthly_price: est.monthly_price,
+    total_price: est.total_price,
+    payment_months: est.payment_months
+  });
+
+  let step = 'init';
   try {
     const acceptedAt = new Date().toISOString();
 
-    // Create Stripe customer if Stripe is configured
+    // Step 1: Stripe customer
+    step = 'stripe_customer';
     const stripeUtils = require('../utils/stripe');
     let stripeCustomerId = null;
     if (stripeUtils.isEnabled() && est.email) {
@@ -135,13 +149,14 @@ router.post('/public/:token/accept', async (req, res) => {
           est.email, est.customer_name,
           { estimate_id: String(est.id) }
         );
+        console.log('[accept] stripe customer:', stripeCustomerId);
       } catch (err) {
-        console.error('[accept] Stripe customer creation failed:', err.message);
-        // Non-fatal — continue without Stripe customer
+        console.error('[accept] Stripe customer creation failed (non-fatal):', err.message);
       }
     }
 
-    // Auto-create property if estimate has no property_id
+    // Step 2: Auto-create property if needed
+    step = 'auto_create_property';
     let propertyId = est.property_id;
     if (!propertyId && est.customer_name) {
       const result = db.prepare(`
@@ -155,23 +170,51 @@ router.post('/public/:token/accept', async (req, res) => {
       console.log(`[accept] Auto-created property ${propertyId} for ${est.customer_name}`);
     }
 
-    // Update estimate status (and link to property if just created)
-    db.prepare(`
-      UPDATE estimates SET
-        status = 'accepted', accepted_at = ?, payment_plan = ?,
-        payment_method_preference = ?, stripe_customer_id = ?, property_id = ?,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(acceptedAt, paymentPlan, paymentMethodPref, stripeCustomerId, propertyId, est.id);
+    // Step 3: Update estimate row
+    step = 'update_estimate';
+    // Detect whether the payment_method_preference column exists (migration 18)
+    let hasPmpColumn = true;
+    try {
+      const cols = db.prepare("PRAGMA table_info(estimates)").all();
+      hasPmpColumn = cols.some(c => c.name === 'payment_method_preference');
+    } catch (e) { /* ignore */ }
 
-    // Generate invoices based on payment plan (with card fee if applicable)
+    if (hasPmpColumn) {
+      db.prepare(`
+        UPDATE estimates SET
+          status = 'accepted', accepted_at = ?, payment_plan = ?,
+          payment_method_preference = ?, stripe_customer_id = ?, property_id = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(acceptedAt, paymentPlan, paymentMethodPref, stripeCustomerId, propertyId, est.id);
+    } else {
+      console.warn('[accept] payment_method_preference column missing, falling back');
+      db.prepare(`
+        UPDATE estimates SET
+          status = 'accepted', accepted_at = ?, payment_plan = ?,
+          stripe_customer_id = ?, property_id = ?,
+          updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(acceptedAt, paymentPlan, stripeCustomerId, propertyId, est.id);
+    }
+
+    // Step 4: Generate invoices
+    step = 'create_invoices';
     const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, paymentPlan, paymentMethodPref);
+    console.log(`[accept] Created ${invoices.length} invoice(s)`);
 
-    logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
-      customer_name: est.customer_name, payment_plan: paymentPlan,
-      invoices_created: invoices.length
-    });
+    // Step 5: Audit log (non-fatal if it fails)
+    step = 'audit_log';
+    try {
+      logAudit(db, 'estimate', est.id, null, 'accepted_by_customer', {
+        customer_name: est.customer_name, payment_plan: paymentPlan,
+        invoices_created: invoices.length
+      });
+    } catch (auditErr) {
+      console.error('[accept] audit log failed (non-fatal):', auditErr.message);
+    }
 
+    console.log('[accept] SUCCESS for estimate', est.id);
     res.json({
       success: true,
       message: 'Proposal accepted!',
@@ -181,8 +224,12 @@ router.post('/public/:token/accept', async (req, res) => {
       total_invoices: invoices.length
     });
   } catch (err) {
-    console.error('[accept] Error:', err.message);
-    res.status(500).json({ error: 'Failed to process acceptance. Please try again.' });
+    console.error(`[accept] FAILED at step '${step}' for estimate ${est.id}:`, err && err.stack || err);
+    res.status(500).json({
+      error: 'Failed to process acceptance. Please try again.',
+      debug_step: step,
+      debug_message: err && err.message || String(err)
+    });
   }
 });
 
