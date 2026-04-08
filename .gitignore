@@ -6,3 +6,6 @@ db/sessions.sqlite
 .env
 uploads/
 backups/
+
+.DS_Store
+.claude/
