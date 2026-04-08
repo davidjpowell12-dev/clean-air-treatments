@@ -17,10 +17,27 @@ const Api = {
       throw new Error('Not authenticated');
     }
 
-    const data = await res.json();
+    // Read body as text first so we can surface non-JSON responses
+    // (e.g. Railway HTML error pages, proxy timeouts, truncated bodies)
+    const text = await res.text();
+    let data = null;
+    let parseError = null;
+    if (text) {
+      try {
+        data = JSON.parse(text);
+      } catch (err) {
+        parseError = err;
+      }
+    }
 
     if (!res.ok) {
-      throw new Error(data.error || `Request failed (${res.status})`);
+      const msg = (data && data.error) ||
+        (parseError ? `Server error ${res.status}: ${text.slice(0, 300)}` : `Request failed (${res.status})`);
+      throw new Error(msg);
+    }
+
+    if (parseError) {
+      throw new Error(`Bad response from server: ${parseError.message}. Body: ${text.slice(0, 300)}`);
     }
 
     return data;
