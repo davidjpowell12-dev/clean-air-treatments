@@ -153,6 +153,25 @@ app.get('/proposal/:token', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'proposal.html'));
 });
 
+// Stripe Setup mode return URL: attach the saved payment method, then bounce
+// the customer back to the proposal page with a success flag.
+app.get('/proposal/:token/card-saved', async (req, res) => {
+  const sessionId = req.query.session_id;
+  if (!sessionId) return res.redirect(`/proposal/${req.params.token}`);
+  try {
+    const stripeUtils = require('./utils/stripe');
+    const stripe = require('stripe')(stripeUtils.getStripeKey());
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    if (session.setup_intent) {
+      await stripeUtils.attachSetupIntentToCustomer(session.setup_intent);
+    }
+    res.redirect(`/proposal/${req.params.token}?card=saved`);
+  } catch (err) {
+    console.error('[card-saved] Failed to attach payment method:', err && err.stack || err);
+    res.redirect(`/proposal/${req.params.token}?card=error`);
+  }
+});
+
 // Payment result pages (no auth — customer sees after Stripe Checkout)
 app.get('/payment/success', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'payment-success.html'));
