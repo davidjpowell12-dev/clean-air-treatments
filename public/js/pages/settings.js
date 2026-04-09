@@ -104,6 +104,15 @@ const SettingsPage = {
         </div>
 
         <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>Data Cleanup</h3></div>
+          <div class="card-body">
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Find and merge duplicate property records.</p>
+            <button class="btn btn-secondary btn-full" id="findDupesBtn" onclick="SettingsPage.findDuplicates()">Find Duplicate Properties</button>
+            <div id="duplicatesResults" style="margin-top:12px;"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
           <div class="card-header"><h3>Data Export</h3></div>
           <div class="card-body">
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Export application records for MDARD annual reporting (due March 1).</p>
@@ -640,6 +649,73 @@ const SettingsPage = {
       setTimeout(() => { this.exportCSV(type); }, i * 500);
     });
     App.toast('Downloading all exports...', 'success');
+  },
+
+  async findDuplicates() {
+    const btn = document.getElementById('findDupesBtn');
+    const container = document.getElementById('duplicatesResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const result = await Api.get('/api/admin/duplicates/properties');
+      if (!result.duplicate_groups || result.duplicate_groups.length === 0) {
+        container.innerHTML = '<p style="font-size:13px;color:var(--green);font-weight:600;">No duplicates found.</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <p style="font-size:13px;color:var(--red);font-weight:600;margin-bottom:12px;">
+          Found ${result.total_duplicates} duplicate record${result.total_duplicates > 1 ? 's' : ''} across ${result.duplicate_groups.length} address${result.duplicate_groups.length > 1 ? 'es' : ''}
+        </p>
+        ${result.duplicate_groups.map(group => `
+          <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;margin-bottom:12px;">
+            <div style="font-weight:600;font-size:14px;margin-bottom:8px;">${this.esc(group.address)}</div>
+            ${group.properties.map(p => {
+              const isRecommended = p.id === group.recommended_keep_id;
+              const linked = p.schedule_count + p.application_count + p.estimate_count;
+              return `
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--gray-100);font-size:13px;">
+                  <span style="min-width:60px;font-weight:500;">ID ${p.id}</span>
+                  <span style="flex:1;color:var(--gray-500);">${this.esc(p.customer_name)} &middot; ${linked} linked record${linked !== 1 ? 's' : ''}</span>
+                  ${isRecommended
+                    ? '<span style="color:var(--green);font-weight:600;font-size:12px;">KEEP</span>'
+                    : `<button class="btn btn-sm" style="padding:2px 10px;font-size:12px;color:var(--red);border:1px solid var(--red);background:none;" onclick="SettingsPage.mergeDuplicate(${group.recommended_keep_id}, ${p.id})">Remove</button>`
+                  }
+                </div>
+              `;
+            }).join('')}
+            <button class="btn btn-primary btn-sm" style="margin-top:8px;font-size:12px;" onclick="SettingsPage.mergeAll(${group.recommended_keep_id}, [${group.properties.filter(p => p.id !== group.recommended_keep_id).map(p => p.id).join(',')}])">
+              Merge All &rarr; Keep ID ${group.recommended_keep_id}
+            </button>
+          </div>
+        `).join('')}
+      `;
+    } catch (err) {
+      container.innerHTML = `<p style="font-size:13px;color:var(--red);">Error: ${err.message}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Find Duplicate Properties'; }
+    }
+  },
+
+  async mergeDuplicate(keepId, removeId) {
+    if (!confirm(`Merge property ${removeId} into ${keepId}? All linked records will be moved and the duplicate will be deleted.`)) return;
+    try {
+      const result = await Api.post('/api/admin/duplicates/merge', { keep_id: keepId, remove_ids: [removeId] });
+      App.toast(`Merged! ${result.records_reassigned} record(s) reassigned.`, 'success');
+      this.findDuplicates(); // Refresh the list
+    } catch (err) {
+      App.toast('Merge failed: ' + err.message, 'error');
+    }
+  },
+
+  async mergeAll(keepId, removeIds) {
+    if (!confirm(`Merge ${removeIds.length} duplicate(s) into property ${keepId}? All linked records will be moved and duplicates deleted.`)) return;
+    try {
+      const result = await Api.post('/api/admin/duplicates/merge', { keep_id: keepId, remove_ids: removeIds });
+      App.toast(`Merged! ${result.records_reassigned} record(s) reassigned, ${removeIds.length} duplicate(s) removed.`, 'success');
+      this.findDuplicates(); // Refresh the list
+    } catch (err) {
+      App.toast('Merge failed: ' + err.message, 'error');
+    }
   },
 
   esc(str) {

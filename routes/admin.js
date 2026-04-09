@@ -148,6 +148,103 @@ function pruneBackups() {
   }
 }
 
+// ── Duplicate Properties Finder ─────────────────────────────────────
+// Returns groups of properties that share the same address (case-insensitive)
+router.get('/duplicates/properties', requireAdmin, (req, res) => {
+  try {
+    const db = getDb();
+
+    // Find addresses that appear more than once
+    const dupeAddresses = db.prepare(`
+      SELECT LOWER(TRIM(address)) as addr, COUNT(*) as cnt
+      FROM properties
+      WHERE address != ''
+      GROUP BY LOWER(TRIM(address))
+      HAVING COUNT(*) > 1
+    `).all();
+
+    const groups = dupeAddresses.map(({ addr, cnt }) => {
+      const properties = db.prepare(`
+        SELECT p.*,
+          (SELECT COUNT(*) FROM schedules WHERE property_id = p.id) as schedule_count,
+          (SELECT COUNT(*) FROM applications WHERE property_id = p.id) as application_count,
+          (SELECT COUNT(*) FROM estimates WHERE property_id = p.id) as estimate_count
+        FROM properties p
+        WHERE LOWER(TRIM(p.address)) = ?
+        ORDER BY p.created_at ASC
+      `).all(addr);
+
+      // The "best" record is the one with the most linked data
+      const sorted = [...properties].sort((a, b) => {
+        const scoreA = a.schedule_count + a.application_count + a.estimate_count;
+        const scoreB = b.schedule_count + b.application_count + b.estimate_count;
+        return scoreB - scoreA;
+      });
+
+      return {
+        address: properties[0].address,
+        count: cnt,
+        recommended_keep_id: sorted[0].id,
+        properties
+      };
+    });
+
+    res.json({ duplicate_groups: groups, total_duplicates: groups.reduce((sum, g) => sum + g.count - 1, 0) });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to find duplicates: ' + err.message });
+  }
+});
+
+// ── Merge Duplicate Properties ──────────────────────────────────────
+// Reassigns all linked records from source properties to the target, then deletes the sources
+router.post('/duplicates/merge', requireAdmin, (req, res) => {
+  try {
+    const db = getDb();
+    const { keep_id, remove_ids } = req.body;
+
+    if (!keep_id || !remove_ids || !Array.isArray(remove_ids) || remove_ids.length === 0) {
+      return res.status(400).json({ error: 'Provide keep_id (property to keep) and remove_ids (array of properties to merge into it)' });
+    }
+
+    // Verify the target property exists
+    const target = db.prepare('SELECT * FROM properties WHERE id = ?').get(keep_id);
+    if (!target) return res.status(404).json({ error: `Property ${keep_id} not found` });
+
+    const mergeAll = db.transaction(() => {
+      let totalReassigned = 0;
+
+      for (const removeId of remove_ids) {
+        if (removeId === keep_id) continue;
+
+        // Reassign schedules
+        const s = db.prepare('UPDATE schedules SET property_id = ? WHERE property_id = ?').run(keep_id, removeId);
+        // Reassign applications
+        const a = db.prepare('UPDATE applications SET property_id = ? WHERE property_id = ?').run(keep_id, removeId);
+        // Reassign estimates
+        const e = db.prepare('UPDATE estimates SET property_id = ? WHERE property_id = ?').run(keep_id, removeId);
+
+        totalReassigned += s.changes + a.changes + e.changes;
+
+        // Delete the duplicate property
+        db.prepare('DELETE FROM properties WHERE id = ?').run(removeId);
+        console.log(`[merge] Deleted property ${removeId}, reassigned ${s.changes} schedules, ${a.changes} applications, ${e.changes} estimates to property ${keep_id}`);
+      }
+
+      return totalReassigned;
+    });
+
+    const reassigned = mergeAll();
+    res.json({
+      success: true,
+      kept: keep_id,
+      removed: remove_ids.filter(id => id !== keep_id),
+      records_reassigned: reassigned
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Merge failed: ' + err.message });
+  }
+});
+
 // ── CSV Export Helpers ───────────────────────────────────────────────
 function escapeCSV(value) {
   if (value === null || value === undefined) return '';

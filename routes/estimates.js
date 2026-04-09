@@ -155,19 +155,31 @@ router.post('/public/:token/accept', async (req, res) => {
       }
     }
 
-    // Step 2: Auto-create property if needed
+    // Step 2: Auto-create property if needed (de-dupe by address first)
     step = 'auto_create_property';
     let propertyId = est.property_id;
     if (!propertyId && est.customer_name) {
-      const result = db.prepare(`
-        INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        est.customer_name, est.address || '', est.city || '', est.state || 'MI',
-        est.zip || '', est.email || '', est.phone || '', est.property_sqft || null
-      );
-      propertyId = result.lastInsertRowid;
-      console.log(`[accept] Auto-created property ${propertyId} for ${est.customer_name}`);
+      // Check for existing property by address (case-insensitive)
+      if (est.address) {
+        const existing = db.prepare(
+          'SELECT id FROM properties WHERE LOWER(TRIM(address)) = LOWER(TRIM(?)) LIMIT 1'
+        ).get(est.address);
+        if (existing) {
+          propertyId = existing.id;
+          console.log(`[accept] Reusing existing property ${propertyId} for ${est.customer_name} at ${est.address}`);
+        }
+      }
+      if (!propertyId) {
+        const result = db.prepare(`
+          INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          est.customer_name, est.address || '', est.city || '', est.state || 'MI',
+          est.zip || '', est.email || '', est.phone || '', est.property_sqft || null
+        );
+        propertyId = result.lastInsertRowid;
+        console.log(`[accept] Auto-created property ${propertyId} for ${est.customer_name}`);
+      }
     }
 
     // Step 3: Update estimate row
