@@ -87,6 +87,7 @@ const EstimatesPage = {
           </div>
           <div class="est-list-card-meta">
             <span>${e.item_count || 0} service${(e.item_count || 0) !== 1 ? 's' : ''}</span>
+            ${e.status === 'accepted' && e.payment_method_preference ? `<span>${e.payment_method_preference === 'card' ? '💳' : '📝'} ${e.payment_method_preference === 'card' ? 'Card' : 'Check'}</span>` : ''}
             <span>${date}</span>
           </div>
         </div>
@@ -569,6 +570,29 @@ const EstimatesPage = {
               Valid until ${new Date(est.valid_until).toLocaleDateString()}
             </div>
           ` : ''}
+
+          ${est.status === 'accepted' ? `
+            <div style="padding:12px 24px;border-top:1px solid var(--gray-100);display:flex;gap:16px;flex-wrap:wrap;">
+              ${est.payment_plan ? `
+                <div style="font-size:13px;">
+                  <span style="color:var(--gray-400);">Plan:</span>
+                  <span style="font-weight:600;color:var(--gray-700);">${est.payment_plan === 'monthly' ? 'Monthly' : est.payment_plan === 'per_service' ? 'Per Service' : 'Pay in Full'}</span>
+                </div>
+              ` : ''}
+              ${est.payment_method_preference ? `
+                <div style="font-size:13px;">
+                  <span style="color:var(--gray-400);">Payment:</span>
+                  <span style="font-weight:600;color:var(--gray-700);">${est.payment_method_preference === 'card' ? '💳 Card' : '📝 Check'}</span>
+                </div>
+              ` : ''}
+              ${est.accepted_at ? `
+                <div style="font-size:13px;">
+                  <span style="color:var(--gray-400);">Accepted:</span>
+                  <span style="font-weight:600;color:var(--gray-700);">${new Date(est.accepted_at).toLocaleDateString()}</span>
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
         </div>
 
         ${est.reminder_count > 0 ? `
@@ -616,10 +640,12 @@ const EstimatesPage = {
             <button class="btn btn-primary btn-full" style="margin-top:8px;background:var(--green);" onclick="EstimatesPage.showScheduleModal(${est.id})" id="scheduleJobBtn">
               📅 Schedule This Job
             </button>
-            <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.sendCardSaveLink(${est.id})" id="cardSaveBtn">
-              💳 Send Card-Save Link via SMS
-            </button>
-            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use if customer needs to save a card on file</p>
+            ${est.payment_method_preference !== 'check' ? `
+              <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.sendCardSaveLink(${est.id})" id="cardSaveBtn">
+                💳 Send Card-Save Link via SMS
+              </button>
+              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use if customer needs to save a card on file</p>
+            ` : ''}
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
