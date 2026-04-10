@@ -1,4 +1,23 @@
 const EstimatesPage = {
+  // ─── SMS Helper ─────────────────────────────────────────
+  // Reliably open the native SMS app across iOS and Android
+  _openSMS(phone, message) {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    // iOS uses sms:NUMBER&body=  Android uses sms:NUMBER?body=
+    const sep = isIOS ? '&' : '?';
+    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(message)}`;
+
+    // Use an anchor click — more reliable than window.location on mobile browsers
+    const a = document.createElement('a');
+    a.href = smsUrl;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    // Clean up after a tick
+    setTimeout(() => a.remove(), 100);
+  },
+
   async render(action, id) {
     if (action === 'new') return this.renderBuilder(id || null, true);
     if (action === 'edit' && id) return this.renderBuilder(id, false);
@@ -713,8 +732,7 @@ const EstimatesPage = {
       const message = `Hi ${firstName}, this is Dave with Clean Air Lawn Care. I put together a custom lawn care program for your property. Take a look when you get a chance and feel free to call or text me with any questions!\n\n${proposalUrl}`;
 
       // Open native SMS app
-      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
-      window.location.href = smsUrl;
+      this._openSMS(cleanPhone, message);
 
       App.toast('Estimate marked as sent!', 'success');
       // Re-render after a short delay (user may have left the app to send the text)
@@ -736,8 +754,7 @@ const EstimatesPage = {
       const cleanPhone = est.phone.replace(/\D/g, '');
       const firstName = (est.customer_name || 'there').split(' ')[0];
       const message = `Hi ${firstName}! Last quick step — tap this link to securely save your card for billing. No charge today. Your first payment will process after your first service visit, then monthly going forward:\n\n${url}`;
-      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
-      window.location.href = smsUrl;
+      this._openSMS(cleanPhone, message);
       App.toast('Card-save text ready!', 'success');
     } catch (err) {
       App.toast(err.message || 'Failed to prepare card-save link', 'error');
@@ -759,8 +776,7 @@ const EstimatesPage = {
       const message = `Hi ${firstName}, just following up on the lawn care proposal I sent over. Happy to answer any questions — feel free to call or text me anytime!\n\n${proposalUrl}`;
 
       // Open native SMS app
-      const smsUrl = `sms:${cleanPhone}${/iPhone|iPad|iPod/i.test(navigator.userAgent) ? '&' : '?'}body=${encodeURIComponent(message)}`;
-      window.location.href = smsUrl;
+      this._openSMS(cleanPhone, message);
 
       // Track the reminder
       await Api.post(`/api/estimates/${id}/send-reminder-sms`);
