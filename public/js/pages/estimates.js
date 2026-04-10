@@ -641,10 +641,10 @@ const EstimatesPage = {
               👁 View as Customer
             </a>
           ` : ''}
-          ${est.status === 'draft' ? `
+          ${est.status !== 'accepted' && est.status !== 'declined' && est.status !== 'expired' ? `
             <div class="card" style="margin-top:12px;border:2px solid var(--green);">
               <div class="card-body" style="padding:16px;">
-                <label style="font-weight:600;font-size:14px;color:var(--green-dark);display:block;margin-bottom:8px;">Send Proposal via Text</label>
+                <label style="font-weight:600;font-size:14px;color:var(--green-dark);display:block;margin-bottom:8px;">${est.status === 'draft' ? 'Send Proposal via Text' : 'Re-send Proposal via Text'}</label>
                 <div style="display:flex;gap:8px;">
                   <input type="tel" id="sendPhoneInput" value="${this._esc(est.phone || '')}" placeholder="(555) 555-5555" style="flex:1;padding:12px;border:2px solid var(--gray-200);border-radius:8px;font-size:15px;">
                   <button class="btn btn-primary" style="padding:12px 20px;white-space:nowrap;" onclick="EstimatesPage.sendViaSMS(${est.id})" id="sendEstBtn">
