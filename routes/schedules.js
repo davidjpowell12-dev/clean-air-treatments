@@ -515,20 +515,35 @@ router.post('/optimize-route', requireAuth, async (req, res) => {
   const locations = [homeLoc, ...entries.map(e => ({ lat: e.lat, lng: e.lng }))];
   const n = locations.length;
 
-  // Call Distance Matrix API — all origins × all destinations in one request
-  const coordStr = locations.map(l => `${l.lat},${l.lng}`).join('|');
-  const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${coordStr}&destinations=${coordStr}&key=${apiKey}&mode=driving`;
-  const dmRes = await fetch(dmUrl);
-  const dmData = await dmRes.json();
+  // Call Distance Matrix API — batched to stay under 100 elements per request
+  // Google limit: max 25 origins, max 25 destinations, max 100 elements (origins × destinations)
+  const allCoords = locations.map(l => `${l.lat},${l.lng}`);
+  const destStr = allCoords.join('|');
+  const MAX_ELEMENTS = 100;
+  const batchSize = Math.max(1, Math.floor(MAX_ELEMENTS / n)); // origins per batch
 
-  if (dmData.status !== 'OK') {
-    return res.status(400).json({ error: `Distance Matrix API error: ${dmData.status}` });
+  // Initialize N×N duration matrix
+  const dur = Array.from({ length: n }, () => Array(n).fill(999999));
+
+  for (let start = 0; start < n; start += batchSize) {
+    const end = Math.min(start + batchSize, n);
+    const originStr = allCoords.slice(start, end).join('|');
+    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originStr}&destinations=${destStr}&key=${apiKey}&mode=driving`;
+    const dmRes = await fetch(dmUrl);
+    const dmData = await dmRes.json();
+
+    if (dmData.status !== 'OK') {
+      return res.status(400).json({ error: `Distance Matrix API error: ${dmData.status}` });
+    }
+
+    for (let i = 0; i < dmData.rows.length; i++) {
+      const origIdx = start + i;
+      for (let j = 0; j < dmData.rows[i].elements.length; j++) {
+        const el = dmData.rows[i].elements[j];
+        dur[origIdx][j] = el.status === 'OK' ? el.duration.value : 999999;
+      }
+    }
   }
-
-  // Build N×N duration matrix (seconds)
-  const dur = dmData.rows.map(row =>
-    row.elements.map(el => el.status === 'OK' ? el.duration.value : 999999)
-  );
 
   // Nearest-neighbor algorithm starting from home (index 0)
   const visited = new Set([0]);
