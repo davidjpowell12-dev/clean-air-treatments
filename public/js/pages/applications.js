@@ -472,6 +472,85 @@ const ApplicationsPage = {
       </div>
     `;
 
+    // --- Auto-save/restore form state (survives navigation to other pages) ---
+    const DRAFT_KEY = editId ? `app_draft_edit_${editId}` : 'app_draft_new';
+    const form = document.getElementById('appForm');
+
+    // Restore saved draft (only if NOT editing and NOT coming from schedule/prefill context)
+    if (!editId && !scheduleContext && !prefill) {
+      try {
+        const saved = sessionStorage.getItem(DRAFT_KEY);
+        if (saved) {
+          const draft = JSON.parse(saved);
+          // Restore all text/number/date/time inputs
+          for (const [key, val] of Object.entries(draft)) {
+            if (key === '_propSearch') {
+              const searchInput = document.getElementById('propSearchInput');
+              if (searchInput && val) searchInput.value = val;
+              continue;
+            }
+            if (key === '_propHint') continue;
+            const el = form.querySelector(`[name="${key}"]`);
+            if (!el) continue;
+            if (el.type === 'checkbox') {
+              el.checked = !!val;
+            } else {
+              el.value = val || '';
+            }
+          }
+          // Restore hidden property ID and hint
+          if (draft.property_id) {
+            document.getElementById('propIdField').value = draft.property_id;
+            const hint = document.getElementById('propSelectedHint');
+            if (hint && draft._propHint) {
+              hint.textContent = draft._propHint;
+              hint.style.color = 'var(--green-dark)';
+            }
+            const clearBtn = document.getElementById('clearPropBtn');
+            if (clearBtn) clearBtn.style.display = '';
+          }
+          console.log('[app-form] Restored draft from sessionStorage');
+        }
+      } catch (e) {
+        console.error('[app-form] Failed to restore draft:', e);
+      }
+    }
+
+    // Auto-save on every input change
+    const saveDraft = () => {
+      try {
+        const formData = new FormData(form);
+        const draft = {};
+        for (const [key, val] of formData.entries()) {
+          draft[key] = val;
+        }
+        // Save checkboxes explicitly (FormData only includes checked ones)
+        draft.lawn_markers_posted = document.getElementById('lawnMarkers')?.checked ? '1' : '';
+        draft.notification_registry_checked = document.getElementById('registryChecked')?.checked ? '1' : '';
+        // Save property search display text
+        const propSearch = document.getElementById('propSearchInput');
+        if (propSearch) draft._propSearch = propSearch.value;
+        const propHint = document.getElementById('propSelectedHint');
+        if (propHint) draft._propHint = propHint.textContent;
+        sessionStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+      } catch (e) { /* storage full or private mode — ignore */ }
+    };
+
+    form.addEventListener('input', saveDraft);
+    form.addEventListener('change', saveDraft);
+
+    // Clear draft on successful submit
+    const origSubmitHandler = form.onsubmit;
+    const clearDraftOnSuccess = () => {
+      sessionStorage.removeItem(DRAFT_KEY);
+      sessionStorage.removeItem('app_draft_new'); // also clear new draft if editing
+    };
+    // We'll hook into the existing submit handler — look for the navigate call
+    const _origNavigate = App.navigate.bind(App);
+    const self = this;
+    // Patch: clear draft when navigating away after successful save
+    ApplicationsPage._clearDraft = clearDraftOnSuccess;
+
     // --- Property search typeahead ---
     this._setupPropertySearch();
 
@@ -665,11 +744,14 @@ const ApplicationsPage = {
           await Api.post('/api/applications', data);
           App.toast('Application logged', 'success');
         }
+        // Clear saved draft on successful submit
+        if (ApplicationsPage._clearDraft) ApplicationsPage._clearDraft();
         App.navigate('applications');
       } catch (err) {
         // If network error, try offline save
         if (err.message.includes('fetch') || err.message.includes('network') || err.message.includes('Failed')) {
           await OfflineStore.savePendingApplication(data);
+          if (ApplicationsPage._clearDraft) ApplicationsPage._clearDraft();
           App.toast('Saved offline \u2014 will sync when connected', 'success');
           App.navigate('applications');
         } else {
