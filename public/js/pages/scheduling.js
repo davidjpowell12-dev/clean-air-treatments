@@ -857,6 +857,7 @@ const SchedulingPage = {
       data = { entries: [], grouped: {} };
     }
     const grouped = data.grouped || {};
+    this._calGrouped = grouped;
 
     const firstDay = new Date(year, month, 1);
     const lastDay = new Date(year, month + 1, 0);
@@ -910,21 +911,19 @@ const SchedulingPage = {
       this.renderCalendar();
     });
 
-    // Tap day number → daily view
+    // Tap day number → expanded day modal
     document.querySelectorAll('.cal-day-num[data-date]').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
-        this._selectedDate = el.dataset.date;
-        App.navigate('scheduling');
+        this._showDayModal(el.dataset.date);
       });
     });
 
-    // Tap "+N more" → daily view
+    // Tap "+N more" → expanded day modal
     document.querySelectorAll('.cal-entry-more[data-date]').forEach(el => {
       el.addEventListener('click', (e) => {
         e.stopPropagation();
-        this._selectedDate = el.dataset.date;
-        App.navigate('scheduling');
+        this._showDayModal(el.dataset.date);
       });
     });
 
@@ -1117,6 +1116,235 @@ const SchedulingPage = {
 
     calBody.addEventListener('pointerup', endDrag);
     calBody.addEventListener('pointercancel', endDrag);
+  },
+
+  _showDayModal(dateStr) {
+    const entries = (this._calGrouped && this._calGrouped[dateStr]) || [];
+    const todayStr = this._today();
+    const d = new Date(dateStr + 'T12:00:00');
+    const dayLabel = d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    // Remove any existing modal
+    const existing = document.querySelector('.day-modal-backdrop');
+    if (existing) existing.remove();
+
+    const backdrop = document.createElement('div');
+    backdrop.className = 'day-modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="day-modal">
+        <div class="day-modal-handle"></div>
+        <div class="day-modal-header">
+          <div>
+            <h3>${dayLabel}</h3>
+            <span class="day-modal-count">${entries.length} visit${entries.length !== 1 ? 's' : ''}</span>
+          </div>
+          <button class="day-modal-close">&times;</button>
+        </div>
+        <div class="day-modal-body">
+          ${entries.length === 0 ? '<div class="day-modal-empty">No visits scheduled</div>' : ''}
+          ${entries.map(e => {
+            const isOverdue = e.status === 'scheduled' && dateStr < todayStr;
+            const statusClass = isOverdue ? 'overdue' : e.status;
+            const statusLabel = isOverdue ? 'Overdue' : e.status.charAt(0).toUpperCase() + e.status.slice(1);
+            const svcBorder = this._svcBorderColor(e.service_type);
+            return `
+            <div class="day-modal-entry day-modal-entry-${statusClass}"
+                 data-entry-id="${e.id}"
+                 data-entry-name="${e.customer_name.replace(/"/g, '&quot;')}"
+                 data-source-date="${dateStr}"
+                 ${svcBorder ? `style="border-left-color:${svcBorder};"` : ''}>
+              <div class="day-modal-entry-info">
+                <div class="day-modal-entry-name">${e.customer_name}</div>
+                <div class="day-modal-entry-detail">${e.service_type || ''}${e.technician_name ? ' · ' + e.technician_name : ''}</div>
+              </div>
+              <span class="day-modal-entry-status day-modal-entry-status-${statusClass}">${statusLabel}</span>
+            </div>`;
+          }).join('')}
+          ${entries.length > 0 ? '<div class="day-modal-drag-hint">Long-press to drag to another day</div>' : ''}
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(backdrop);
+
+    // Close on backdrop tap or close button
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) backdrop.remove();
+    });
+    backdrop.querySelector('.day-modal-close').addEventListener('click', () => backdrop.remove());
+
+    // Tap entry → navigate to daily view
+    backdrop.querySelectorAll('.day-modal-entry').forEach(el => {
+      el.addEventListener('click', (e) => {
+        if (el.classList.contains('dragging-from-modal')) return;
+        backdrop.remove();
+        this._selectedDate = dateStr;
+        App.navigate('scheduling');
+      });
+    });
+
+    // Init drag from modal entries
+    this._initModalDrag(backdrop, dateStr);
+  },
+
+  _initModalDrag(backdrop, modalDate) {
+    const LONG_PRESS_MS = 300;
+    const DRAG_THRESHOLD_PX = 5;
+    const self = this;
+    let pressTimer = null;
+    let startX = 0, startY = 0;
+    let isDragging = false;
+    let dragEntry = null;
+    let ghostEl = null;
+    let currentDropTarget = null;
+
+    const modalBody = backdrop.querySelector('.day-modal-body');
+    if (!modalBody) return;
+
+    modalBody.addEventListener('pointerdown', (e) => {
+      const entryEl = e.target.closest('.day-modal-entry[data-entry-id]');
+      if (!entryEl) return;
+
+      startX = e.clientX;
+      startY = e.clientY;
+      dragEntry = entryEl;
+
+      pressTimer = setTimeout(() => {
+        isDragging = true;
+        entryEl.classList.add('dragging-from-modal');
+
+        // Fade the modal so calendar cells are visible
+        backdrop.classList.add('drag-active');
+        document.body.style.overflow = 'hidden';
+        document.body.style.touchAction = 'none';
+
+        ghostEl = document.createElement('div');
+        ghostEl.className = 'cal-drag-ghost';
+        ghostEl.textContent = entryEl.dataset.entryName;
+        ghostEl.style.left = e.clientX + 'px';
+        ghostEl.style.top = e.clientY + 'px';
+        ghostEl.style.zIndex = '1100';
+        document.body.appendChild(ghostEl);
+
+        if (navigator.vibrate) navigator.vibrate(50);
+      }, LONG_PRESS_MS);
+    });
+
+    const onMove = (e) => {
+      if (pressTimer && !isDragging) {
+        const dx = Math.abs(e.clientX - startX);
+        const dy = Math.abs(e.clientY - startY);
+        if (dx > DRAG_THRESHOLD_PX || dy > DRAG_THRESHOLD_PX) {
+          clearTimeout(pressTimer);
+          pressTimer = null;
+        }
+        return;
+      }
+      if (!isDragging || !ghostEl) return;
+      e.preventDefault();
+
+      ghostEl.style.left = e.clientX + 'px';
+      ghostEl.style.top = (e.clientY - 20) + 'px';
+
+      ghostEl.style.pointerEvents = 'none';
+      const target = document.elementFromPoint(e.clientX, e.clientY);
+      ghostEl.style.pointerEvents = '';
+
+      const cellEl = target ? target.closest('.cal-cell[data-date]') : null;
+      if (currentDropTarget && currentDropTarget !== cellEl) {
+        currentDropTarget.classList.remove('cal-cell-drop-target');
+      }
+      if (cellEl) {
+        cellEl.classList.add('cal-cell-drop-target');
+        currentDropTarget = cellEl;
+      } else {
+        currentDropTarget = null;
+      }
+    };
+
+    const endDrag = async (e) => {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+
+      if (!isDragging) {
+        dragEntry = null;
+        return;
+      }
+      isDragging = false;
+
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+
+      if (ghostEl) { ghostEl.remove(); ghostEl = null; }
+      if (dragEntry) dragEntry.classList.remove('dragging-from-modal');
+      backdrop.classList.remove('drag-active');
+      document.querySelectorAll('.cal-cell-drop-target').forEach(el =>
+        el.classList.remove('cal-cell-drop-target')
+      );
+
+      if (currentDropTarget && dragEntry) {
+        const entryId = dragEntry.dataset.entryId;
+        const newDate = currentDropTarget.dataset.date;
+        const entryName = dragEntry.dataset.entryName;
+        const sourceDate = dragEntry.dataset.sourceDate;
+
+        // Close the modal
+        backdrop.remove();
+
+        // Optimistic UI: move entry in calendar grid
+        const sourceDateEntry = document.querySelector(`.cal-cell[data-date="${sourceDate}"] .cal-entry[data-entry-id="${entryId}"]`);
+        if (sourceDateEntry) {
+          sourceDateEntry.dataset.sourceDate = newDate;
+          let targetEntries = currentDropTarget.querySelector('.cal-entries');
+          if (!targetEntries) {
+            targetEntries = document.createElement('div');
+            targetEntries.className = 'cal-entries';
+            currentDropTarget.appendChild(targetEntries);
+          }
+          targetEntries.appendChild(sourceDateEntry);
+        }
+
+        // Update count badges
+        self._updateCellBadge(document.querySelector(`.cal-cell[data-date="${sourceDate}"]`));
+        self._updateCellBadge(currentDropTarget);
+
+        // Update grouped data
+        if (self._calGrouped && self._calGrouped[sourceDate]) {
+          const idx = self._calGrouped[sourceDate].findIndex(x => String(x.id) === String(entryId));
+          if (idx >= 0) {
+            const [moved] = self._calGrouped[sourceDate].splice(idx, 1);
+            if (!self._calGrouped[newDate]) self._calGrouped[newDate] = [];
+            self._calGrouped[newDate].push(moved);
+          }
+        }
+
+        try {
+          await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
+          App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+        } catch (err) {
+          App.toast('Reschedule failed: ' + (err.message || 'Unknown error'), 'error');
+          self.renderCalendar();
+        }
+      }
+
+      dragEntry = null;
+      currentDropTarget = null;
+    };
+
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+
+    // Cleanup listeners when backdrop is removed
+    const observer = new MutationObserver(() => {
+      if (!document.body.contains(backdrop)) {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', endDrag);
+        document.removeEventListener('pointercancel', endDrag);
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.body, { childList: true });
   },
 
   _updateCellBadge(cellEl) {
