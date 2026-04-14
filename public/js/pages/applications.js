@@ -13,11 +13,26 @@ const ApplicationsPage = {
     try {
       const applications = await Api.get('/api/applications');
 
+      const hasDraft = sessionStorage.getItem('app_draft_new');
+
       main.innerHTML = `
         <div class="page-header">
           <h2>Application Log</h2>
           <button class="btn btn-primary btn-sm" onclick="App.navigate('applications', 'new')">+ New</button>
         </div>
+
+        ${hasDraft ? `
+          <div class="card" style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 14px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+              <strong style="font-size: 13px;">📝 You have an unsaved application</strong>
+              <p style="font-size: 12px; color: var(--gray-600); margin: 2px 0 0;">Tap to continue where you left off</p>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-sm btn-primary" onclick="App.navigate('applications', 'new')">Resume</button>
+              <button class="btn btn-sm btn-outline" onclick="sessionStorage.removeItem('app_draft_new'); ApplicationsPage.renderList();" style="font-size: 11px;">Discard</button>
+            </div>
+          </div>
+        ` : ''}
 
         <div class="form-row" style="margin-bottom:16px;">
           <div class="form-group" style="margin:0;">
@@ -538,6 +553,10 @@ const ApplicationsPage = {
 
     form.addEventListener('input', saveDraft);
     form.addEventListener('change', saveDraft);
+
+    // Save immediately so schedule-prefilled or restored data is persisted
+    // (JS-set values don't trigger input/change events)
+    saveDraft();
 
     // Clear draft on successful submit
     const origSubmitHandler = form.onsubmit;

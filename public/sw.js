@@ -1,4 +1,4 @@
-const CACHE_NAME = 'clean-air-v44';
+const CACHE_NAME = 'clean-air-v45';
 const STATIC_ASSETS = [
   '/',
   '/app',
@@ -12,7 +12,7 @@ const STATIC_ASSETS = [
   '/js/pages/products.js?v=23',
   '/js/pages/inventory.js?v=23',
   '/js/pages/calculator.js?v=23',
-  '/js/pages/applications.js?v=23',
+  '/js/pages/applications.js?v=27',
   '/js/pages/properties.js?v=23',
   '/js/pages/ipm.js?v=23',
   '/js/pages/scheduling.js?v=24',
