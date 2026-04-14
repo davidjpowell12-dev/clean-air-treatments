@@ -61,7 +61,7 @@ router.get('/public/:token', (req, res) => {
 
   // Get included items only
   const items = db.prepare(
-    'SELECT service_name, description, price, is_recurring, rounds, is_included FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
+    'SELECT id, service_name, description, price, is_recurring, rounds, is_included FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
   ).all(est.id);
 
   // Return only client-safe fields (strip internal notes, reminder info, etc.)
