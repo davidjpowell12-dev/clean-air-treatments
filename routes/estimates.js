@@ -118,9 +118,38 @@ router.post('/public/:token/accept', async (req, res) => {
 
   const paymentPlan = req.body.payment_plan || 'monthly';
   const paymentMethodPref = req.body.payment_method_preference || 'card';
+  const excludedItems = Array.isArray(req.body.excluded_items) ? req.body.excluded_items : [];
   const validPlans = ['full', 'monthly', 'per_service'];
   if (!validPlans.includes(paymentPlan)) {
     return res.status(400).json({ error: 'Invalid payment plan' });
+  }
+
+  // If client toggled off services, update is_included and recalculate totals
+  if (excludedItems.length > 0) {
+    const items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ?').all(est.id);
+    // Validate: at least 1 item must stay included
+    const remainingCount = items.filter(i => !excludedItems.includes(i.id)).length;
+    if (remainingCount === 0) {
+      return res.status(400).json({ error: 'At least one service must be selected' });
+    }
+    // Mark excluded items
+    const markExcluded = db.prepare('UPDATE estimate_items SET is_included = 0 WHERE id = ? AND estimate_id = ?');
+    for (const itemId of excludedItems) {
+      markExcluded.run(itemId, est.id);
+    }
+    // Recalculate totals from included items
+    const includedItems = items.filter(i => !excludedItems.includes(i.id));
+    const newTotal = includedItems.reduce((sum, i) => {
+      return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
+    }, 0);
+    const months = est.payment_months || 8;
+    const newMonthly = Math.round((newTotal / months) * 100) / 100;
+    db.prepare('UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(newTotal, newMonthly, est.id);
+    // Update local reference so downstream uses correct values
+    est.total_price = newTotal;
+    est.monthly_price = newMonthly;
+    console.log(`[accept] Client excluded ${excludedItems.length} items, recalculated total=$${newTotal}, monthly=$${newMonthly}`);
   }
 
   console.log('[accept] Starting:', {
@@ -128,6 +157,7 @@ router.post('/public/:token/accept', async (req, res) => {
     customer: est.customer_name,
     paymentPlan,
     paymentMethodPref,
+    excluded_items: excludedItems.length,
     has_email: !!est.email,
     has_property_id: !!est.property_id,
     monthly_price: est.monthly_price,

@@ -76,6 +76,24 @@
     .service-detail { font-size: 12px; color: var(--gray-400); margin-top: 2px; }
     .service-price { font-size: 15px; font-weight: 700; color: var(--gray-700); flex-shrink: 0; margin-left: 16px; }
 
+    /* Service toggle switch */
+    .service-toggle { position: relative; width: 44px; height: 24px; flex-shrink: 0; margin-right: 10px; }
+    .service-toggle input { opacity: 0; width: 0; height: 0; }
+    .service-toggle .toggle-track {
+      position: absolute; cursor: pointer; inset: 0;
+      background: var(--gray-300); border-radius: 24px; transition: 0.25s;
+    }
+    .service-toggle .toggle-track::after {
+      content: ''; position: absolute; width: 18px; height: 18px;
+      left: 3px; top: 3px; background: white; border-radius: 50%;
+      transition: 0.25s; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+    }
+    .service-toggle input:checked + .toggle-track { background: var(--green); }
+    .service-toggle input:checked + .toggle-track::after { transform: translateX(20px); }
+    .service-row.service-excluded { opacity: 0.45; }
+    .service-row.service-excluded .service-name { text-decoration: line-through; }
+    .service-row.service-excluded .service-price { text-decoration: line-through; }
+
     .proposal-message { padding: 0 24px 24px; }
     .proposal-message-box { background: var(--gray-50); border-left: 3px solid var(--green); padding: 16px; border-radius: 0 8px 8px 0; font-size: 14px; color: var(--gray-700); line-height: 1.5; }
 
@@ -168,6 +186,7 @@
     const app = document.getElementById('app');
     let proposalData = null;
     let selectedPlan = 'monthly';
+    let excludedItems = new Set();
 
     const pathParts = window.location.pathname.split('/');
     const token = pathParts[pathParts.length - 1];
@@ -237,18 +256,26 @@
               <div class="price-total">Season Total: $${Math.round(est.total_price).toLocaleString()}</div>
             </div>
 
-            <div class="proposal-services">
+            <div class="proposal-services" id="servicesSection">
               <h3>Services Included</h3>
-              ${items.map(item => `
-                <div class="service-row">
-                  <span class="service-check">\u2713</span>
+              ${items.map((item, idx) => {
+                const itemTotal = item.is_recurring ? item.price * item.rounds : item.price;
+                return `
+                <div class="service-row" id="svc-row-${item.id}" data-item-id="${item.id}" data-item-total="${itemTotal}">
+                  ${canAccept && items.length > 1 ? `
+                    <label class="service-toggle">
+                      <input type="checkbox" checked onchange="toggleService(${item.id}, this.checked)">
+                      <span class="toggle-track"></span>
+                    </label>
+                  ` : `<span class="service-check">\u2713</span>`}
                   <div class="service-info">
                     <div class="service-name">${esc(item.service_name)}</div>
                     ${item.is_recurring ? `<div class="service-detail">${item.rounds} treatments per season</div>` : `<div class="service-detail">One-time service</div>`}
                   </div>
-                  <div class="service-price">$${Math.round(item.is_recurring ? item.price * item.rounds : item.price).toLocaleString()}</div>
-                </div>
-              `).join('')}
+                  <div class="service-price">$${Math.round(itemTotal).toLocaleString()}</div>
+                </div>`;
+              }).join('')}
+              ${canAccept && items.length > 1 ? `<p style="font-size:11px;color:var(--gray-400);margin-top:8px;text-align:center;">Toggle services on/off to customize your plan</p>` : ''}
             </div>
 
             ${est.valid_until && !isAccepted ? `
@@ -308,7 +335,7 @@
               <div class="plan-title">Monthly Payments</div>
               <div class="plan-desc">${est.payment_months} equal monthly payments</div>
             </div>
-            <div class="plan-amount">$${Math.round(est.monthly_price)}/mo</div>
+            <div class="plan-amount">$${Math.round(getActiveMonthly())}/mo</div>
           </div>
 
           <div class="plan-option" id="plan-full" onclick="selectPlan('full')">
@@ -317,7 +344,7 @@
               <div class="plan-title">Pay in Full</div>
               <div class="plan-desc">One-time payment today</div>
             </div>
-            <div class="plan-amount">$${Math.round(est.total_price).toLocaleString()}</div>
+            <div class="plan-amount">$${Math.round(getActiveTotal()).toLocaleString()}</div>
           </div>
 
           <div class="plan-option" id="plan-per_service" onclick="selectPlan('per_service')">
@@ -401,11 +428,14 @@
       const summary = document.getElementById('feeSummary');
       if (!summary) return;
 
+      const activeTotal = getActiveTotal();
+      const activeMonthly = getActiveMonthly();
+
       if (selectedMethod === 'check') {
         if (selectedPlan === 'monthly') {
-          summary.innerHTML = '<strong>$' + Math.round(est.monthly_price) + '/mo</strong> x ' + est.payment_months + ' months = <strong>$' + Math.round(est.total_price).toLocaleString() + '</strong>';
+          summary.innerHTML = '<strong>$' + Math.round(activeMonthly) + '/mo</strong> x ' + est.payment_months + ' months = <strong>$' + Math.round(activeTotal).toLocaleString() + '</strong>';
         } else if (selectedPlan === 'full') {
-          summary.innerHTML = 'Total: <strong>$' + Math.round(est.total_price).toLocaleString() + '</strong>';
+          summary.innerHTML = 'Total: <strong>$' + Math.round(activeTotal).toLocaleString() + '</strong>';
         } else {
           summary.innerHTML = 'Invoiced per visit — no processing fee';
         }
@@ -413,12 +443,12 @@
         // Card: add 3.5% fee (covers Stripe 2.9% + $0.30 rounded up)
         const feeRate = 0.035;
         if (selectedPlan === 'monthly') {
-          const base = est.monthly_price;
+          const base = activeMonthly;
           const withFee = Math.round(base * (1 + feeRate) * 100) / 100;
           const fee = withFee - base;
           summary.innerHTML = '$' + Math.round(base) + '/mo + $' + fee.toFixed(2) + ' processing fee = <strong>$' + withFee.toFixed(2) + '/mo</strong>';
         } else if (selectedPlan === 'full') {
-          const base = est.total_price;
+          const base = activeTotal;
           const withFee = Math.round(base * (1 + feeRate) * 100) / 100;
           const fee = withFee - base;
           summary.innerHTML = '$' + Math.round(base).toLocaleString() + ' + $' + fee.toFixed(2) + ' processing fee = <strong>$' + withFee.toFixed(2) + '</strong>';
@@ -438,7 +468,11 @@
         const acceptResp = await fetch(`/api/estimates/public/${token}/accept`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payment_plan: selectedPlan, payment_method_preference: selectedMethod })
+          body: JSON.stringify({
+            payment_plan: selectedPlan,
+            payment_method_preference: selectedMethod,
+            excluded_items: Array.from(excludedItems)
+          })
         });
 
         const acceptData = await acceptResp.json();
@@ -593,6 +627,69 @@
           <p>${message}</p>
         </div>
       `;
+    }
+
+    function toggleService(itemId, isOn) {
+      if (isOn) {
+        excludedItems.delete(itemId);
+      } else {
+        excludedItems.add(itemId);
+      }
+
+      // Ensure at least 1 service stays on
+      const items = proposalData.items || [];
+      const activeCount = items.filter(i => !excludedItems.has(i.id)).length;
+      if (activeCount === 0) {
+        // Revert — can't exclude everything
+        excludedItems.delete(itemId);
+        const cb = document.querySelector(`#svc-row-${itemId} input[type="checkbox"]`);
+        if (cb) cb.checked = true;
+        return;
+      }
+
+      // Visual toggle
+      const row = document.getElementById('svc-row-' + itemId);
+      if (row) row.classList.toggle('service-excluded', !isOn);
+
+      recalcTotals();
+    }
+
+    function recalcTotals() {
+      const est = proposalData;
+      const items = est.items || [];
+      const activeTotal = items.reduce((sum, i) => {
+        if (excludedItems.has(i.id)) return sum;
+        return sum + (i.is_recurring ? i.price * i.rounds : i.price);
+      }, 0);
+      const months = est.payment_months || 8;
+      const activeMonthly = Math.round((activeTotal / months) * 100) / 100;
+
+      // Store active prices for use in payment picker / accept
+      proposalData._activeTotal = activeTotal;
+      proposalData._activeMonthly = activeMonthly;
+
+      // Update price hero
+      const priceEl = document.querySelector('.price-monthly');
+      if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeMonthly);
+      const totalEl = document.querySelector('.price-total');
+      if (totalEl) totalEl.textContent = 'Season Total: $' + Math.round(activeTotal).toLocaleString();
+
+      // Update plan picker amounts if open
+      const planMonthly = document.querySelector('#plan-monthly .plan-amount');
+      if (planMonthly) planMonthly.textContent = '$' + Math.round(activeMonthly) + '/mo';
+      const planFull = document.querySelector('#plan-full .plan-amount');
+      if (planFull) planFull.textContent = '$' + Math.round(activeTotal).toLocaleString();
+
+      // Update fee summary if visible
+      updateFeeSummary();
+    }
+
+    function getActiveTotal() {
+      return proposalData._activeTotal != null ? proposalData._activeTotal : proposalData.total_price;
+    }
+
+    function getActiveMonthly() {
+      return proposalData._activeMonthly != null ? proposalData._activeMonthly : proposalData.monthly_price;
     }
 
     function esc(str) {
