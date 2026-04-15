@@ -374,6 +374,24 @@ function runMigrations(db) {
   if (fixedDiscounts.changes > 0) {
     console.log(`[schema-repair] Fixed ${fixedDiscounts.changes} Bundle Discount item(s) to is_included=1`);
   }
+
+  // Recalculate total_price/monthly_price on estimates with Bundle Discount items
+  // in case the totals were stored without the discount applied
+  const estimatesWithDiscount = db.prepare(`
+    SELECT DISTINCT e.id, e.payment_months
+    FROM estimates e
+    JOIN estimate_items ei ON ei.estimate_id = e.id
+    WHERE ei.service_name = 'Bundle Discount'
+  `).all();
+  for (const est of estimatesWithDiscount) {
+    const items = db.prepare('SELECT price, is_recurring, rounds FROM estimate_items WHERE estimate_id = ? AND is_included = 1').all(est.id);
+    const total = items.reduce((sum, i) => sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0);
+    const monthly = Math.round((total / (est.payment_months || 8)) * 100) / 100;
+    const updated = db.prepare('UPDATE estimates SET total_price = ?, monthly_price = ? WHERE id = ? AND total_price != ?').run(total, monthly, est.id, total);
+    if (updated.changes > 0) {
+      console.log(`[schema-repair] Recalculated estimate ${est.id}: total=$${total}, monthly=$${monthly}`);
+    }
+  }
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.
