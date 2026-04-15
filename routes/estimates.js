@@ -416,16 +416,48 @@ router.get('/:id', requireAuth, (req, res) => {
 
   // Include existing schedule info so the Schedule Job modal knows what's already scheduled
   if (est.property_id) {
+    const currentYear = new Date().getFullYear() + '%';
+
+    // Backfill any NULL service_type entries for this property before querying
+    const nullEntries = db.prepare(`
+      SELECT s.id, s.estimate_id, s.program_id FROM schedules s
+      WHERE s.property_id = ? AND s.service_type IS NULL AND s.program_id IS NOT NULL
+      AND s.scheduled_date LIKE ?
+    `).all(est.property_id, currentYear);
+
+    if (nullEntries.length > 0) {
+      const updateStmt = db.prepare('UPDATE schedules SET service_type = ? WHERE program_id = ?');
+      const seen = new Set();
+      for (const entry of nullEntries) {
+        if (seen.has(entry.program_id)) continue;
+        seen.add(entry.program_id);
+        // Try to infer service type from linked estimate items, or from the estimate's items
+        let serviceName = null;
+        if (entry.estimate_id) {
+          const item = db.prepare(`SELECT service_name FROM estimate_items WHERE estimate_id = ? AND is_included = 1 AND is_recurring = 1 ORDER BY sort_order, id LIMIT 1`).get(entry.estimate_id);
+          if (item) serviceName = item.service_name;
+        }
+        if (!serviceName) {
+          // Check if there's an accepted estimate for this property
+          const item = db.prepare(`SELECT ei.service_name FROM estimate_items ei JOIN estimates e ON e.id = ei.estimate_id WHERE e.property_id = ? AND e.status = 'accepted' AND ei.is_included = 1 AND ei.is_recurring = 1 ORDER BY ei.sort_order, ei.id LIMIT 1`).get(est.property_id);
+          if (item) serviceName = item.service_name;
+        }
+        if (serviceName) {
+          updateStmt.run(serviceName, entry.program_id);
+        }
+      }
+    }
+
     const existingSchedules = db.prepare(`
       SELECT service_type, COUNT(*) as count,
              MIN(scheduled_date) as first_date, MAX(scheduled_date) as last_date,
              SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
       FROM schedules
-      WHERE (estimate_id = ? OR property_id = ?)
+      WHERE property_id = ?
         AND program_id IS NOT NULL
         AND scheduled_date LIKE ?
       GROUP BY service_type
-    `).all(est.id, est.property_id, new Date().getFullYear() + '%');
+    `).all(est.property_id, currentYear);
     est.existing_schedules = existingSchedules;
   }
 
