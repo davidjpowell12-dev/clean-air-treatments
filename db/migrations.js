@@ -365,6 +365,15 @@ function runMigrations(db) {
   // is safe to run repeatedly.
   ensureColumn(db, 'estimates', 'payment_method_preference', "TEXT DEFAULT 'card'");
   ensureColumn(db, 'estimates', 'stripe_customer_id', 'TEXT');
+
+  // Fix any Bundle Discount line items that were created with is_included=0
+  const fixedDiscounts = db.prepare(`
+    UPDATE estimate_items SET is_included = 1
+    WHERE service_name = 'Bundle Discount' AND is_included = 0
+  `).run();
+  if (fixedDiscounts.changes > 0) {
+    console.log(`[schema-repair] Fixed ${fixedDiscounts.changes} Bundle Discount item(s) to is_included=1`);
+  }
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.
