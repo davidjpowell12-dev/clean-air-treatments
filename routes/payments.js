@@ -52,7 +52,8 @@ router.get('/invoices/:id', requireAuth, (req, res) => {
       e.customer_name, e.address, e.city, e.state, e.zip,
       e.email as customer_email, e.phone as customer_phone,
       e.token as estimate_token, e.total_price as estimate_total,
-      e.payment_months, e.property_sqft
+      e.payment_months, e.property_sqft,
+      e.stripe_customer_id, e.payment_method_preference
     FROM invoices i
     JOIN estimates e ON i.estimate_id = e.id
     WHERE i.id = ?
@@ -110,6 +111,65 @@ router.post('/invoices/:id/void', requireAuth, (req, res) => {
   });
 
   res.json({ success: true, invoice_number: invoice.invoice_number });
+});
+
+// Manually charge a specific invoice (card on file)
+router.post('/invoices/:id/charge', requireAuth, async (req, res) => {
+  const db = getDb();
+  const invoice = db.prepare(`
+    SELECT i.*, e.customer_name, e.email, e.stripe_customer_id, e.payment_method_preference
+    FROM invoices i JOIN estimates e ON i.estimate_id = e.id
+    WHERE i.id = ?
+  `).get(req.params.id);
+
+  if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+  if (invoice.status === 'paid') return res.status(400).json({ error: 'Invoice already paid' });
+  if (invoice.status === 'void') return res.status(400).json({ error: 'Invoice is voided' });
+  if (!invoice.stripe_customer_id) {
+    return res.status(400).json({ error: 'No Stripe customer linked. Customer needs to save a card first.' });
+  }
+
+  try {
+    const stripeUtils = require('../utils/stripe');
+    const result = await stripeUtils.chargeCustomer(
+      invoice.stripe_customer_id,
+      invoice.amount_cents,
+      invoice.invoice_number,
+      `${invoice.customer_name} — Clean Air Lawn Care`
+    );
+
+    if (!result) {
+      return res.status(400).json({ error: 'No payment method on file. Send a payment link instead.' });
+    }
+
+    // Mark invoice as paid
+    db.prepare(`
+      UPDATE invoices SET status = 'paid', paid_at = ?, payment_method = 'card',
+        stripe_payment_intent_id = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(new Date().toISOString(), result.id, invoice.id);
+
+    logAudit(db, 'invoice', invoice.id, req.session.userId, 'manual_charge', {
+      invoice_number: invoice.invoice_number,
+      amount_cents: invoice.amount_cents,
+      payment_intent: result.id
+    });
+
+    console.log(`[charge] Manual charge SUCCESS: ${invoice.invoice_number} $${(invoice.amount_cents / 100).toFixed(2)} for ${invoice.customer_name}`);
+    res.json({ success: true, payment_intent_id: result.id, invoice_number: invoice.invoice_number });
+  } catch (err) {
+    // Mark as failed so it shows up in the failed filter
+    db.prepare('UPDATE invoices SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run('failed', invoice.id);
+
+    logAudit(db, 'invoice', invoice.id, req.session.userId, 'charge_failed', {
+      invoice_number: invoice.invoice_number,
+      error: err.message
+    });
+
+    console.error(`[charge] Manual charge FAILED: ${invoice.invoice_number}:`, err.message);
+    res.status(400).json({ error: `Charge failed: ${err.message}` });
+  }
 });
 
 // Send payment request email with Stripe Checkout link

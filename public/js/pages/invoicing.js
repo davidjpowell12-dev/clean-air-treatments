@@ -20,6 +20,7 @@ const InvoicingPage = {
       main.innerHTML = `
         <div class="page-header">
           <h2>Invoicing</h2>
+          <button class="btn btn-primary btn-sm" id="autoChargeBtn" onclick="InvoicingPage.runAutoCharge()">⚡ Run Auto-Charge</button>
         </div>
 
         <!-- Dashboard Stats -->
@@ -209,7 +210,12 @@ const InvoicingPage = {
         <!-- Actions -->
         <div class="est-actions" style="margin-top:16px;">
           ${inv.status === 'pending' || inv.status === 'failed' ? `
-            <button class="btn btn-primary btn-full" onclick="InvoicingPage.showCheckForm(${inv.id})">
+            ${inv.stripe_customer_id ? `
+              <button class="btn btn-primary btn-full" onclick="InvoicingPage.chargeInvoice(${inv.id})" id="chargeNowBtn">
+                💳 Charge Card Now — $${amount}
+              </button>
+            ` : ''}
+            <button class="btn btn-${inv.stripe_customer_id ? 'secondary' : 'primary'} btn-full" style="margin-top:8px;" onclick="InvoicingPage.showCheckForm(${inv.id})">
               Record Check Payment
             </button>
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="InvoicingPage.sendPaymentRequest(${inv.id})" id="sendPayReqBtn">
@@ -294,6 +300,41 @@ const InvoicingPage = {
     }
     btn.disabled = false;
     btn.textContent = 'Send Payment Link';
+  },
+
+  async chargeInvoice(id) {
+    if (!confirm('Charge this invoice to the card on file?')) return;
+    const btn = document.getElementById('chargeNowBtn');
+    btn.disabled = true;
+    btn.textContent = 'Charging...';
+
+    try {
+      const result = await Api.post(`/api/payments/invoices/${id}/charge`);
+      App.toast('Payment successful! ' + (result.invoice_number || ''), 'success');
+      this.renderDetail(id);
+    } catch (err) {
+      App.toast(err.message || 'Charge failed', 'error');
+      btn.disabled = false;
+      btn.textContent = '💳 Retry Charge';
+    }
+  },
+
+  async runAutoCharge() {
+    if (!confirm('Run auto-charge on all due invoices now?')) return;
+    const btn = document.getElementById('autoChargeBtn');
+    btn.disabled = true;
+    btn.textContent = 'Processing...';
+
+    try {
+      const result = await Api.post('/api/payments/process-due-invoices');
+      const msg = `Charged: ${result.charged || 0}, Failed: ${result.failed || 0}, No card: ${result.no_method || 0}, Skipped: ${result.skipped || 0}`;
+      App.toast(msg, result.failed > 0 ? 'error' : 'success');
+      this.renderList();
+    } catch (err) {
+      App.toast(err.message || 'Auto-charge failed', 'error');
+      btn.disabled = false;
+      btn.textContent = '⚡ Run Auto-Charge';
+    }
   },
 
   async voidInvoice(id) {
