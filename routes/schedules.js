@@ -191,10 +191,8 @@ router.get('/unscheduled-programs', requireAuth, (req, res) => {
     params.push(`${year}%`);
   }
 
-  // Only show properties that have an accepted estimate (active clients)
   let sql = `SELECT p.* FROM properties p
-    WHERE p.id NOT IN (${subquery})
-    AND EXISTS (SELECT 1 FROM estimates e WHERE e.property_id = p.id AND e.status = 'accepted')`;
+    WHERE p.id NOT IN (${subquery})`;
 
   if (search) {
     sql += ' AND (p.customer_name LIKE ? OR p.address LIKE ? OR p.city LIKE ?)';
