@@ -561,7 +561,7 @@ router.post('/activate-client', requireAdmin, async (req, res) => {
     if (discount > 0) {
       db.prepare(`
         INSERT INTO estimate_items (estimate_id, service_name, description, price, is_recurring, rounds, is_included, sort_order)
-        VALUES (?, 'Bundle Discount', 'Multi-service discount', ?, 0, 1, 0, ?)
+        VALUES (?, 'Bundle Discount', 'Multi-service discount', ?, 0, 1, 1, ?)
       `).run(estId, -discount, items.length);
     }
 
