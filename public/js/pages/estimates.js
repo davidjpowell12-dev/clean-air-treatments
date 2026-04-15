@@ -550,6 +550,7 @@ const EstimatesPage = {
             <div class="est-hero-monthly">$${est.monthly_price.toFixed(0)}</div>
             <div class="est-hero-label">/month over ${est.payment_months} months</div>
             <div class="est-hero-total">$${est.total_price.toFixed(0)} season total</div>
+            ${est.payment_method_preference === 'card' ? `<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:6px;">+ 3.5% card fee · $${Math.round(est.monthly_price * 1.035)}/mo billed</div>` : ''}
           </div>
 
           <div class="est-proposal-services">
