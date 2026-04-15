@@ -522,21 +522,48 @@ const SchedulingPage = {
       <div class="card">
         <div class="card-header"><h3>Generate Season</h3></div>
         <div class="card-body">
-          <p class="form-hint" style="margin-bottom: 16px;">Schedule 6 visits for each selected property, spaced evenly across the season.</p>
+          <p class="form-hint" style="margin-bottom: 16px;">Generate a season program for selected properties. Pick a service type to schedule separately (e.g., fert first, then mosquito).</p>
+
+          <div class="form-group">
+            <label>Service Type</label>
+            <select id="seasonServiceType" style="font-weight:600;">
+              <option value="Fertilization & Weed Control">Fertilization & Weed Control</option>
+              <option value="Mosquito & Tick">Mosquito & Tick</option>
+              <option value="Aeration & Overseeding">Aeration & Overseeding</option>
+              <option value="Spring Cleanup">Spring Cleanup</option>
+              <option value="Fall Cleanup">Fall Cleanup</option>
+              <option value="">Other / General</option>
+            </select>
+          </div>
 
           <div class="form-row">
             <div class="form-group">
-              <label>Season Start Date</label>
+              <label>Start Date</label>
               <input type="date" id="seasonStart" value="${startDate}">
             </div>
             <div class="form-group">
-              <label>Weeks Between Visits</label>
+              <label>Rounds</label>
+              <select id="seasonRounds">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6" selected>6</option>
+                <option value="7">7</option>
+                <option value="8">8</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Weeks Apart</label>
               <select id="seasonInterval">
-                <option value="4">4 weeks</option>
-                <option value="5">5 weeks</option>
-                <option value="6" selected>6 weeks</option>
-                <option value="7">7 weeks</option>
-                <option value="8">8 weeks</option>
+                <option value="2">2 wks</option>
+                <option value="3">3 wks</option>
+                <option value="4">4 wks</option>
+                <option value="5">5 wks</option>
+                <option value="6" selected>6 wks</option>
+                <option value="7">7 wks</option>
+                <option value="8">8 wks</option>
               </select>
             </div>
           </div>
@@ -570,20 +597,23 @@ const SchedulingPage = {
     const updatePreview = () => {
       const start = document.getElementById('seasonStart').value;
       const weeks = Number(document.getElementById('seasonInterval').value);
-      const endDate = this._shiftDate(start, 5 * weeks * 7);
+      const rounds = Number(document.getElementById('seasonRounds').value);
+      const svcType = document.getElementById('seasonServiceType').value;
       const box = document.getElementById('seasonPreview');
       if (selected.size === 0) {
         box.innerHTML = '';
         return;
       }
       const dates = [];
-      for (let r = 0; r < 6; r++) {
+      for (let r = 0; r < rounds; r++) {
         dates.push(this._shortDate(this._shiftDate(start, r * weeks * 7)));
       }
       box.innerHTML = `
         <div class="card" style="background: var(--gray-50); margin: 0;">
           <div class="card-body" style="padding: 10px 14px;">
-            <strong>${selected.size} properties &times; 6 visits = ${selected.size * 6} total entries</strong><br>
+            <strong>${selected.size} properties &times; ${rounds} visits = ${selected.size * rounds} total entries</strong>
+            ${svcType ? `<br><span style="font-size:12px;color:var(--green-dark);font-weight:600;">${svcType}</span>` : ''}
+            <br>
             <span style="font-size: 13px; color: var(--gray-700);">
               ${dates.map((d, i) => `R${i + 1}: ${d}`).join(' &middot; ')}
             </span>
@@ -595,7 +625,10 @@ const SchedulingPage = {
     const loadProperties = async () => {
       const yr = document.getElementById('seasonStart').value.slice(0, 4);
       const search = document.getElementById('seasonSearch').value;
-      const url = `/api/schedules/unscheduled-programs?year=${yr}${search ? '&search=' + encodeURIComponent(search) : ''}`;
+      const svcType = document.getElementById('seasonServiceType').value;
+      let url = `/api/schedules/unscheduled-programs?year=${yr}`;
+      if (svcType) url += `&service_type=${encodeURIComponent(svcType)}`;
+      if (search) url += `&search=${encodeURIComponent(search)}`;
       try { allProperties = await Api.get(url); } catch (err) { allProperties = []; }
       renderResults();
     };
@@ -647,6 +680,13 @@ const SchedulingPage = {
     });
 
     document.getElementById('seasonInterval').addEventListener('change', updatePreview);
+    document.getElementById('seasonRounds').addEventListener('change', updatePreview);
+    document.getElementById('seasonServiceType').addEventListener('change', () => {
+      selected.clear();
+      updateBtn();
+      updatePreview();
+      loadProperties();
+    });
 
     document.getElementById('seasonSelectAll').addEventListener('click', () => {
       allProperties.forEach(p => selected.add(p.id));
@@ -660,14 +700,18 @@ const SchedulingPage = {
       btn.disabled = true;
       btn.textContent = 'Generating...';
       try {
+        const svcType = document.getElementById('seasonServiceType').value;
         const result = await Api.post('/api/schedules/generate-season', {
           property_ids: Array.from(selected),
           start_date: document.getElementById('seasonStart').value,
           interval_weeks: Number(document.getElementById('seasonInterval').value),
+          total_rounds: Number(document.getElementById('seasonRounds').value),
+          service_type: svcType || null,
           assigned_to: document.getElementById('seasonTech').value ? Number(document.getElementById('seasonTech').value) : null
         });
-        const msg = `Generated ${result.generated} visits for ${selected.size} properties` +
-          (result.skipped_properties > 0 ? ` (${result.skipped_properties} already had a season)` : '');
+        const svcLabel = svcType ? ` for ${svcType}` : '';
+        const msg = `Generated ${result.generated} visits${svcLabel} for ${selected.size} properties` +
+          (result.skipped_properties > 0 ? ` (${result.skipped_properties} already scheduled)` : '');
         App.toast(msg);
         App.navigate('scheduling', 'overview');
       } catch (err) {

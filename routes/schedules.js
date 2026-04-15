@@ -100,13 +100,14 @@ router.get('/unscheduled', requireAuth, (req, res) => {
 // Generate season — bulk create rounds for selected properties
 router.post('/generate-season', requireAuth, (req, res) => {
   const db = getDb();
-  const { property_ids, start_date, interval_weeks, assigned_to } = req.body;
+  const { property_ids, start_date, interval_weeks, assigned_to, service_type, total_rounds } = req.body;
 
   if (!Array.isArray(property_ids) || !start_date || !interval_weeks) {
     return res.status(400).json({ error: 'property_ids, start_date, and interval_weeks required' });
   }
 
-  const totalRounds = 6;
+  const rounds = total_rounds || 6;
+  const svcType = service_type || null;
   const year = start_date.slice(0, 4);
 
   const generate = db.transaction(() => {
@@ -114,22 +115,29 @@ router.post('/generate-season', requireAuth, (req, res) => {
     let skippedProperties = 0;
 
     for (const pid of property_ids) {
-      // Skip if property already has a program this year
-      const existing = db.prepare(
-        "SELECT id FROM schedules WHERE property_id = ? AND program_id IS NOT NULL AND scheduled_date LIKE ?"
-      ).get(pid, `${year}%`);
+      // Skip if property already has a program for THIS service type this year
+      let existing;
+      if (svcType) {
+        existing = db.prepare(
+          "SELECT id FROM schedules WHERE property_id = ? AND program_id IS NOT NULL AND service_type = ? AND scheduled_date LIKE ?"
+        ).get(pid, svcType, `${year}%`);
+      } else {
+        existing = db.prepare(
+          "SELECT id FROM schedules WHERE property_id = ? AND program_id IS NOT NULL AND (service_type IS NULL OR service_type = '') AND scheduled_date LIKE ?"
+        ).get(pid, `${year}%`);
+      }
       if (existing) { skippedProperties++; continue; }
 
-      const programId = `pgm_${Date.now()}_${pid}`;
+      const programId = `pgm_${Date.now()}_${pid}_${(svcType || 'general').replace(/\s+/g, '_')}`;
 
-      for (let round = 1; round <= totalRounds; round++) {
+      for (let round = 1; round <= rounds; round++) {
         const offsetDays = (round - 1) * interval_weeks * 7;
         const roundDate = db.prepare("SELECT date(?, '+' || ? || ' days') as d").get(start_date, offsetDays);
 
         db.prepare(`
-          INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, created_by)
-          VALUES (?, ?, ?, 0, ?, ?, ?, ?)
-        `).run(pid, roundDate.d, assigned_to || null, round, totalRounds, programId, req.session.userId);
+          INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, round_number, total_rounds, program_id, service_type, created_by)
+          VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)
+        `).run(pid, roundDate.d, assigned_to || null, round, rounds, programId, svcType, req.session.userId);
         generated++;
       }
     }
@@ -138,25 +146,31 @@ router.post('/generate-season', requireAuth, (req, res) => {
 
   const result = generate();
   logAudit(db, 'schedule', 0, req.session.userId, 'generate_season', {
-    start_date, interval_weeks, count: result.generated, skipped: result.skippedProperties
+    start_date, interval_weeks, service_type: svcType, rounds, count: result.generated, skipped: result.skippedProperties
   });
-  res.json({ generated: result.generated, skipped_properties: result.skippedProperties, rounds: totalRounds });
+  res.json({ generated: result.generated, skipped_properties: result.skippedProperties, rounds, service_type: svcType });
 });
 
-// Get properties without a season for a given year
+// Get properties without a season for a given year (optionally filtered by service type)
 router.get('/unscheduled-programs', requireAuth, (req, res) => {
   const db = getDb();
-  const { year, search } = req.query;
+  const { year, search, service_type } = req.query;
   if (!year) return res.status(400).json({ error: 'Year parameter required' });
 
-  let sql = `
-    SELECT p.* FROM properties p
-    WHERE p.id NOT IN (
-      SELECT DISTINCT property_id FROM schedules
-      WHERE program_id IS NOT NULL AND scheduled_date LIKE ?
-    )
-  `;
-  const params = [`${year}%`];
+  let subquery;
+  const params = [];
+
+  if (service_type) {
+    // Find properties that DON'T have this specific service type scheduled
+    subquery = `SELECT DISTINCT property_id FROM schedules WHERE program_id IS NOT NULL AND service_type = ? AND scheduled_date LIKE ?`;
+    params.push(service_type, `${year}%`);
+  } else {
+    // Original behavior: properties with no program at all
+    subquery = `SELECT DISTINCT property_id FROM schedules WHERE program_id IS NOT NULL AND scheduled_date LIKE ?`;
+    params.push(`${year}%`);
+  }
+
+  let sql = `SELECT p.* FROM properties p WHERE p.id NOT IN (${subquery})`;
 
   if (search) {
     sql += ' AND (p.customer_name LIKE ? OR p.address LIKE ? OR p.city LIKE ?)';

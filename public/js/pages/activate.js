@@ -72,7 +72,15 @@ const ActivatePage = {
             <!-- service rows inserted here -->
           </div>
           <div style="padding:0 16px 16px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-top:2px solid var(--gray-200);font-weight:700;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:2px solid var(--gray-200);font-size:14px;color:var(--gray-500);">
+              <span>Subtotal</span>
+              <span id="seasonSubtotal">$0</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;padding:4px 0 8px;">
+              <label style="font-size:13px;color:var(--gray-500);white-space:nowrap;">Bundle Discount</label>
+              <input type="number" step="0.01" name="bundle_discount" class="est-input" placeholder="0.00" value="" style="max-width:120px;text-align:right;" onchange="ActivatePage.updateTotals()">
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:2px solid var(--gray-200);font-weight:700;font-size:16px;">
               <span>Season Total</span>
               <span id="seasonTotal">$0</span>
             </div>
@@ -289,10 +297,13 @@ const ActivatePage = {
 
   updateTotals() {
     const items = this._getItems();
-    const total = items.reduce((sum, i) => sum + (i.is_recurring ? i.price * i.rounds : i.price), 0);
+    const subtotal = items.reduce((sum, i) => sum + (i.is_recurring ? i.price * i.rounds : i.price), 0);
+    const discount = parseFloat(document.querySelector('[name="bundle_discount"]')?.value) || 0;
+    const total = Math.max(0, subtotal - discount);
     const months = parseInt(document.querySelector('[name="payment_months"]')?.value) || 8;
     const monthly = total / months;
 
+    document.getElementById('seasonSubtotal').textContent = '$' + Math.round(subtotal).toLocaleString();
     document.getElementById('seasonTotal').textContent = '$' + Math.round(total).toLocaleString();
     document.getElementById('monthlyTotal').textContent = '$' + Math.round(monthly) + '/mo';
 
@@ -379,7 +390,8 @@ const ActivatePage = {
       remaining_months: parseInt(formData.get('remaining_months')) || null,
       first_due_date: formData.get('first_due_date') || null,
       stripe_customer_id: formData.get('stripe_customer_id') || null,
-      notes: formData.get('notes') || null
+      notes: formData.get('notes') || null,
+      bundle_discount: parseFloat(formData.get('bundle_discount')) || 0
     };
 
     try {

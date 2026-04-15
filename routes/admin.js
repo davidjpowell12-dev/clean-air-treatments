@@ -490,7 +490,8 @@ router.post('/activate-client', requireAdmin, async (req, res) => {
   const {
     customer_name, address, city, state, zip, email, phone, property_sqft,
     items, payment_plan, payment_method, payment_months,
-    stripe_customer_id, remaining_months, first_due_date, notes
+    stripe_customer_id, remaining_months, first_due_date, notes,
+    bundle_discount
   } = req.body;
 
   if (!customer_name) return res.status(400).json({ error: 'Customer name required' });
@@ -520,10 +521,12 @@ router.post('/activate-client', requireAdmin, async (req, res) => {
       propertyId = propResult.lastInsertRowid;
     }
 
-    // Step 2: Calculate totals from items
-    const totalPrice = items.reduce((sum, i) => {
+    // Step 2: Calculate totals from items (minus bundle discount)
+    const subtotal = items.reduce((sum, i) => {
       return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
     }, 0);
+    const discount = Math.max(0, parseFloat(bundle_discount) || 0);
+    const totalPrice = Math.max(0, subtotal - discount);
     const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
 
     // Step 3: Create pre-accepted estimate
@@ -553,6 +556,13 @@ router.post('/activate-client', requireAdmin, async (req, res) => {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       insertItem.run(estId, item.service_name, item.description || '', item.price, item.is_recurring ? 1 : 0, item.rounds || 1, i);
+    }
+    // Add bundle discount as a visible line item
+    if (discount > 0) {
+      db.prepare(`
+        INSERT INTO estimate_items (estimate_id, service_name, description, price, is_recurring, rounds, is_included, sort_order)
+        VALUES (?, 'Bundle Discount', 'Multi-service discount', ?, 0, 1, 0, ?)
+      `).run(estId, -discount, items.length);
     }
 
     // Step 5: Create invoices based on plan
