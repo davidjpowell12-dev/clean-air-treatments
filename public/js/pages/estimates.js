@@ -909,6 +909,7 @@ const EstimatesPage = {
   _defaultIntervals: {
     'mosquito': 3, 'tick': 3, 'mosquito & tick': 3, 'mosquito/tick': 3,
     'fert': 6, 'fertiliz': 6, 'weed': 6, 'fert & weed': 6,
+    'mow': 1, 'mowing': 1,
   },
 
   _getDefaultInterval(serviceName) {
@@ -925,6 +926,25 @@ const EstimatesPage = {
     const recurringItems = items.filter(i => i.is_recurring && (i.rounds || 1) > 1);
     const oneTimeItems = items.filter(i => !i.is_recurring || (i.rounds || 1) <= 1);
 
+    // Build a map of already-scheduled service types
+    const existingSchedules = {};
+    if (est.existing_schedules) {
+      for (const s of est.existing_schedules) {
+        if (s.service_type) existingSchedules[s.service_type.toLowerCase()] = s;
+      }
+    }
+
+    // Check if a service name matches an existing schedule
+    const getExistingSchedule = (serviceName) => {
+      const lower = (serviceName || '').toLowerCase();
+      for (const [key, info] of Object.entries(existingSchedules)) {
+        if (lower.includes(key.toLowerCase()) || key.toLowerCase().includes(lower.split(' ')[0].toLowerCase())) {
+          return info;
+        }
+      }
+      return null;
+    };
+
     // Default start date: next Monday
     const today = new Date();
     const dayOfWeek = today.getDay();
@@ -938,14 +958,19 @@ const EstimatesPage = {
     if (fallDate < today) fallDate.setFullYear(fallDate.getFullYear() + 1);
     const defaultFallDate = fallDate.toISOString().split('T')[0];
 
-    // Build service config for each recurring service
-    this._schedServiceConfig = recurringItems.map(item => ({
-      item_id: item.id,
-      service_name: item.service_name,
-      rounds: item.rounds || 6,
-      interval: this._getDefaultInterval(item.service_name),
-      start_date: defaultStart
-    }));
+    // Build service config for each recurring service, marking already-scheduled ones
+    this._schedServiceConfig = recurringItems.map(item => {
+      const existing = getExistingSchedule(item.service_name);
+      return {
+        item_id: item.id,
+        service_name: item.service_name,
+        rounds: item.rounds || 6,
+        interval: this._getDefaultInterval(item.service_name),
+        start_date: defaultStart,
+        already_scheduled: !!existing,
+        existing_info: existing
+      };
+    });
 
     this._schedOneTimeItems = oneTimeItems;
     this._schedBundleOneTime = true;
@@ -963,9 +988,19 @@ const EstimatesPage = {
         ${recurringItems.length > 0 ? `
           <div style="margin-bottom:20px;">
             <div style="font-weight:700;font-size:13px;text-transform:uppercase;color:var(--gray-500);letter-spacing:0.5px;margin-bottom:12px;">Recurring Services</div>
-            ${recurringItems.map((item, idx) => `
-              <div style="background:var(--gray-50, #f8f9fa);border-radius:12px;padding:14px;margin-bottom:10px;" data-svc-idx="${idx}">
-                <div style="font-weight:600;font-size:14px;margin-bottom:8px;">${this._esc(item.service_name)} <span style="color:var(--gray-400);font-weight:400;font-size:12px;">${item.rounds || 6} rounds</span></div>
+            ${recurringItems.map((item, idx) => {
+              const cfg = this._schedServiceConfig[idx];
+              const isScheduled = cfg.already_scheduled;
+              const info = cfg.existing_info;
+              return `
+              <div style="background:${isScheduled ? '#f0f9e8' : 'var(--gray-50, #f8f9fa)'};border-radius:12px;padding:14px;margin-bottom:10px;${isScheduled ? 'border:1px solid var(--green);opacity:0.7;' : ''}" data-svc-idx="${idx}">
+                <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
+                  ${this._esc(item.service_name)} <span style="color:var(--gray-400);font-weight:400;font-size:12px;">${item.rounds || 6} rounds</span>
+                  ${isScheduled ? `<span style="background:var(--green);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;">✓ SCHEDULED${info && info.completed ? ' · ' + info.completed + ' done' : ''}</span>` : ''}
+                </div>
+                ${isScheduled ? `
+                  <div style="font-size:12px;color:var(--gray-500);">${info ? info.count + ' entries · ' + info.first_date + ' → ' + info.last_date : 'Already on the schedule'}</div>
+                ` : `
                 <div style="display:flex;gap:8px;align-items:center;">
                   <div style="flex:1;">
                     <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:2px;">Start</label>
@@ -973,15 +1008,16 @@ const EstimatesPage = {
                   </div>
                   <div style="flex:0 0 auto;">
                     <label style="font-size:11px;color:var(--gray-500);display:block;margin-bottom:2px;">Every</label>
-                    <div style="display:flex;gap:4px;">
-                      ${[3,4,5,6,7,8].map(w => `
+                    <div style="display:flex;gap:4px;flex-wrap:wrap;">
+                      ${[1,2,3,4,5,6,7,8].map(w => `
                         <button class="sched-int-btn" data-idx="${idx}" data-weeks="${w}" style="padding:6px 8px;border:1px solid ${w === this._getDefaultInterval(item.service_name) ? 'var(--green)' : 'var(--gray-200)'};border-radius:6px;background:${w === this._getDefaultInterval(item.service_name) ? 'var(--green-light, #f0f9e8)' : 'white'};font-weight:${w === this._getDefaultInterval(item.service_name) ? '700' : '400'};font-size:12px;cursor:pointer;min-width:30px;">${w}w</button>
                       `).join('')}
                     </div>
                   </div>
                 </div>
+                `}
               </div>
-            `).join('')}
+            `;}).join('')}
           </div>
         ` : ''}
 
@@ -1102,8 +1138,8 @@ const EstimatesPage = {
     // Collect all scheduled visits: { date, services[] }
     const allVisits = [];
 
-    // Recurring services
-    this._schedServiceConfig.forEach(svc => {
+    // Recurring services (skip already-scheduled ones)
+    this._schedServiceConfig.filter(svc => !svc.already_scheduled).forEach(svc => {
       for (let r = 0; r < svc.rounds; r++) {
         const d = new Date(svc.start_date + 'T12:00:00');
         d.setDate(d.getDate() + (r * svc.interval * 7));
@@ -1179,13 +1215,16 @@ const EstimatesPage = {
     btn.textContent = 'Creating...';
 
     // Build per-service schedule data
-    const services = this._schedServiceConfig.map(svc => ({
-      service_name: svc.service_name,
-      item_id: svc.item_id,
-      rounds: svc.rounds,
-      interval_weeks: svc.interval,
-      start_date: svc.start_date
-    }));
+    // Only schedule services that aren't already on the calendar
+    const services = this._schedServiceConfig
+      .filter(svc => !svc.already_scheduled)
+      .map(svc => ({
+        service_name: svc.service_name,
+        item_id: svc.item_id,
+        rounds: svc.rounds,
+        interval_weeks: svc.interval,
+        start_date: svc.start_date
+      }));
 
     // One-time services
     const oneTimeServices = [];

@@ -364,16 +364,43 @@ router.post('/:id/card-save-link', requireAuth, async (req, res) => {
 // Get accepted estimates that need scheduling (for dashboard widget)
 router.get('/needs-scheduling', requireAuth, (req, res) => {
   const db = getDb();
+  const currentYear = new Date().getFullYear();
   const estimates = db.prepare(`
     SELECT e.id, e.customer_name, e.address, e.city, e.total_price, e.monthly_price,
            e.payment_months, e.accepted_at, e.property_id,
            (SELECT COUNT(*) FROM estimate_items WHERE estimate_id = e.id AND is_included = 1) as item_count,
+           (SELECT COUNT(DISTINCT ei.service_name) FROM estimate_items ei
+            WHERE ei.estimate_id = e.id AND ei.is_included = 1 AND ei.is_recurring = 1
+            AND ei.service_name NOT IN (
+              SELECT DISTINCT s.service_type FROM schedules s
+              WHERE s.program_id IS NOT NULL AND s.service_type IS NOT NULL
+              AND (s.estimate_id = e.id OR s.property_id = e.property_id)
+              AND s.scheduled_date LIKE ?
+            )) as unscheduled_services,
            ROUND((julianday('now') - julianday(e.accepted_at))) as days_since_accepted
     FROM estimates e
     WHERE e.status = 'accepted'
-      AND e.id NOT IN (SELECT DISTINCT estimate_id FROM schedules WHERE estimate_id IS NOT NULL)
+      AND (
+        -- Show if ANY included recurring service hasn't been scheduled yet
+        EXISTS (
+          SELECT 1 FROM estimate_items ei
+          WHERE ei.estimate_id = e.id AND ei.is_included = 1 AND ei.is_recurring = 1
+          AND ei.service_name NOT IN (
+            SELECT DISTINCT s.service_type FROM schedules s
+            WHERE s.program_id IS NOT NULL AND s.service_type IS NOT NULL
+            AND (s.estimate_id = e.id OR s.property_id = e.property_id)
+            AND s.scheduled_date LIKE ?
+          )
+        )
+        -- Also show if NO schedules at all (covers pre-update entries with NULL service_type)
+        OR NOT EXISTS (
+          SELECT 1 FROM schedules s
+          WHERE s.estimate_id = e.id AND s.program_id IS NOT NULL
+          AND s.scheduled_date LIKE ?
+        )
+      )
     ORDER BY e.accepted_at ASC
-  `).all();
+  `).all(`${currentYear}%`, `${currentYear}%`, `${currentYear}%`);
   res.json(estimates);
 });
 
@@ -386,6 +413,21 @@ router.get('/:id', requireAuth, (req, res) => {
   est.items = db.prepare(
     'SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id'
   ).all(est.id);
+
+  // Include existing schedule info so the Schedule Job modal knows what's already scheduled
+  if (est.property_id) {
+    const existingSchedules = db.prepare(`
+      SELECT service_type, COUNT(*) as count,
+             MIN(scheduled_date) as first_date, MAX(scheduled_date) as last_date,
+             SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
+      FROM schedules
+      WHERE (estimate_id = ? OR property_id = ?)
+        AND program_id IS NOT NULL
+        AND scheduled_date LIKE ?
+      GROUP BY service_type
+    `).all(est.id, est.property_id, new Date().getFullYear() + '%');
+    est.existing_schedules = existingSchedules;
+  }
 
   res.json(est);
 });

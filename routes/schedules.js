@@ -157,11 +157,32 @@ router.get('/unscheduled-programs', requireAuth, (req, res) => {
   const { year, search, service_type } = req.query;
   if (!year) return res.status(400).json({ error: 'Year parameter required' });
 
+  // First, backfill any schedule entries missing service_type by looking at linked estimate_items
+  const nullEntries = db.prepare(`
+    SELECT s.id, s.estimate_id FROM schedules s
+    WHERE s.service_type IS NULL AND s.estimate_id IS NOT NULL AND s.program_id IS NOT NULL
+  `).all();
+  if (nullEntries.length > 0) {
+    const updateStmt = db.prepare('UPDATE schedules SET service_type = ? WHERE id = ?');
+    for (const entry of nullEntries) {
+      // Get the primary recurring service name from the estimate
+      const item = db.prepare(`
+        SELECT service_name FROM estimate_items
+        WHERE estimate_id = ? AND is_included = 1 AND is_recurring = 1
+        ORDER BY sort_order, id LIMIT 1
+      `).get(entry.estimate_id);
+      if (item) {
+        updateStmt.run(item.service_name, entry.id);
+      }
+    }
+  }
+
   let subquery;
   const params = [];
 
   if (service_type) {
     // Find properties that DON'T have this specific service type scheduled
+    // Match by exact service_type OR by fuzzy match (e.g. "Fert & Weed Control" matches search for that)
     subquery = `SELECT DISTINCT property_id FROM schedules WHERE program_id IS NOT NULL AND service_type = ? AND scheduled_date LIKE ?`;
     params.push(service_type, `${year}%`);
   } else {
@@ -170,7 +191,10 @@ router.get('/unscheduled-programs', requireAuth, (req, res) => {
     params.push(`${year}%`);
   }
 
-  let sql = `SELECT p.* FROM properties p WHERE p.id NOT IN (${subquery})`;
+  // Only show properties that have an accepted estimate (active clients)
+  let sql = `SELECT p.* FROM properties p
+    WHERE p.id NOT IN (${subquery})
+    AND EXISTS (SELECT 1 FROM estimates e WHERE e.property_id = p.id AND e.status = 'accepted')`;
 
   if (search) {
     sql += ' AND (p.customer_name LIKE ? OR p.address LIKE ? OR p.city LIKE ?)';
