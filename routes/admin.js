@@ -455,4 +455,170 @@ router.get('/export/invoices', requireAdmin, (req, res) => {
   }
 });
 
+// ── Stripe Customer Search ─────────────────────────────────────────
+router.get('/stripe-search', requireAdmin, async (req, res) => {
+  const { email } = req.query;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+
+  try {
+    const stripeUtils = require('../utils/stripe');
+    if (!stripeUtils.isEnabled()) {
+      return res.status(503).json({ error: 'Stripe is not configured' });
+    }
+    const stripe = require('stripe')(stripeUtils.getStripeKey());
+    const customers = await stripe.customers.list({ email, limit: 5 });
+
+    const results = customers.data.map(c => ({
+      id: c.id,
+      name: c.name,
+      email: c.email,
+      has_payment_method: !!(c.invoice_settings?.default_payment_method || c.default_source),
+      created: new Date(c.created * 1000).toLocaleDateString()
+    }));
+
+    res.json(results);
+  } catch (err) {
+    console.error('[stripe-search] Error:', err.message);
+    res.status(500).json({ error: 'Stripe search failed: ' + err.message });
+  }
+});
+
+// ── Activate Client (bulk import from CoPilot) ────────────────────
+router.post('/activate-client', requireAdmin, async (req, res) => {
+  const db = getDb();
+  const crypto = require('crypto');
+  const {
+    customer_name, address, city, state, zip, email, phone, property_sqft,
+    items, payment_plan, payment_method, payment_months,
+    stripe_customer_id, remaining_months, first_due_date, notes
+  } = req.body;
+
+  if (!customer_name) return res.status(400).json({ error: 'Customer name required' });
+  if (!items || !items.length) return res.status(400).json({ error: 'At least one service required' });
+
+  const plan = payment_plan || 'monthly';
+  const method = payment_method || 'card';
+  const months = payment_months || 8;
+  const remain = remaining_months || months;
+
+  try {
+    // Step 1: Create or find property
+    let propertyId = null;
+    if (address) {
+      const existing = db.prepare(
+        'SELECT id FROM properties WHERE LOWER(TRIM(address)) = LOWER(TRIM(?)) AND LOWER(TRIM(customer_name)) = LOWER(TRIM(?)) LIMIT 1'
+      ).get(address, customer_name);
+      if (existing) {
+        propertyId = existing.id;
+      }
+    }
+    if (!propertyId) {
+      const propResult = db.prepare(`
+        INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(customer_name, address || '', city || '', state || 'MI', zip || '', email || '', phone || '', property_sqft || null);
+      propertyId = propResult.lastInsertRowid;
+    }
+
+    // Step 2: Calculate totals from items
+    const totalPrice = items.reduce((sum, i) => {
+      return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
+    }, 0);
+    const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
+
+    // Step 3: Create pre-accepted estimate
+    const token = crypto.randomBytes(32).toString('hex');
+    const now = new Date().toISOString();
+
+    const estResult = db.prepare(`
+      INSERT INTO estimates (
+        property_id, customer_name, address, city, state, zip,
+        email, phone, property_sqft, total_price, monthly_price,
+        payment_months, token, status, accepted_at, payment_plan,
+        payment_method_preference, stripe_customer_id, notes, created_by, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      propertyId, customer_name, address || '', city || '', state || 'MI', zip || '',
+      email || '', phone || '', property_sqft || null, totalPrice, monthlyPrice,
+      months, token, now, plan, method, stripe_customer_id || null,
+      notes || 'Imported from CoPilot', req.session.userId, now
+    );
+    const estId = estResult.lastInsertRowid;
+
+    // Step 4: Create estimate items
+    const insertItem = db.prepare(`
+      INSERT INTO estimate_items (estimate_id, service_name, description, price, is_recurring, rounds, is_included, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, 1, ?)
+    `);
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      insertItem.run(estId, item.service_name, item.description || '', item.price, item.is_recurring ? 1 : 0, item.rounds || 1, i);
+    }
+
+    // Step 5: Create invoices based on plan
+    const stripeUtils = require('../utils/stripe');
+    let invoiceCount = 0;
+
+    if (plan === 'full') {
+      const invoiceNumber = stripeUtils.generateInvoiceNumber(db);
+      const amount = method === 'card' ? Math.round(totalPrice * 100 * 1.035) : Math.round(totalPrice * 100);
+      db.prepare(`
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
+        VALUES (?, ?, ?, 'pending', 'full', ?)
+      `).run(invoiceNumber, estId, amount, first_due_date || now.split('T')[0]);
+      invoiceCount = 1;
+
+    } else if (plan === 'monthly') {
+      const baseMonthlyCents = Math.round(monthlyPrice * 100);
+      const monthlyCents = method === 'card' ? Math.round(baseMonthlyCents * 1.035) : baseMonthlyCents;
+      const totalCents = method === 'card' ? Math.round(totalPrice * 100 * 1.035) : Math.round(totalPrice * 100);
+      let remaining = totalCents;
+
+      // Calculate start date for invoices
+      const startDate = first_due_date ? new Date(first_due_date + 'T12:00:00') : new Date();
+
+      for (let i = 0; i < remain; i++) {
+        const invoiceNumber = stripeUtils.generateInvoiceNumber(db);
+        const installmentAmount = (i === remain - 1) ? remaining : monthlyCents;
+        remaining -= installmentAmount;
+
+        let dueDate;
+        if (first_due_date) {
+          dueDate = new Date(startDate.getFullYear(), startDate.getMonth() + i, startDate.getDate());
+        } else {
+          dueDate = new Date(startDate.getFullYear(), startDate.getMonth() + 1 + i, 1);
+        }
+        const dueDateStr = dueDate.toISOString().split('T')[0];
+
+        // First invoice = pending (chargeable), rest = scheduled
+        const status = i === 0 ? 'pending' : 'scheduled';
+
+        db.prepare(`
+          INSERT INTO invoices (
+            invoice_number, estimate_id, amount_cents, status, payment_plan,
+            installment_number, total_installments, due_date
+          ) VALUES (?, ?, ?, ?, 'monthly', ?, ?, ?)
+        `).run(invoiceNumber, estId, installmentAmount, status, i + 1, remain, dueDateStr);
+        invoiceCount++;
+      }
+
+    }
+    // per_service: no invoices created up front
+
+    console.log(`[activate] Created client ${customer_name}: property=${propertyId}, estimate=${estId}, invoices=${invoiceCount}, plan=${plan}, method=${method}, stripe=${stripe_customer_id || 'none'}`);
+
+    res.json({
+      success: true,
+      property_id: propertyId,
+      estimate_id: estId,
+      invoices_created: invoiceCount,
+      total_price: totalPrice,
+      monthly_price: monthlyPrice
+    });
+  } catch (err) {
+    console.error('[activate] FAILED:', err.stack || err);
+    res.status(500).json({ error: 'Activation failed: ' + err.message });
+  }
+});
+
 module.exports = router;

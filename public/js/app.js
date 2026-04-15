@@ -129,6 +129,9 @@ const App = {
       case 'invoicing':
         InvoicingPage.render(action, id ? Number(id) : null);
         break;
+      case 'activate':
+        ActivatePage.render();
+        break;
       case 'settings':
         SettingsPage.render();
         break;
