@@ -139,6 +139,7 @@ try {
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/backup', require('./routes/backup'));
   app.use('/api/export', require('./routes/backup'));
+  app.use('/api/follow-ups', require('./routes/follow-ups'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);

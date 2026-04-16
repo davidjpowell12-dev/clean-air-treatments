@@ -68,18 +68,20 @@ const PropertiesPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [prop, applications, ipmCases, scheduleRounds, soilTests] = await Promise.all([
+      const [prop, applications, ipmCases, scheduleRounds, soilTests, followUps] = await Promise.all([
         Api.get(`/api/properties/${id}`),
         Api.get(`/api/properties/${id}/applications`),
         Api.get(`/api/properties/${id}/ipm-cases`),
         Api.get(`/api/schedules/property/${id}`).catch(() => []),
-        Api.get(`/api/soil-tests/property/${id}`).catch(() => [])
+        Api.get(`/api/soil-tests/property/${id}`).catch(() => []),
+        Api.get(`/api/follow-ups?property_id=${id}&status=open`).catch(() => [])
       ]);
       const isAdmin = App.user.role === 'admin';
 
       const zones = prop.zones || [];
       const zoneTotalSqft = zones.reduce((sum, z) => sum + (z.sqft || 0), 0);
       this._currentPropertyId = prop.id;
+      this.currentDetailId = id; // used by FollowUpsPage to refresh
 
       main.innerHTML = `
         <span class="back-link" onclick="App.navigate('properties')">&larr; Properties</span>
@@ -111,6 +113,38 @@ const PropertiesPage = {
               </div>
             ` : ''}
           </div>
+        </div>
+
+        <div class="card" style="margin-bottom:12px;">
+          <div class="card-header">
+            <h3 style="font-size:16px;">📋 Follow-ups ${followUps.length > 0 ? `<span style="color:var(--gray-500);font-weight:500;font-size:13px;">(${followUps.length})</span>` : ''}</h3>
+            <button class="btn btn-sm btn-outline" onclick="FollowUpsPage.openCreate(${prop.id})">+ Add</button>
+          </div>
+          ${followUps.length === 0 ? `
+            <div style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
+              No open follow-ups for this customer.
+            </div>
+          ` : `
+            <div>
+              ${followUps.map(f => {
+                const waitingBadge = f.waiting_on === 'customer'
+                  ? '<span class="badge badge-blue" style="font-size:10px;">Waiting</span>'
+                  : '<span class="badge badge-orange" style="font-size:10px;">On me</span>';
+                return `
+                  <div class="data-row">
+                    <div class="data-row-main" onclick="FollowUpsPage.openEdit(${f.id})" style="cursor:pointer;">
+                      <h4>${f.pinned ? '📌 ' : ''}${this.esc(f.title)}</h4>
+                      ${f.notes ? `<p style="font-size:13px;color:var(--gray-700);">${this.esc(f.notes.slice(0, 80))}${f.notes.length > 80 ? '…' : ''}</p>` : ''}
+                      <div style="margin-top:4px;display:flex;gap:6px;align-items:center;">${waitingBadge}<span style="font-size:11px;color:var(--gray-500);">${f.bucket === 'today' ? '🔥 Today' : f.bucket === 'this_week' ? '📆 Week' : '💭 Someday'}</span></div>
+                    </div>
+                    <div class="data-row-right">
+                      <button class="btn-icon fu-done-btn" onclick="event.stopPropagation();FollowUpsPage.complete(${f.id})" title="Mark done">✓</button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
         </div>
 
         <div class="card" style="margin-bottom:12px;">

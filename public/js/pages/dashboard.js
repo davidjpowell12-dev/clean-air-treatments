@@ -14,14 +14,16 @@ const DashboardPage = {
     `;
 
     try {
-      const [products, inventory, applications, properties, financials, needsScheduling, billingStats] = await Promise.all([
+      const [products, inventory, applications, properties, financials, needsScheduling, billingStats, followUpCounts, followUpTop] = await Promise.all([
         Api.get('/api/products'),
         Api.get('/api/inventory'),
         Api.get('/api/applications?limit=5'),
         Api.get('/api/properties').catch(() => []),
         Api.get('/api/applications/stats').catch(() => ({ total_revenue: 0, total_cost: 0, total_margin: 0, margin_pct: 0 })),
         Api.get('/api/estimates/needs-scheduling').catch(() => []),
-        Api.get('/api/payments/dashboard').catch(() => ({ failed_count: 0, scheduled_count: 0 }))
+        Api.get('/api/payments/dashboard').catch(() => ({ failed_count: 0, scheduled_count: 0 })),
+        Api.get('/api/follow-ups/counts').catch(() => ({ today: 0, this_week: 0, someday: 0, waiting_me: 0, waiting_customer: 0, total: 0 })),
+        Api.get('/api/follow-ups?status=open&bucket=today').catch(() => [])
       ]);
 
       const lowStock = inventory.filter(i => i.quantity <= i.reorder_threshold);
@@ -70,6 +72,49 @@ const DashboardPage = {
               <div class="stat-value" style="font-size:22px;color:${financials.margin_pct >= 0 ? 'var(--green-dark)' : 'var(--red)'};">${financials.margin_pct}%</div>
               <div class="stat-label">Margin %</div>
             </div>
+          </div>
+        ` : ''}
+
+        ${followUpCounts.total > 0 ? `
+          <div class="card" style="margin-top:12px;border:2px solid var(--blue, #1d428a);border-left:6px solid var(--blue, #1d428a);">
+            <div class="card-header" style="cursor:pointer;" onclick="App.navigate('follow-ups')">
+              <h3 style="color:var(--blue, #1d428a);">📋 Follow-ups (${followUpCounts.total})</h3>
+              <span class="back-link">View All →</span>
+            </div>
+            <div class="fu-dash-widget">
+              <div class="fu-dash-bucket today" onclick="App.navigate('follow-ups')">
+                <div class="fu-dash-bucket-count">${followUpCounts.today}</div>
+                <div class="fu-dash-bucket-label">🔥 Today</div>
+              </div>
+              <div class="fu-dash-bucket" onclick="App.navigate('follow-ups')">
+                <div class="fu-dash-bucket-count">${followUpCounts.this_week}</div>
+                <div class="fu-dash-bucket-label">📆 This Week</div>
+              </div>
+              <div class="fu-dash-bucket" onclick="App.navigate('follow-ups')">
+                <div class="fu-dash-bucket-count">${followUpCounts.someday}</div>
+                <div class="fu-dash-bucket-label">💭 Someday</div>
+              </div>
+            </div>
+            <div class="fu-dash-split">
+              <span><strong>${followUpCounts.waiting_me}</strong> on me</span>
+              <span>·</span>
+              <span><strong>${followUpCounts.waiting_customer}</strong> waiting on customer</span>
+            </div>
+            ${followUpTop.slice(0, 3).length > 0 ? `
+              <div style="border-top:1px solid var(--gray-200);">
+                ${followUpTop.slice(0, 3).map(f => `
+                  <div class="data-row" style="cursor:pointer;" onclick="event.stopPropagation();FollowUpsPage.openEdit(${f.id})">
+                    <div class="data-row-main">
+                      <h4>${f.pinned ? '📌 ' : ''}${this.escapeHtml(f.title)}</h4>
+                      ${f.customer_name ? `<p style="color:var(--blue);font-weight:600;font-size:12px;">${this.escapeHtml(f.customer_name)}</p>` : ''}
+                    </div>
+                    <div class="data-row-right">
+                      <button class="btn-icon fu-done-btn" onclick="event.stopPropagation();FollowUpsPage.complete(${f.id})" title="Mark done">✓</button>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
           </div>
         ` : ''}
 

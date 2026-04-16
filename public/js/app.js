@@ -68,6 +68,9 @@ const App = {
     window.addEventListener('offline', updateOnlineStatus);
     updateOnlineStatus();
 
+    // Mount global quick-capture follow-up button
+    if (window.FollowUpsPage && FollowUpsPage.mountFab) FollowUpsPage.mountFab();
+
     // Initial page load
     const hash = window.location.hash.slice(1) || 'dashboard';
     const parts = hash.split('/');
@@ -128,6 +131,9 @@ const App = {
         break;
       case 'invoicing':
         InvoicingPage.render(action, id ? Number(id) : null);
+        break;
+      case 'follow-ups':
+        FollowUpsPage.render(action, id ? Number(id) : null);
         break;
       case 'activate':
         ActivatePage.render();

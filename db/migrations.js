@@ -344,6 +344,29 @@ const migrations = [
   function addSalesOrderPath(db) {
     try { db.exec('ALTER TABLE purchases ADD COLUMN sales_order_path TEXT'); } catch (e) { /* column may already exist */ }
     try { db.exec('ALTER TABLE purchases ADD COLUMN sales_order_original_name TEXT'); } catch (e) { /* column may already exist */ }
+  },
+  // Migration: Create follow_ups table for client request tracking
+  function createFollowUps(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS follow_ups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        property_id INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+        title TEXT NOT NULL,
+        notes TEXT,
+        bucket TEXT NOT NULL DEFAULT 'today',
+        waiting_on TEXT NOT NULL DEFAULT 'me',
+        pinned INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'open',
+        created_by INTEGER REFERENCES users(id),
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        completed_at DATETIME,
+        snoozed_until DATETIME
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_followups_status ON follow_ups(status)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_followups_property ON follow_ups(property_id)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_followups_bucket ON follow_ups(bucket)');
   }
 ];
 
