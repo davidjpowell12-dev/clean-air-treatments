@@ -75,12 +75,19 @@ const DashboardPage = {
           </div>
         ` : ''}
 
-        ${followUpCounts.total > 0 ? `
-          <div class="card" style="margin-top:12px;border:2px solid var(--blue, #1d428a);border-left:6px solid var(--blue, #1d428a);">
-            <div class="card-header" style="cursor:pointer;" onclick="App.navigate('follow-ups')">
-              <h3 style="color:var(--blue, #1d428a);">📋 Follow-ups (${followUpCounts.total})</h3>
-              <span class="back-link">View All →</span>
+        <div class="card" style="margin-top:12px;border:2px solid var(--blue, #1d428a);border-left:6px solid var(--blue, #1d428a);">
+          <div class="card-header" style="cursor:pointer;" onclick="App.navigate('follow-ups')">
+            <h3 style="color:var(--blue, #1d428a);">📋 Follow-ups${followUpCounts.total > 0 ? ' (' + followUpCounts.total + ')' : ''}</h3>
+            <span class="back-link">View All →</span>
+          </div>
+          ${followUpCounts.total === 0 ? `
+            <div style="padding:20px 16px;text-align:center;">
+              <p style="color:var(--gray-700);font-size:14px;margin-bottom:12px;">
+                Capture client requests as they come up — additional services, things to check on, questions to follow up.
+              </p>
+              <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();FollowUpsPage.openCreate()">+ Capture your first follow-up</button>
             </div>
+          ` : `
             <div class="fu-dash-widget">
               <div class="fu-dash-bucket today" onclick="App.navigate('follow-ups')">
                 <div class="fu-dash-bucket-count">${followUpCounts.today}</div>
@@ -115,8 +122,8 @@ const DashboardPage = {
                 `).join('')}
               </div>
             ` : ''}
-          </div>
-        ` : ''}
+          `}
+        </div>
 
         ${billingStats.failed_count > 0 ? `
           <div class="card" style="margin-top:12px;border:2px solid #dc2626;border-left:6px solid #dc2626;cursor:pointer;" onclick="App.navigate('invoicing');setTimeout(()=>{const t=document.querySelector('.est-tab[data-filter=failed]');if(t)t.click();},100);">
