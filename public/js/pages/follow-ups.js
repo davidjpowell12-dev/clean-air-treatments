@@ -290,6 +290,8 @@ const FollowUpsPage = {
   },
 
   closeModal() {
+    // Kill any active voice recognition so it can't linger in record mode
+    this.stopVoiceInput();
     const m = document.getElementById('fuModal');
     if (m) {
       m.classList.remove('open');
@@ -366,8 +368,16 @@ const FollowUpsPage = {
     }
   },
 
-  // Web Speech API voice capture
+  // Web Speech API voice capture — toggle on/off, always cancellable
+  _voiceRec: null,
+
   startVoiceInput() {
+    // If already recording, toggle OFF
+    if (this._voiceRec) {
+      this.stopVoiceInput();
+      return;
+    }
+
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) {
       App.toast('Voice input not supported on this device', 'error');
@@ -376,15 +386,33 @@ const FollowUpsPage = {
     const voiceBtn = document.getElementById('fuVoiceBtn');
     const titleInput = document.getElementById('fuTitle');
     const notesInput = document.getElementById('fuNotes');
+    if (!voiceBtn || !titleInput) return;
 
-    const rec = new SR();
+    let rec;
+    try {
+      rec = new SR();
+    } catch (err) {
+      App.toast('Could not start mic: ' + err.message, 'error');
+      return;
+    }
     rec.continuous = false;
     rec.interimResults = true;
     rec.lang = 'en-US';
 
-    voiceBtn.textContent = '🔴';
+    this._voiceRec = rec;
+
+    // Visual "recording" state + "tap again to stop" hint
+    voiceBtn.textContent = '⏹';
     voiceBtn.style.background = 'var(--red)';
     voiceBtn.style.color = 'white';
+    voiceBtn.title = 'Tap to stop';
+
+    // Safety timeout — never leave the UI stuck in record mode
+    const safetyTimer = setTimeout(() => {
+      if (this._voiceRec === rec) {
+        try { rec.stop(); } catch (e) { /* ignore */ }
+      }
+    }, 30000); // 30 seconds max
 
     let finalText = '';
     rec.onresult = (event) => {
@@ -396,30 +424,62 @@ const FollowUpsPage = {
           interim += event.results[i][0].transcript;
         }
       }
-      // Put first sentence into title, rest into notes
       const combined = (finalText + interim).trim();
       if (!titleInput.value || titleInput.dataset.fromVoice) {
         titleInput.value = combined.slice(0, 120);
         titleInput.dataset.fromVoice = '1';
-        if (combined.length > 120) {
+        if (combined.length > 120 && notesInput) {
           notesInput.value = combined.slice(120);
           notesInput.dataset.fromVoice = '1';
         }
       }
     };
+
+    const reset = () => {
+      clearTimeout(safetyTimer);
+      this._voiceRec = null;
+      const btn = document.getElementById('fuVoiceBtn');
+      if (btn) {
+        btn.textContent = '🎤';
+        btn.style.background = '';
+        btn.style.color = '';
+        btn.title = 'Voice input';
+      }
+    };
+
     rec.onerror = (e) => {
-      App.toast('Voice error: ' + (e.error || 'unknown'), 'error');
-      stop();
+      if (e.error && e.error !== 'aborted' && e.error !== 'no-speech') {
+        App.toast('Voice error: ' + e.error, 'error');
+      }
+      reset();
     };
-    rec.onend = () => stop();
+    rec.onend = () => reset();
 
-    const stop = () => {
-      voiceBtn.textContent = '🎤';
-      voiceBtn.style.background = '';
-      voiceBtn.style.color = '';
-    };
+    try {
+      rec.start();
+    } catch (err) {
+      App.toast('Mic start failed: ' + err.message, 'error');
+      reset();
+    }
+  },
 
-    rec.start();
+  stopVoiceInput() {
+    if (!this._voiceRec) return;
+    try { this._voiceRec.stop(); } catch (e) { /* ignore */ }
+    // If stop() doesn't fire onend promptly, abort
+    const rec = this._voiceRec;
+    setTimeout(() => {
+      if (this._voiceRec === rec) {
+        try { rec.abort(); } catch (e) { /* ignore */ }
+        this._voiceRec = null;
+        const btn = document.getElementById('fuVoiceBtn');
+        if (btn) {
+          btn.textContent = '🎤';
+          btn.style.background = '';
+          btn.style.color = '';
+        }
+      }
+    }, 500);
   },
 
   // ─── Floating quick-capture button (global) ─────────────────────
