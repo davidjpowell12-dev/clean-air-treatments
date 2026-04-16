@@ -634,13 +634,18 @@ const EstimatesPage = {
           <button class="btn btn-primary btn-full" onclick="App.navigate('estimates', 'edit', ${est.id})">
             Edit Estimate
           </button>
-          ${est.token && est.status !== 'draft' ? `
+          ${est.token ? `
             <button class="btn btn-secondary btn-full" style="margin-top:8px;" onclick="EstimatesPage.copyProposalLink('${est.token}')">
               📋 Copy Proposal Link
             </button>
             <a href="/proposal/${est.token}" target="_blank" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
               👁 View as Customer
             </a>
+            ${est.status === 'draft' ? `
+              <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.markSentManually(${est.id})">
+                ✉️ Mark as Sent (I emailed it)
+              </button>
+            ` : ''}
           ` : ''}
           ${est.status !== 'accepted' && est.status !== 'declined' && est.status !== 'expired' ? `
             <div class="card" style="margin-top:12px;border:2px solid var(--green);">
@@ -700,6 +705,18 @@ const EstimatesPage = {
       App.toast('Proposal link copied!', 'success');
     } catch (e) {
       prompt('Copy this link:', url);
+    }
+  },
+
+  // ─── Mark Estimate as Sent (for manual email/other delivery) ──
+  async markSentManually(id) {
+    if (!confirm('Mark this estimate as sent? Use this if you emailed or shared the link manually.')) return;
+    try {
+      await Api.put(`/api/estimates/${id}`, { status: 'sent' });
+      App.toast('Marked as sent', 'success');
+      App.navigate('estimates', 'view', id);
+    } catch (err) {
+      App.toast(err.message, 'error');
     }
   },
 
