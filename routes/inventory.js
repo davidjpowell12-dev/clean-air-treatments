@@ -1,8 +1,26 @@
 const express = require('express');
+const path = require('path');
 const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// File upload setup for sales order PDFs
+let upload;
+try {
+  const multer = require('multer');
+  const { v4: uuidv4 } = require('uuid');
+  const storage = multer.diskStorage({
+    destination: process.env.UPLOADS_DIR || path.join(__dirname, '..', 'uploads'),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname);
+      cb(null, 'so-' + uuidv4() + ext);
+    }
+  });
+  upload = multer({ storage, limits: { fileSize: 20 * 1024 * 1024 } });
+} catch (e) {
+  upload = { single: () => (req, res, next) => next() };
+}
 
 // Get all inventory with product info
 router.get('/', requireAuth, (req, res) => {
@@ -70,12 +88,27 @@ router.post('/adjust', requireAuth, (req, res) => {
 });
 
 // Bulk receive inventory (season intake / delivery) + create purchase records
-router.post('/receive', requireAuth, (req, res) => {
-  const { items, po_number, vendor_name, purchase_date, received_date } = req.body;
+// Accepts multipart/form-data with optional sales_order PDF upload
+router.post('/receive', requireAuth, upload.single('sales_order'), (req, res) => {
+  // Parse items from FormData (JSON string) or JSON body
+  let items, po_number, vendor_name, purchase_date, received_date;
+  if (req.body.items && typeof req.body.items === 'string') {
+    try { items = JSON.parse(req.body.items); } catch (e) { items = null; }
+    po_number = req.body.po_number || null;
+    vendor_name = req.body.vendor_name || null;
+    purchase_date = req.body.purchase_date || null;
+    received_date = req.body.received_date || null;
+  } else {
+    ({ items, po_number, vendor_name, purchase_date, received_date } = req.body);
+  }
 
   if (!Array.isArray(items) || items.length === 0) {
     return res.status(400).json({ error: 'At least one item is required' });
   }
+
+  // If a PDF was uploaded, record its path (shared across all purchase rows in this delivery)
+  const salesOrderPath = req.file ? req.file.filename : null;
+  const salesOrderOriginalName = req.file ? req.file.originalname : null;
 
   const db = getDb();
   const results = [];
@@ -104,8 +137,8 @@ router.post('/receive', requireAuth, (req, res) => {
       const totalCost = (unitCost != null) ? unitCost * Number(item.quantity) : null;
 
       db.prepare(`
-        INSERT INTO purchases (product_id, quantity, unit_cost, total_cost, po_number, vendor_name, purchase_date, received_date, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO purchases (product_id, quantity, unit_cost, total_cost, po_number, vendor_name, purchase_date, received_date, sales_order_path, sales_order_original_name, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         item.product_id,
         Number(item.quantity),
@@ -115,6 +148,8 @@ router.post('/receive', requireAuth, (req, res) => {
         vendor_name || null,
         purchase_date || today,
         received_date || today,
+        salesOrderPath,
+        salesOrderOriginalName,
         req.session.userId
       );
 

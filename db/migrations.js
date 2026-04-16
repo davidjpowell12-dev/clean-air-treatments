@@ -339,6 +339,11 @@ const migrations = [
     for (const [sqft, price] of tiers) {
       insert.run(serviceId, sqft, price);
     }
+  },
+  // Migration: Add sales_order_path to purchases for COGS documentation
+  function addSalesOrderPath(db) {
+    try { db.exec('ALTER TABLE purchases ADD COLUMN sales_order_path TEXT'); } catch (e) { /* column may already exist */ }
+    try { db.exec('ALTER TABLE purchases ADD COLUMN sales_order_original_name TEXT'); } catch (e) { /* column may already exist */ }
   }
 ];
 
@@ -365,6 +370,8 @@ function runMigrations(db) {
   // is safe to run repeatedly.
   ensureColumn(db, 'estimates', 'payment_method_preference', "TEXT DEFAULT 'card'");
   ensureColumn(db, 'estimates', 'stripe_customer_id', 'TEXT');
+  ensureColumn(db, 'purchases', 'sales_order_path', 'TEXT');
+  ensureColumn(db, 'purchases', 'sales_order_original_name', 'TEXT');
 
   // Fix any Bundle Discount line items that were created with is_included=0
   const fixedDiscounts = db.prepare(`

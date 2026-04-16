@@ -206,6 +206,10 @@ const InventoryPage = {
               <label>Vendor</label>
               <input type="text" name="vendor_name" placeholder="e.g. SiteOne Landscape Supply">
             </div>
+            <div class="form-group">
+              <label>Sales Order PDF <span style="color:var(--gray-500);font-weight:400;font-size:12px;">(required for COGS submission)</span></label>
+              <input type="file" name="sales_order" accept="application/pdf,image/*" style="padding:8px;border:2px dashed var(--gray-300);border-radius:6px;width:100%;box-sizing:border-box;background:var(--gray-50);">
+            </div>
 
             <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 8px;">
               <h4 style="color:var(--blue);font-size:14px;">Items</h4>
@@ -258,19 +262,27 @@ const InventoryPage = {
       }
 
       const formData = new FormData(e.target);
-      const payload = {
-        items,
-        po_number: formData.get('po_number') || null,
-        vendor_name: formData.get('vendor_name') || null,
-        purchase_date: formData.get('purchase_date') || null,
-        received_date: formData.get('purchase_date') || null
-      };
+      const file = formData.get('sales_order');
+      const hasFile = file && file.size > 0;
+
+      // Build payload as FormData so we can attach the PDF
+      const payload = new FormData();
+      payload.append('items', JSON.stringify(items));
+      payload.append('po_number', formData.get('po_number') || '');
+      payload.append('vendor_name', formData.get('vendor_name') || '');
+      payload.append('purchase_date', formData.get('purchase_date') || '');
+      payload.append('received_date', formData.get('purchase_date') || '');
+      if (hasFile) payload.append('sales_order', file);
 
       try {
-        await Api.post('/api/inventory/receive', payload);
+        const res = await fetch('/api/inventory/receive', { method: 'POST', body: payload });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+          throw new Error(err.error || 'Upload failed');
+        }
         overlay.classList.remove('open');
         setTimeout(() => overlay.remove(), 200);
-        App.toast('Received ' + items.length + ' item' + (items.length > 1 ? 's' : ''), 'success');
+        App.toast('Received ' + items.length + ' item' + (items.length > 1 ? 's' : '') + (hasFile ? ' · SO attached' : ''), 'success');
         this.render();
       } catch (err) {
         App.toast(err.message, 'error');
@@ -360,7 +372,7 @@ const InventoryPage = {
         ${purchases.map(p => `
           <div class="data-row" style="cursor:pointer;" onclick="InventoryPage.showEditPurchaseModal(${p.id})">
             <div class="data-row-main">
-              <h4>${this.esc(p.product_name)}</h4>
+              <h4>${this.esc(p.product_name)} ${p.sales_order_path ? '<span style="font-size:11px;background:#d1fae5;color:#065f46;padding:2px 6px;border-radius:4px;font-weight:600;margin-left:4px;">📄 SO</span>' : '<span style="font-size:11px;background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-weight:600;margin-left:4px;">No SO</span>'}</h4>
               <p>${p.purchase_date}${p.vendor_name ? ' &middot; ' + this.esc(p.vendor_name) : ''}${p.po_number ? ' &middot; PO: ' + this.esc(p.po_number) : ''}</p>
             </div>
             <div class="data-row-right" style="text-align:right;">
@@ -373,6 +385,40 @@ const InventoryPage = {
       `;
     } catch (err) {
       preview.innerHTML = '<div class="empty-state"><p>Error: ' + err.message + '</p></div>';
+    }
+  },
+
+  async uploadSalesOrder(purchaseId) {
+    const fileInput = document.getElementById('salesOrderFile');
+    if (!fileInput || !fileInput.files || !fileInput.files[0]) {
+      App.toast('Choose a file first', 'error');
+      return;
+    }
+    const fd = new FormData();
+    fd.append('sales_order', fileInput.files[0]);
+    try {
+      const res = await fetch('/api/purchases/' + purchaseId + '/sales-order', { method: 'POST', body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Upload failed' }));
+        throw new Error(err.error || 'Upload failed');
+      }
+      App.toast('Sales order attached', 'success');
+      document.querySelector('.modal-overlay')?.remove();
+      this.showEditPurchaseModal(purchaseId);
+    } catch (err) {
+      App.toast(err.message, 'error');
+    }
+  },
+
+  async removeSalesOrder(purchaseId) {
+    if (!confirm('Remove the attached sales order?')) return;
+    try {
+      await Api.delete('/api/purchases/' + purchaseId + '/sales-order');
+      App.toast('Sales order removed', 'success');
+      document.querySelector('.modal-overlay')?.remove();
+      this.showEditPurchaseModal(purchaseId);
+    } catch (err) {
+      App.toast(err.message, 'error');
     }
   },
 
@@ -446,6 +492,23 @@ const InventoryPage = {
             <div class="form-group">
               <label>Notes</label>
               <textarea name="notes" rows="2">${this.esc(purchase.notes || '')}</textarea>
+            </div>
+            <div class="form-group">
+              <label>Sales Order PDF</label>
+              <div id="salesOrderSection" style="padding:12px;background:var(--gray-50);border-radius:8px;">
+                ${purchase.sales_order_path ? `
+                  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                    <span style="font-size:18px;">📄</span>
+                    <a href="/api/purchases/${purchase.id}/sales-order" target="_blank" style="flex:1;font-size:13px;color:var(--blue);text-decoration:underline;">${this.esc(purchase.sales_order_original_name || 'View sales order')}</a>
+                    <button type="button" class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);" onclick="InventoryPage.removeSalesOrder(${purchase.id})">Remove</button>
+                  </div>
+                  <label style="font-size:12px;color:var(--gray-500);">Replace with new file:</label>
+                ` : `
+                  <label style="font-size:12px;color:var(--gray-500);display:block;margin-bottom:4px;">Upload sales order PDF (required for COGS)</label>
+                `}
+                <input type="file" id="salesOrderFile" accept="application/pdf,image/*" style="width:100%;padding:8px;border:2px dashed var(--gray-300);border-radius:6px;box-sizing:border-box;background:white;">
+                <button type="button" class="btn btn-sm btn-primary" style="margin-top:8px;width:100%;" onclick="InventoryPage.uploadSalesOrder(${purchase.id})">Upload</button>
+              </div>
             </div>
             <button type="submit" class="btn btn-primary btn-full">Save Changes</button>
           </form>
