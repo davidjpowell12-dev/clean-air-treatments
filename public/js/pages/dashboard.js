@@ -14,7 +14,7 @@ const DashboardPage = {
     `;
 
     try {
-      const [products, inventory, applications, properties, financials, needsScheduling, billingStats, followUpCounts, followUpTop] = await Promise.all([
+      const [products, inventory, applications, properties, financials, needsScheduling, billingStats, followUpCounts, followUpTop, msgCounts] = await Promise.all([
         Api.get('/api/products'),
         Api.get('/api/inventory'),
         Api.get('/api/applications?limit=5'),
@@ -23,7 +23,8 @@ const DashboardPage = {
         Api.get('/api/estimates/needs-scheduling').catch(() => []),
         Api.get('/api/payments/dashboard').catch(() => ({ failed_count: 0, scheduled_count: 0 })),
         Api.get('/api/follow-ups/counts').catch(() => ({ today: 0, this_week: 0, someday: 0, waiting_me: 0, waiting_customer: 0, total: 0 })),
-        Api.get('/api/follow-ups?status=open&bucket=today').catch(() => [])
+        Api.get('/api/follow-ups?status=open&bucket=today').catch(() => []),
+        Api.get('/api/messaging/drafts/counts').catch(() => ({ heads_up_ready: 0, completion_ready: 0, failed: 0 }))
       ]);
 
       const lowStock = inventory.filter(i => i.quantity <= i.reorder_threshold);
@@ -124,6 +125,29 @@ const DashboardPage = {
             ` : ''}
           `}
         </div>
+
+        ${(msgCounts.heads_up_ready + msgCounts.completion_ready + msgCounts.failed) > 0 ? `
+          <div class="card" style="margin-top:12px;border:2px solid #7c3aed;border-left:6px solid #7c3aed;cursor:pointer;" onclick="App.navigate('messaging')">
+            <div class="card-header">
+              <h3 style="color:#7c3aed;">📱 Messages to Send</h3>
+              <span class="back-link">Review →</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;padding:12px 16px;">
+              <div style="text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:${msgCounts.heads_up_ready > 0 ? '#7c3aed' : 'var(--gray-400)'};">${msgCounts.heads_up_ready}</div>
+                <div style="font-size:11px;color:var(--gray-600);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">🔔 Heads-ups</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:${msgCounts.completion_ready > 0 ? '#7c3aed' : 'var(--gray-400)'};">${msgCounts.completion_ready}</div>
+                <div style="font-size:11px;color:var(--gray-600);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">✅ Completions</div>
+              </div>
+              <div style="text-align:center;">
+                <div style="font-size:22px;font-weight:800;color:${msgCounts.failed > 0 ? 'var(--red)' : 'var(--gray-400)'};">${msgCounts.failed}</div>
+                <div style="font-size:11px;color:var(--gray-600);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">⚠ Failed</div>
+              </div>
+            </div>
+          </div>
+        ` : ''}
 
         ${billingStats.failed_count > 0 ? `
           <div class="card" style="margin-top:12px;border:2px solid #dc2626;border-left:6px solid #dc2626;cursor:pointer;" onclick="App.navigate('invoicing');setTimeout(()=>{const t=document.querySelector('.est-tab[data-filter=failed]');if(t)t.click();},100);">

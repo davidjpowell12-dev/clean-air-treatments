@@ -135,6 +135,9 @@ const App = {
       case 'follow-ups':
         FollowUpsPage.render(action, id ? Number(id) : null);
         break;
+      case 'messaging':
+        MessagingPage.render();
+        break;
       case 'activate':
         ActivatePage.render();
         break;

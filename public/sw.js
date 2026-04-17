@@ -1,15 +1,16 @@
-const CACHE_NAME = 'clean-air-v56';
+const CACHE_NAME = 'clean-air-v57';
 const STATIC_ASSETS = [
   '/',
   '/app',
   '/index.html',
   '/app.html',
   '/css/styles.css?v=26',
-  '/js/app.js?v=26',
+  '/js/app.js?v=27',
   '/js/pages/activate.js?v=2',
   '/js/utils/api.js?v=25',
   '/js/utils/offline.js?v=24',
-  '/js/pages/dashboard.js?v=26',
+  '/js/pages/dashboard.js?v=27',
+  '/js/pages/messaging.js?v=1',
   '/js/pages/products.js?v=24',
   '/js/pages/inventory.js?v=25',
   '/js/pages/calculator.js?v=24',
@@ -19,7 +20,7 @@ const STATIC_ASSETS = [
   '/js/pages/scheduling.js?v=26',
   '/js/pages/estimates.js?v=32',
   '/js/pages/invoicing.js?v=25',
-  '/js/pages/settings.js?v=26',
+  '/js/pages/settings.js?v=27',
   '/js/pages/follow-ups.js?v=3',
   '/js/lib/html5-qrcode.min.js',
   '/logo.png',

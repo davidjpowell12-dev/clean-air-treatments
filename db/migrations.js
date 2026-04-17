@@ -397,6 +397,42 @@ function runMigrations(db) {
   ensureColumn(db, 'purchases', 'sales_order_original_name', 'TEXT');
   ensureColumn(db, 'follow_ups', 'linked_estimate_id', 'INTEGER REFERENCES estimates(id) ON DELETE SET NULL');
 
+  // Messaging: per-service text templates used when composing SMS drafts.
+  ensureColumn(db, 'services', 'heads_up_text', 'TEXT');
+  ensureColumn(db, 'services', 'completion_text', 'TEXT');
+  ensureColumn(db, 'services', 'client_action', 'TEXT');
+  // Messaging: per-property opt-in flag (default 1 — existing clients grandfathered in,
+  // consistent with "established business relationship" for transactional messages).
+  ensureColumn(db, 'properties', 'sms_opted_in', 'INTEGER DEFAULT 1');
+
+  // Drafts of outbound SMS messages. Each is composed from the visit + services + templates,
+  // then presented to the user for optional editing before send.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS message_drafts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+      schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+      application_id INTEGER REFERENCES applications(id) ON DELETE SET NULL,
+      type TEXT NOT NULL,                    -- 'heads_up' or 'completion'
+      service_date DATE,                     -- day the visit happens (for heads_up) or was completed
+      service_summary TEXT,                  -- e.g. "Fertilizer + Weed Control"
+      composed_text TEXT NOT NULL,           -- the auto-composed starting text
+      edited_text TEXT,                      -- user's edited version (null = use composed)
+      to_phone TEXT,                         -- snapshot of the phone at compose time
+      status TEXT NOT NULL DEFAULT 'draft',  -- draft | sent | failed | skipped
+      send_result TEXT,                      -- JSON: sid, error, dry_run, etc.
+      scheduled_for DATETIME,                -- when to auto-send (null = on-demand only)
+      sent_at DATETIME,
+      sent_by INTEGER REFERENCES users(id),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status ON message_drafts(status)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_type ON message_drafts(type)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_property ON message_drafts(property_id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_schedule ON message_drafts(schedule_id)');
+
   // Fix any Bundle Discount line items that were created with is_included=0
   const fixedDiscounts = db.prepare(`
     UPDATE estimate_items SET is_included = 1

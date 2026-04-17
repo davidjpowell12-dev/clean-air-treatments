@@ -89,6 +89,95 @@ const SettingsPage = {
         </div>
 
         <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>📱 SMS Messaging</h3></div>
+          <div class="card-body">
+            <p style="font-size:13px;color:var(--gray-600);margin-bottom:14px;">
+              Templates used to compose heads-up (night-before) and completion (after-service) text messages.
+              You can edit each message before sending — these are just the starting points.
+              Variables: <code>{{first_name}}</code>, <code>{{customer_name}}</code>, <code>{{address}}</code>, <code>{{friendly_date}}</code>, <code>{{business_name}}</code>, <code>{{review_link}}</code>.
+            </p>
+
+            <div id="msgTwilioStatus" style="padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:14px;"></div>
+
+            <div class="form-group">
+              <label>Business name</label>
+              <input type="text" id="msgBusinessName" value="${this.esc(settings.msg_business_name || 'Clean Air Treatments')}" placeholder="Clean Air Treatments">
+            </div>
+
+            <div class="form-group">
+              <label>Greeting</label>
+              <input type="text" id="msgGreeting" value="${this.esc(settings.msg_greeting || 'Hi {{first_name}},')}">
+            </div>
+
+            <div class="form-group">
+              <label>Heads-up intro (night before)</label>
+              <textarea id="msgHeadsUpIntro" rows="2" placeholder="{{business_name}} will be at {{address}} {{friendly_date}} for:">${this.esc(settings.msg_heads_up_intro || '{{business_name}} will be at {{address}} {{friendly_date}} for:')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Heads-up closing line</label>
+              <textarea id="msgHeadsUpClosing" rows="2">${this.esc(settings.msg_heads_up_closing || 'Please unlock gates and secure pets. Reply with any questions.')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Completion intro</label>
+              <textarea id="msgCompletionIntro" rows="2">${this.esc(settings.msg_completion_intro || 'We just finished at {{address}} today:')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Google review link</label>
+              <input type="text" id="msgReviewLink" value="${this.esc(settings.msg_review_link || '')}" placeholder="https://g.page/r/XXXXXX/review">
+              <p class="form-hint">Leave blank to omit the review ask from completion texts. Short link preferred.</p>
+            </div>
+
+            <div class="form-group">
+              <label>Review ask line</label>
+              <input type="text" id="msgReviewLine" value="${this.esc(settings.msg_review_line || 'Enjoyed our service? A quick review helps a ton: {{review_link}}')}">
+            </div>
+
+            <div class="form-group">
+              <label>Signature</label>
+              <input type="text" id="msgSignature" value="${this.esc(settings.msg_signature || 'Thanks! — {{business_name}}')}">
+            </div>
+
+            <div class="form-group">
+              <label>Opt-out line (required on every message)</label>
+              <input type="text" id="msgOptOut" value="${this.esc(settings.msg_opt_out || 'Reply STOP to unsubscribe.')}">
+            </div>
+
+            <button class="btn btn-primary btn-full" onclick="SettingsPage.saveMessagingTemplates()">Save Messaging Templates</button>
+
+            <details style="margin-top:16px;">
+              <summary style="cursor:pointer;font-weight:600;color:var(--blue);">Per-service templates (${services.length})</summary>
+              <p style="font-size:12px;color:var(--gray-500);margin:8px 0 12px;">
+                Each service has its own heads-up line, completion line, and optional client action (e.g. "Water in within 24 hours").
+                When a visit includes multiple services, the lines are combined.
+              </p>
+              <div id="msgServiceTemplates">
+                ${services.map(s => `
+                  <div class="fu-svc-tmpl" data-svc-id="${s.id}" style="padding:12px;border:1px solid var(--gray-200);border-radius:10px;margin-bottom:10px;">
+                    <h4 style="margin:0 0 8px;color:var(--gray-800);">${this.esc(s.name)}</h4>
+                    <div class="form-group" style="margin-bottom:8px;">
+                      <label style="font-size:12px;">Heads-up line</label>
+                      <textarea rows="2" data-field="heads_up_text" placeholder="e.g. Weed Control — pre-emergent to stop crabgrass and annual weeds">${this.esc(s.heads_up_text || '')}</textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                      <label style="font-size:12px;">Completion line</label>
+                      <textarea rows="2" data-field="completion_text" placeholder="e.g. Weed Control applied — pre-emergent barrier is now in place">${this.esc(s.completion_text || '')}</textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:8px;">
+                      <label style="font-size:12px;">Client action (optional)</label>
+                      <input type="text" data-field="client_action" placeholder="e.g. Water within 24 hours to activate" value="${this.esc(s.client_action || '')}">
+                    </div>
+                    <button class="btn btn-primary btn-sm" onclick="SettingsPage.saveServiceTemplate(${s.id})">Save</button>
+                  </div>
+                `).join('')}
+              </div>
+            </details>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
           <div class="card-header">
             <h3>CRM Import</h3>
           </div>
@@ -161,6 +250,7 @@ const SettingsPage = {
 
       // Load backups section asynchronously after render
       this.loadBackupsSection();
+      this.loadTwilioStatus();
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
@@ -410,6 +500,64 @@ const SettingsPage = {
       App.toast('Labor rate updated', 'success');
     } catch (err) {
       App.toast(err.message, 'error');
+    }
+  },
+
+  // ─── Messaging templates ───────────────────────────────
+  async saveMessagingTemplates() {
+    const fields = {
+      msg_business_name:     document.getElementById('msgBusinessName').value.trim(),
+      msg_greeting:          document.getElementById('msgGreeting').value.trim(),
+      msg_heads_up_intro:    document.getElementById('msgHeadsUpIntro').value.trim(),
+      msg_heads_up_closing:  document.getElementById('msgHeadsUpClosing').value.trim(),
+      msg_completion_intro:  document.getElementById('msgCompletionIntro').value.trim(),
+      msg_review_link:       document.getElementById('msgReviewLink').value.trim(),
+      msg_review_line:       document.getElementById('msgReviewLine').value.trim(),
+      msg_signature:         document.getElementById('msgSignature').value.trim(),
+      msg_opt_out:           document.getElementById('msgOptOut').value.trim()
+    };
+    try {
+      await Promise.all(
+        Object.entries(fields).map(([k, v]) => Api.put('/api/settings/' + k, { value: v }))
+      );
+      App.toast('Messaging templates saved', 'success');
+    } catch (err) {
+      App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  async saveServiceTemplate(serviceId) {
+    const row = document.querySelector(`.fu-svc-tmpl[data-svc-id="${serviceId}"]`);
+    if (!row) return;
+    const body = {
+      heads_up_text:   row.querySelector('[data-field="heads_up_text"]').value.trim() || null,
+      completion_text: row.querySelector('[data-field="completion_text"]').value.trim() || null,
+      client_action:   row.querySelector('[data-field="client_action"]').value.trim() || null
+    };
+    try {
+      await Api.put('/api/services/' + serviceId, body);
+      App.toast('Service template saved', 'success');
+    } catch (err) {
+      App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  async loadTwilioStatus() {
+    const box = document.getElementById('msgTwilioStatus');
+    if (!box) return;
+    try {
+      const s = await Api.get('/api/messaging/status');
+      if (s.twilio_configured) {
+        box.style.background = '#dcf5c8';
+        box.style.color = '#2d6a1e';
+        box.innerHTML = '✓ Twilio is live — messages will be sent for real.';
+      } else {
+        box.style.background = '#fee4b8';
+        box.style.color = '#92400e';
+        box.innerHTML = '⚠ Twilio not configured — running in dry-run mode. Add TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER to Railway env vars once A2P is approved.';
+      }
+    } catch (e) {
+      box.innerHTML = '';
     }
   },
 

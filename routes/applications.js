@@ -248,6 +248,21 @@ router.post('/', requireAuth, (req, res) => {
 
   logAudit(db, 'application', result.lastInsertRowid, req.session.userId, 'create', b);
 
+  // ─── Messaging: queue a completion SMS draft (non-fatal) ──────────
+  // The draft goes into the messaging page where user can review/edit/send.
+  // Does NOT auto-send — the user controls dispatch.
+  try {
+    const app = db.prepare('SELECT * FROM applications WHERE id = ?').get(result.lastInsertRowid);
+    if (app && app.property_id) {
+      const { createCompletionDraft } = require('./messaging');
+      const r = createCompletionDraft(db, app);
+      if (r && r.created) console.log(`[messaging] Completion draft ${r.draft_id} queued for app ${app.id}`);
+      else if (r && r.skipped) console.log(`[messaging] Completion draft skipped: ${r.skipped}`);
+    }
+  } catch (err) {
+    console.error('[messaging] Could not queue completion draft:', err.message);
+  }
+
   // ─── Pay-Per-Service Invoice Trigger ─────────────────────
   // If property has an accepted estimate with per_service payment plan,
   // auto-create an invoice for this treatment

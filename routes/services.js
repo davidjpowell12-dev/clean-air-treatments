@@ -54,7 +54,10 @@ router.put('/:id', requireAuth, (req, res) => {
   const existing = db.prepare('SELECT * FROM services WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Service not found' });
 
-  const { name, description, is_recurring, rounds, display_order, is_active } = req.body;
+  const {
+    name, description, is_recurring, rounds, display_order, is_active,
+    heads_up_text, completion_text, client_action
+  } = req.body;
 
   db.prepare(`
     UPDATE services SET
@@ -63,7 +66,10 @@ router.put('/:id', requireAuth, (req, res) => {
       is_recurring = COALESCE(?, is_recurring),
       rounds = COALESCE(?, rounds),
       display_order = COALESCE(?, display_order),
-      is_active = COALESCE(?, is_active)
+      is_active = COALESCE(?, is_active),
+      heads_up_text = ?,
+      completion_text = ?,
+      client_action = ?
     WHERE id = ?
   `).run(
     name || null,
@@ -72,6 +78,9 @@ router.put('/:id', requireAuth, (req, res) => {
     rounds || null,
     display_order !== undefined ? display_order : null,
     is_active !== undefined ? (is_active ? 1 : 0) : null,
+    heads_up_text !== undefined ? heads_up_text : existing.heads_up_text,
+    completion_text !== undefined ? completion_text : existing.completion_text,
+    client_action !== undefined ? client_action : existing.client_action,
     req.params.id
   );
 
