@@ -395,6 +395,7 @@ function runMigrations(db) {
   ensureColumn(db, 'estimates', 'stripe_customer_id', 'TEXT');
   ensureColumn(db, 'purchases', 'sales_order_path', 'TEXT');
   ensureColumn(db, 'purchases', 'sales_order_original_name', 'TEXT');
+  ensureColumn(db, 'follow_ups', 'linked_estimate_id', 'INTEGER REFERENCES estimates(id) ON DELETE SET NULL');
 
   // Fix any Bundle Discount line items that were created with is_included=0
   const fixedDiscounts = db.prepare(`

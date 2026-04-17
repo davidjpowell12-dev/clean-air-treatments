@@ -256,6 +256,14 @@ router.post('/public/:token/accept', async (req, res) => {
       console.error('[accept] audit log failed (non-fatal):', auditErr.message);
     }
 
+    // Step 6: Auto-complete any linked follow-ups (non-fatal)
+    try {
+      const { autoCompleteLinkedFollowUps } = require('./follow-ups');
+      autoCompleteLinkedFollowUps(db, est.id, null);
+    } catch (followupErr) {
+      console.error('[accept] follow-up auto-complete failed (non-fatal):', followupErr.message);
+    }
+
     console.log('[accept] SUCCESS for estimate', est.id);
     res.json({
       success: true,
@@ -899,6 +907,16 @@ router.put('/:id/status', requireAuth, (req, res) => {
   logAudit(db, 'estimate', req.params.id, req.session.userId, 'status_change', {
     from: est.status, to: status
   });
+
+  // Auto-complete any linked follow-ups when the status transitions to accepted
+  if (status === 'accepted' && est.status !== 'accepted') {
+    try {
+      const { autoCompleteLinkedFollowUps } = require('./follow-ups');
+      autoCompleteLinkedFollowUps(db, Number(req.params.id), req.session.userId);
+    } catch (followupErr) {
+      console.error('[status-change] follow-up auto-complete failed (non-fatal):', followupErr.message);
+    }
+  }
 
   const updated = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   res.json(updated);

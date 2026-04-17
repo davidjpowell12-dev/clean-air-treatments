@@ -1,9 +1,42 @@
 const express = require('express');
+const crypto = require('crypto');
 const { getDb } = require('../db/database');
 const { logAudit } = require('../db/audit');
 const { requireAuth } = require('../middleware/auth');
 
 const router = express.Router();
+
+// Exported helper: mark any follow-ups linked to this estimate as done.
+// Called when an estimate transitions to 'accepted' (customer-facing and admin).
+function autoCompleteLinkedFollowUps(db, estimateId, userId) {
+  try {
+    const linked = db.prepare(
+      "SELECT id FROM follow_ups WHERE linked_estimate_id = ? AND status = 'open'"
+    ).all(estimateId);
+    if (!linked.length) return 0;
+
+    const update = db.prepare(`
+      UPDATE follow_ups SET
+        status = 'done',
+        completed_at = CURRENT_TIMESTAMP,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    for (const f of linked) {
+      update.run(f.id);
+      try {
+        logAudit(db, 'follow_up', f.id, userId || null, 'auto_complete', {
+          reason: 'linked_estimate_accepted', estimate_id: estimateId
+        });
+      } catch (e) { /* audit failures non-fatal */ }
+    }
+    console.log(`[follow-ups] Auto-completed ${linked.length} follow-up(s) for accepted estimate ${estimateId}`);
+    return linked.length;
+  } catch (err) {
+    console.error('[follow-ups] autoCompleteLinkedFollowUps failed:', err.message);
+    return 0;
+  }
+}
 
 // List follow-ups with optional filters
 // Query params: status (open/done/all), bucket (today/this_week/someday),
@@ -15,10 +48,12 @@ router.get('/', requireAuth, (req, res) => {
   let sql = `
     SELECT f.*,
            p.customer_name, p.address, p.city,
-           u.full_name as created_by_name
+           u.full_name as created_by_name,
+           e.status as linked_estimate_status
     FROM follow_ups f
     LEFT JOIN properties p ON p.id = f.property_id
     LEFT JOIN users u ON u.id = f.created_by
+    LEFT JOIN estimates e ON e.id = f.linked_estimate_id
   `;
   const conditions = [];
   const params = [];
@@ -254,6 +289,63 @@ router.post('/:id/pin', requireAuth, (req, res) => {
   res.json({ success: true, pinned: newPin });
 });
 
+// Convert a follow-up to a draft estimate.
+// Requires the follow-up to be linked to a property. Creates a minimal
+// draft estimate pre-filled with the customer's info, links the two,
+// and returns the new estimate id so the UI can navigate to it.
+router.post('/:id/convert-to-estimate', requireAuth, (req, res) => {
+  const db = getDb();
+  const fu = db.prepare('SELECT * FROM follow_ups WHERE id = ?').get(req.params.id);
+  if (!fu) return res.status(404).json({ error: 'Follow-up not found' });
+  if (!fu.property_id) {
+    return res.status(400).json({ error: 'Follow-up must be linked to a customer before converting to estimate' });
+  }
+  if (fu.linked_estimate_id) {
+    // Already converted — just return the existing estimate id
+    return res.json({ estimate_id: fu.linked_estimate_id, already_linked: true });
+  }
+
+  const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(fu.property_id);
+  if (!prop) return res.status(400).json({ error: 'Property not found' });
+
+  // Create minimal draft estimate (no items yet — user will add in editor)
+  const token = crypto.randomBytes(32).toString('hex');
+  const insert = db.prepare(`
+    INSERT INTO estimates (
+      property_id, customer_name, address, city, state, zip,
+      email, phone, property_sqft, total_price, monthly_price,
+      payment_months, token, status, created_by
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 8, ?, 'draft', ?)
+  `);
+  const result = insert.run(
+    prop.id,
+    prop.customer_name,
+    prop.address || '',
+    prop.city || '',
+    prop.state || 'MI',
+    prop.zip || '',
+    prop.email || '',
+    prop.phone || '',
+    prop.sqft || null,
+    token,
+    req.session.userId
+  );
+  const estimateId = result.lastInsertRowid;
+
+  // Link follow-up to the new estimate
+  db.prepare('UPDATE follow_ups SET linked_estimate_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(estimateId, fu.id);
+
+  logAudit(db, 'follow_up', fu.id, req.session.userId, 'convert_to_estimate', {
+    estimate_id: estimateId, customer_name: prop.customer_name
+  });
+  logAudit(db, 'estimate', estimateId, req.session.userId, 'created_from_followup', {
+    follow_up_id: fu.id, follow_up_title: fu.title
+  });
+
+  res.json({ estimate_id: estimateId, already_linked: false });
+});
+
 // Delete
 router.delete('/:id', requireAuth, (req, res) => {
   const db = getDb();
@@ -270,3 +362,4 @@ router.delete('/:id', requireAuth, (req, res) => {
 });
 
 module.exports = router;
+module.exports.autoCompleteLinkedFollowUps = autoCompleteLinkedFollowUps;

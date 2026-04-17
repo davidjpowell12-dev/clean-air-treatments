@@ -122,6 +122,14 @@ const FollowUpsPage = {
       : '';
     const pinIcon = it.pinned ? '📌 ' : '';
 
+    // Linked estimate badge — shows "→ Est #47 (draft)" or similar.
+    // onclick navigates directly to the estimate
+    const linkedBadge = it.linked_estimate_id
+      ? `<span class="badge" style="background:#e0e7ff;color:#3730a3;font-size:10px;cursor:pointer;"
+             onclick="event.stopPropagation();App.navigate('estimates','view',${it.linked_estimate_id});"
+             title="Go to estimate">→ Est #${it.linked_estimate_id}${it.linked_estimate_status ? ' · ' + it.linked_estimate_status : ''}</span>`
+      : '';
+
     return `
       <div class="data-row fu-row ${isDone ? 'fu-row-done' : ''}" data-id="${it.id}">
         <div class="data-row-main" onclick="FollowUpsPage.openEdit(${it.id})">
@@ -130,6 +138,7 @@ const FollowUpsPage = {
           ${it.notes ? `<p style="font-size:13px;color:var(--gray-700);margin-top:4px;">${this.esc(this.truncate(it.notes, 120))}</p>` : ''}
           <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;">
             ${isDone ? '' : waitingBadge}
+            ${linkedBadge}
             <span style="font-size:11px;color:${ageColor};">${ageLabel}</span>
           </div>
         </div>
@@ -219,6 +228,34 @@ const FollowUpsPage = {
             <input type="checkbox" id="fuPinned" ${fu.pinned ? 'checked' : ''} style="width:20px;height:20px;">
             <label for="fuPinned" style="margin:0;cursor:pointer;">📌 Pin to top (VIPs, urgent)</label>
           </div>
+
+          ${isEdit ? `
+            <div class="form-group" style="padding-top:8px;border-top:1px solid var(--gray-200);">
+              <label style="margin-bottom:8px;">Actions</label>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${fu.linked_estimate_id ? `
+                  <button class="btn btn-outline btn-sm" onclick="App.navigate('estimates','view',${fu.linked_estimate_id});FollowUpsPage.closeModal();">
+                    → Go to Estimate #${fu.linked_estimate_id}
+                  </button>
+                ` : (fu.property_id ? `
+                  <button class="btn btn-secondary btn-sm" onclick="FollowUpsPage.convertToEstimate(${fu.id})">
+                    → Convert to Estimate
+                  </button>
+                ` : `
+                  <span style="font-size:12px;color:var(--gray-500);">Link a customer above to enable "Convert to Estimate"</span>
+                `)}
+                <button class="btn btn-outline btn-sm" onclick="FollowUpsPage.showSnoozeMenu(${fu.id})">
+                  ⏰ Snooze
+                </button>
+              </div>
+              ${fu.snoozed_until ? `
+                <p style="font-size:12px;color:var(--gray-500);margin-top:6px;">
+                  Snoozed until ${new Date(fu.snoozed_until).toLocaleString()}.
+                  <a href="#" onclick="event.preventDefault();FollowUpsPage.unsnooze(${fu.id});" style="color:var(--blue);">Unsnooze</a>
+                </p>
+              ` : ''}
+            </div>
+          ` : ''}
         </div>
         <div class="modal-footer">
           ${isEdit ? `<button class="btn btn-danger btn-sm" onclick="FollowUpsPage.remove(${fu.id})">Delete</button>` : ''}
@@ -349,6 +386,93 @@ const FollowUpsPage = {
     try {
       await Api.post('/api/follow-ups/' + id + '/reopen', {});
       App.toast('Reopened', 'success');
+      if (App.currentPage === 'follow-ups') this.renderList();
+    } catch (err) {
+      App.toast('Failed: ' + err.message, 'error');
+    }
+  },
+
+  async convertToEstimate(id) {
+    if (!confirm('Create a draft estimate for this customer? You\'ll be taken to the estimate editor to add services.')) return;
+    try {
+      const result = await Api.post(`/api/follow-ups/${id}/convert-to-estimate`, {});
+      this.closeModal();
+      App.toast(result.already_linked ? 'Opening existing estimate' : 'Draft estimate created', 'success');
+      App.navigate('estimates', 'view', result.estimate_id);
+    } catch (err) {
+      App.toast('Convert failed: ' + err.message, 'error');
+    }
+  },
+
+  showSnoozeMenu(id) {
+    // Build a quick-pick menu of snooze durations
+    const options = [
+      { label: 'Tomorrow morning', days: 1 },
+      { label: 'In 3 days', days: 3 },
+      { label: 'Next week', days: 7 },
+      { label: 'In 2 weeks', days: 14 },
+      { label: 'In a month', days: 30 }
+    ];
+    // Existing modal content — replace the body with a snooze picker
+    const body = document.querySelector('#fuModal .modal-body');
+    if (!body) return;
+    body.innerHTML = `
+      <h4 style="margin-bottom:12px;">Snooze until…</h4>
+      <p style="font-size:13px;color:var(--gray-600);margin-bottom:16px;">
+        Hides this follow-up until the chosen date. It'll reappear in your list automatically.
+      </p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${options.map(o => `
+          <button class="btn btn-outline" style="text-align:left;justify-content:flex-start;"
+                  onclick="FollowUpsPage.snooze(${id}, ${o.days})">
+            ${o.label}
+          </button>
+        `).join('')}
+        <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+          <input type="date" id="fuSnoozeCustom" style="flex:1;padding:10px;border:1px solid var(--gray-300);border-radius:8px;">
+          <button class="btn btn-primary btn-sm" onclick="FollowUpsPage.snoozeCustom(${id})">Go</button>
+        </div>
+      </div>
+      <div style="margin-top:16px;text-align:center;">
+        <button class="btn btn-outline btn-sm" onclick="FollowUpsPage.openEdit(${id})">← Back</button>
+      </div>
+    `;
+  },
+
+  async snooze(id, days) {
+    try {
+      await Api.post(`/api/follow-ups/${id}/snooze`, { days });
+      this.closeModal();
+      App.toast(`Snoozed for ${days} day${days > 1 ? 's' : ''}`, 'success');
+      if (App.currentPage === 'follow-ups') this.renderList();
+      else if (App.currentPage === 'dashboard' && window.DashboardPage) DashboardPage.render();
+    } catch (err) {
+      App.toast('Snooze failed: ' + err.message, 'error');
+    }
+  },
+
+  async snoozeCustom(id) {
+    const input = document.getElementById('fuSnoozeCustom');
+    if (!input || !input.value) return App.toast('Please pick a date', 'error');
+    // Snooze until 8am on the chosen day (local time)
+    const d = new Date(input.value + 'T08:00:00');
+    try {
+      await Api.post(`/api/follow-ups/${id}/snooze`, { until: d.toISOString() });
+      this.closeModal();
+      App.toast(`Snoozed until ${d.toLocaleDateString()}`, 'success');
+      if (App.currentPage === 'follow-ups') this.renderList();
+      else if (App.currentPage === 'dashboard' && window.DashboardPage) DashboardPage.render();
+    } catch (err) {
+      App.toast('Snooze failed: ' + err.message, 'error');
+    }
+  },
+
+  async unsnooze(id) {
+    try {
+      // Set snoozed_until to now by snoozing with 0 days — effectively clears it
+      await Api.post(`/api/follow-ups/${id}/snooze`, { until: new Date(Date.now() - 1000).toISOString() });
+      App.toast('Unsnoozed', 'success');
+      this.closeModal();
       if (App.currentPage === 'follow-ups') this.renderList();
     } catch (err) {
       App.toast('Failed: ' + err.message, 'error');
