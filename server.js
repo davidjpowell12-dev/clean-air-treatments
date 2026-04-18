@@ -197,6 +197,14 @@ app.get('/payment/cancel', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'payment-cancel.html'));
 });
 
+// Public legal pages (no auth, clean URLs for A2P 10DLC carrier review)
+app.get('/privacy', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'privacy.html'));
+});
+app.get('/sms-terms', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'sms-terms.html'));
+});
+
 // SPA fallback - serve app.html for authenticated routes
 app.get('/app', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app.html'));

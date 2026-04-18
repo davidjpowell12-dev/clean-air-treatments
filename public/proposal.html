@@ -303,6 +303,16 @@
 
             ${canAccept ? `
               <div class="proposal-cta" id="ctaSection">
+                <p style="font-size:11px;color:var(--gray-500);line-height:1.5;margin-bottom:12px;padding:0 4px;text-align:center;">
+                  By accepting this proposal, you consent to receive transactional SMS messages from
+                  Evolved Lawn and Garden Services LLC (dba Clean Air Lawn Care) regarding service
+                  scheduling, completion, and related notifications. Message and data rates may apply.
+                  Message frequency varies. Reply <strong>STOP</strong> to unsubscribe or <strong>HELP</strong>
+                  for help. See our
+                  <a href="/sms-terms" target="_blank" style="color:var(--green-dark);text-decoration:underline;">SMS Terms</a>
+                  and
+                  <a href="/privacy" target="_blank" style="color:var(--green-dark);text-decoration:underline;">Privacy Policy</a>.
+                </p>
                 <button class="accept-btn" id="acceptBtn" onclick="showPaymentPicker()">
                   Accept Proposal
                 </button>
@@ -314,6 +324,11 @@
 
           <div class="proposal-footer">
             <p>Powered by <strong>Clean Air Lawn Care</strong></p>
+            <p style="font-size:11px;margin-top:6px;color:var(--gray-400);">
+              <a href="/privacy" style="color:var(--gray-400);text-decoration:none;">Privacy</a>
+              &middot;
+              <a href="/sms-terms" style="color:var(--gray-400);text-decoration:none;">SMS Terms</a>
+            </p>
           </div>
         </div>
       `;

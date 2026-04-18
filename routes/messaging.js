@@ -305,5 +305,91 @@ router.put('/property/:id/opt-in', requireAuth, (req, res) => {
   res.json({ success: true, sms_opted_in: val });
 });
 
+// ─── Twilio inbound webhook (STOP/HELP/START keyword handling) ──────────
+// Twilio POSTs here when a customer texts our number. Handles the
+// required compliance keywords:
+//   STOP / STOPALL / UNSUBSCRIBE / CANCEL / END / QUIT → opt out
+//   START / UNSTOP / YES                               → opt back in
+//   HELP / INFO                                        → send help response
+// Anything else is logged so the admin can see it in the app.
+//
+// NO AUTH — Twilio signs requests rather than using a session. In production
+// we should verify the signature, but for now we accept all POSTs and just
+// process keywords. Public URL is /api/messaging/twilio-webhook.
+router.post('/twilio-webhook', express.urlencoded({ extended: false }), (req, res) => {
+  const db = getDb();
+  const from = req.body.From || '';      // e.g. "+16165551234"
+  const body = (req.body.Body || '').trim();
+  const bodyUpper = body.toUpperCase();
+
+  // Normalize phone — strip "+1" to match our stored format variants
+  const digits = from.replace(/\D/g, '');
+  const last10 = digits.slice(-10);
+
+  let responseMessage = '';
+  let action = 'received';
+
+  const STOP_KEYWORDS = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'];
+  const START_KEYWORDS = ['START', 'UNSTOP', 'YES'];
+  const HELP_KEYWORDS = ['HELP', 'INFO'];
+
+  if (STOP_KEYWORDS.includes(bodyUpper)) {
+    action = 'opt_out';
+    // Find any property whose phone matches (various format tolerant) and flip
+    const properties = db.prepare(`
+      SELECT id, customer_name, phone FROM properties
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone,'-',''),' ',''),'(',''),')','') LIKE ?
+    `).all('%' + last10);
+    for (const p of properties) {
+      db.prepare('UPDATE properties SET sms_opted_in = 0 WHERE id = ?').run(p.id);
+      logAudit(db, 'property', p.id, null, 'sms_opt_out_via_stop', { phone: from });
+    }
+    // Twilio auto-sends the "You've been unsubscribed" confirmation when STOP is detected
+    // by their system, so we don't need to reply. Empty TwiML is fine.
+    responseMessage = '';
+  } else if (START_KEYWORDS.includes(bodyUpper)) {
+    action = 'opt_in';
+    const properties = db.prepare(`
+      SELECT id FROM properties
+      WHERE REPLACE(REPLACE(REPLACE(REPLACE(phone,'-',''),' ',''),'(',''),')','') LIKE ?
+    `).all('%' + last10);
+    for (const p of properties) {
+      db.prepare('UPDATE properties SET sms_opted_in = 1 WHERE id = ?').run(p.id);
+      logAudit(db, 'property', p.id, null, 'sms_opt_in_via_start', { phone: from });
+    }
+    responseMessage = 'You are resubscribed to Clean Air Lawn Care service notifications. Reply STOP to unsubscribe.';
+  } else if (HELP_KEYWORDS.includes(bodyUpper)) {
+    action = 'help';
+    responseMessage = 'Clean Air Lawn Care (Evolved Lawn and Garden LLC). For help, call (616) 822-5876 or email dave@cleanairlawncare.com. Reply STOP to unsubscribe. Msg&data rates may apply.';
+  } else {
+    // Not a keyword — log as an inbound message for review.
+    // We don't auto-reply to free-form text; admin can follow up via the UI.
+    action = 'inbound_message';
+  }
+
+  try {
+    logAudit(db, 'sms_inbound', 0, null, action, {
+      from, body: body.slice(0, 200), action
+    });
+  } catch (e) { /* non-fatal */ }
+
+  // Respond with TwiML (Twilio expects XML response)
+  res.type('text/xml');
+  if (responseMessage) {
+    res.send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(responseMessage)}</Message></Response>`);
+  } else {
+    res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+  }
+});
+
+function escapeXml(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;');
+}
+
 module.exports = router;
 module.exports.createCompletionDraft = createCompletionDraft;
