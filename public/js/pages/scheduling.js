@@ -304,6 +304,7 @@ const SchedulingPage = {
           <div class="schedule-entry-btns">
             ${e.status !== 'completed' ? `<button class="btn btn-sm btn-primary sched-complete" data-id="${e.id}" data-property-id="${e.property_id}" data-date="${e.scheduled_date}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Complete &amp; Log Application">&#10003;</button>` : ''}
             ${e.status === 'scheduled' ? `<button class="btn btn-sm btn-outline sched-reschedule" data-id="${e.id}" data-name="${e.customer_name}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Reschedule">&#8644;</button>` : ''}
+            <button class="btn btn-sm btn-outline sched-edit-service" data-id="${e.id}" data-current="${(e.service_type || '').replace(/"/g, '&quot;')}" data-name="${(e.customer_name || '').replace(/"/g, '&quot;')}" title="Edit service type">&#9998;</button>
             ${e.status !== 'skipped' ? `<button class="btn btn-sm btn-outline sched-skip" data-id="${e.id}" title="Skip">Skip</button>` : ''}
             ${e.status !== 'scheduled' ? `<button class="btn btn-sm btn-outline sched-reset" data-id="${e.id}" title="Reset">Reset</button>` : ''}
             <button class="btn btn-sm btn-outline sched-remove" data-id="${e.id}" title="Remove">&times;</button>
@@ -366,6 +367,13 @@ const SchedulingPage = {
       }
     });
 
+    // Edit service type buttons
+    document.querySelectorAll('.sched-edit-service').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._showEditServiceModal(btn.dataset.id, btn.dataset.current, btn.dataset.name);
+      });
+    });
+
     // Reschedule buttons
     document.querySelectorAll('.sched-reschedule').forEach(btn => {
       btn.addEventListener('click', () => {
@@ -386,6 +394,81 @@ const SchedulingPage = {
           this.renderDaily();
         };
       });
+    });
+  },
+
+  // Small modal to change a schedule entry's service type.
+  // Used to fix mis-scheduled visits (e.g. was logged as "Mowing" but was really Fert+Weed).
+  async _showEditServiceModal(scheduleId, currentServiceType, customerName) {
+    // Fetch services so we can offer the picker
+    let services = [];
+    try { services = await Api.get('/api/services').catch(() => []); } catch (e) { /* ok */ }
+
+    document.querySelector('.modal-overlay.edit-service-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay edit-service-modal';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Edit Service Type</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--gray-600);margin-bottom:12px;">
+            Change what <strong>${customerName || 'this visit'}</strong> was scheduled for. Useful if you picked the wrong service when scheduling.
+          </p>
+          <div class="form-group">
+            <label>Pick from your services:</label>
+            <div id="editSvcChips" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+              ${services.map(s => `
+                <button type="button" class="svc-chip" data-name="${(s.name || '').replace(/"/g, '&quot;')}">${s.name}</button>
+              `).join('')}
+            </div>
+          </div>
+          <div class="form-group" style="margin-top:12px;">
+            <label>Or type it (comma-separate for multiple services):</label>
+            <input type="text" id="editSvcText" value="${(currentServiceType || '').replace(/"/g, '&quot;')}" placeholder="e.g. Fertilizer, Weed Control">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="editSvcCancel" style="margin-left:auto;">Cancel</button>
+          <button class="btn btn-primary" id="editSvcSave">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+
+    const input = overlay.querySelector('#editSvcText');
+    const close = () => {
+      overlay.classList.remove('open');
+      setTimeout(() => overlay.remove(), 200);
+    };
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('#editSvcCancel').addEventListener('click', close);
+
+    // Chip click → append to the input (so user can build combos like "Fertilizer, Weed Control")
+    overlay.querySelectorAll('.svc-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        const name = chip.dataset.name;
+        const current = input.value.trim();
+        const names = current ? current.split(',').map(s => s.trim()).filter(Boolean) : [];
+        if (!names.includes(name)) names.push(name);
+        input.value = names.join(', ');
+      });
+    });
+
+    overlay.querySelector('#editSvcSave').addEventListener('click', async () => {
+      const newVal = input.value.trim();
+      if (!newVal) return App.toast('Service type cannot be empty', 'error');
+      try {
+        await Api.put('/api/schedules/' + scheduleId, { service_type: newVal });
+        App.toast('Service type updated');
+        close();
+        this.renderDaily();
+      } catch (err) {
+        App.toast('Update failed: ' + err.message, 'error');
+      }
     });
   },
 

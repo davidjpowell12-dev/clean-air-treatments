@@ -2520,6 +2520,25 @@ body {
   letter-spacing: 0.02em;
 }
 
+/* ===== Service chip picker (used in scheduling edit modal) ===== */
+.svc-chip {
+  background: var(--gray-100);
+  color: var(--gray-700);
+  border: 1px solid var(--gray-200);
+  border-radius: 16px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.svc-chip:hover {
+  background: var(--green-light);
+  color: var(--green-dark);
+  border-color: var(--green);
+}
+.svc-chip:active { transform: scale(0.96); }
+
 /* ===== Follow-ups (client request capture) ===== */
 .fu-tabs {
   display: flex;
