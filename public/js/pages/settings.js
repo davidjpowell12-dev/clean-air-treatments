@@ -198,6 +198,12 @@ const SettingsPage = {
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Find and merge duplicate property records.</p>
             <button class="btn btn-secondary btn-full" id="findDupesBtn" onclick="SettingsPage.findDuplicates()">Find Duplicate Properties</button>
             <div id="duplicatesResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Find estimates where a line item's rounds/recurring flag doesn't match the current service definition — usually a sign the service was imported as one-time and later flipped to recurring.</p>
+            <button class="btn btn-secondary btn-full" id="findRoundsMismatchBtn" onclick="SettingsPage.findRoundsMismatch()">Find Rounds Mismatches</button>
+            <div id="roundsMismatchResults" style="margin-top:12px;"></div>
           </div>
         </div>
 
@@ -797,6 +803,81 @@ const SettingsPage = {
       setTimeout(() => { this.exportCSV(type); }, i * 500);
     });
     App.toast('Downloading all exports...', 'success');
+  },
+
+  async findRoundsMismatch() {
+    const btn = document.getElementById('findRoundsMismatchBtn');
+    const container = document.getElementById('roundsMismatchResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const rows = await Api.get('/api/admin/audit/estimate-rounds-mismatch');
+      if (!rows.length) {
+        container.innerHTML = '<p style="font-size:13px;color:var(--green);font-weight:600;">No rounds mismatches found.</p>';
+        return;
+      }
+
+      // Group by estimate for readable display
+      const byEst = {};
+      for (const r of rows) {
+        if (!byEst[r.estimate_id]) byEst[r.estimate_id] = { customer_name: r.customer_name, status: r.estimate_status, items: [] };
+        byEst[r.estimate_id].items.push(r);
+      }
+      const estCount = Object.keys(byEst).length;
+
+      container.innerHTML = `
+        <p style="font-size:13px;color:var(--orange);font-weight:600;margin-bottom:12px;">
+          Found ${rows.length} mismatch${rows.length === 1 ? '' : 'es'} across ${estCount} estimate${estCount === 1 ? '' : 's'}.
+        </p>
+        <button class="btn btn-primary btn-sm" style="margin-bottom:12px;" onclick="SettingsPage.fixAllRoundsMismatch()">Fix All (${rows.length})</button>
+        <div>
+          ${Object.entries(byEst).map(([estId, est]) => `
+            <div style="border:1px solid var(--gray-200);border-radius:8px;padding:12px;margin-bottom:10px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <div style="font-weight:600;font-size:14px;">${this.esc(est.customer_name)}</div>
+                <span class="badge badge-${est.status === 'accepted' ? 'green' : 'gray'}" style="font-size:10px;">${est.status}</span>
+              </div>
+              ${est.items.map(it => `
+                <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 0;border-top:1px solid var(--gray-100);font-size:13px;">
+                  <div>
+                    <div style="font-weight:600;">${this.esc(it.service_name)}</div>
+                    <div style="color:var(--gray-500);font-size:12px;">
+                      Estimate: ${it.item_is_recurring ? (it.item_rounds + ' rounds') : 'one-time'}
+                      &middot; Service definition: ${it.service_is_recurring ? (it.service_rounds + ' rounds') : 'one-time'}
+                    </div>
+                  </div>
+                  <button class="btn btn-outline btn-sm" onclick="SettingsPage.fixRoundsMismatch(${it.item_id})">Fix</button>
+                </div>
+              `).join('')}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (err) {
+      container.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${err.message}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Find Rounds Mismatches'; }
+    }
+  },
+
+  async fixRoundsMismatch(itemId) {
+    try {
+      const r = await Api.post('/api/admin/fix/estimate-item-rounds/' + itemId, {});
+      App.toast(`Fixed ${r.service_name} for ${r.customer_name}`, 'success');
+      this.findRoundsMismatch();
+    } catch (err) {
+      App.toast('Fix failed: ' + err.message, 'error');
+    }
+  },
+
+  async fixAllRoundsMismatch() {
+    if (!confirm('Fix all mismatches? Line items will be updated to match the service definition, and estimate totals will be recalculated. This cannot be undone.')) return;
+    try {
+      const r = await Api.post('/api/admin/fix/estimate-rounds-mismatch-all', {});
+      App.toast(`Fixed ${r.items_fixed} items across ${r.estimates_affected} estimate${r.estimates_affected === 1 ? '' : 's'}`, 'success');
+      this.findRoundsMismatch();
+    } catch (err) {
+      App.toast('Fix failed: ' + err.message, 'error');
+    }
   },
 
   async findDuplicates() {

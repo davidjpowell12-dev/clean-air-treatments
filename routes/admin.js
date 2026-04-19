@@ -631,4 +631,138 @@ router.post('/activate-client', requireAdmin, async (req, res) => {
   }
 });
 
+// ─── Audit: find estimates with line items whose rounds/is_recurring ────
+// don't match the current service definition. Useful for catching cases
+// where a service was imported as one-time and later flipped to recurring,
+// leaving old estimate line items stuck at rounds=1.
+router.get('/audit/estimate-rounds-mismatch', requireAdmin, (req, res) => {
+  const db = getDb();
+  const mismatches = db.prepare(`
+    SELECT
+      ei.id as item_id,
+      ei.estimate_id,
+      ei.service_name,
+      ei.is_recurring as item_is_recurring,
+      ei.rounds as item_rounds,
+      ei.price as item_price,
+      ei.is_included,
+      s.id as service_id,
+      s.is_recurring as service_is_recurring,
+      s.rounds as service_rounds,
+      e.status as estimate_status,
+      e.customer_name,
+      e.accepted_at
+    FROM estimate_items ei
+    JOIN estimates e ON e.id = ei.estimate_id
+    LEFT JOIN services s ON LOWER(s.name) = LOWER(ei.service_name)
+    WHERE s.id IS NOT NULL
+      AND ei.is_included = 1
+      AND (
+        COALESCE(ei.is_recurring, 0) != COALESCE(s.is_recurring, 0)
+        OR (s.is_recurring = 1 AND COALESCE(ei.rounds, 1) != COALESCE(s.rounds, 1))
+      )
+    ORDER BY e.customer_name, ei.service_name
+  `).all();
+  res.json(mismatches);
+});
+
+// Fix a single estimate_item's rounds/is_recurring to match its service.
+// Does NOT alter price — we only fix the round count and recurring flag,
+// then recompute estimate totals.
+router.post('/fix/estimate-item-rounds/:itemId', requireAdmin, (req, res) => {
+  const db = getDb();
+  const item = db.prepare(`
+    SELECT ei.*, e.id as est_id, e.payment_months, e.customer_name
+    FROM estimate_items ei
+    JOIN estimates e ON e.id = ei.estimate_id
+    WHERE ei.id = ?
+  `).get(req.params.itemId);
+  if (!item) return res.status(404).json({ error: 'Line item not found' });
+
+  const svc = db.prepare('SELECT * FROM services WHERE LOWER(name) = LOWER(?)').get(item.service_name);
+  if (!svc) return res.status(404).json({ error: 'No matching service found for "' + item.service_name + '"' });
+
+  const newRecurring = svc.is_recurring ? 1 : 0;
+  const newRounds = svc.is_recurring ? (svc.rounds || 6) : 1;
+
+  db.prepare(`
+    UPDATE estimate_items SET
+      is_recurring = ?, rounds = ?
+    WHERE id = ?
+  `).run(newRecurring, newRounds, item.id);
+
+  // Recompute estimate totals so season total and monthly price reflect the new rounds.
+  const included = db.prepare(
+    'SELECT price, is_recurring, rounds FROM estimate_items WHERE estimate_id = ? AND is_included = 1'
+  ).all(item.est_id);
+  const totalPrice = included.reduce(
+    (sum, i) => sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0
+  );
+  const months = item.payment_months || 8;
+  const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
+  db.prepare('UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(totalPrice, monthlyPrice, item.est_id);
+
+  res.json({
+    success: true,
+    item_id: item.id,
+    service_name: item.service_name,
+    customer_name: item.customer_name,
+    before: { is_recurring: item.is_recurring, rounds: item.rounds },
+    after: { is_recurring: newRecurring, rounds: newRounds },
+    new_total: totalPrice,
+    new_monthly: monthlyPrice
+  });
+});
+
+// Bulk fix all mismatches in one call. Returns a summary.
+router.post('/fix/estimate-rounds-mismatch-all', requireAdmin, (req, res) => {
+  const db = getDb();
+  const mismatches = db.prepare(`
+    SELECT ei.id as item_id
+    FROM estimate_items ei
+    JOIN services s ON LOWER(s.name) = LOWER(ei.service_name)
+    WHERE ei.is_included = 1
+      AND (
+        COALESCE(ei.is_recurring, 0) != COALESCE(s.is_recurring, 0)
+        OR (s.is_recurring = 1 AND COALESCE(ei.rounds, 1) != COALESCE(s.rounds, 1))
+      )
+  `).all();
+
+  const affectedEstimates = new Set();
+  let fixed = 0;
+  for (const m of mismatches) {
+    const item = db.prepare('SELECT * FROM estimate_items WHERE id = ?').get(m.item_id);
+    if (!item) continue;
+    const svc = db.prepare('SELECT * FROM services WHERE LOWER(name) = LOWER(?)').get(item.service_name);
+    if (!svc) continue;
+    const newRecurring = svc.is_recurring ? 1 : 0;
+    const newRounds = svc.is_recurring ? (svc.rounds || 6) : 1;
+    db.prepare('UPDATE estimate_items SET is_recurring = ?, rounds = ? WHERE id = ?')
+      .run(newRecurring, newRounds, item.id);
+    affectedEstimates.add(item.estimate_id);
+    fixed++;
+  }
+
+  // Recompute totals for each affected estimate
+  for (const estId of affectedEstimates) {
+    const est = db.prepare('SELECT payment_months FROM estimates WHERE id = ?').get(estId);
+    const included = db.prepare(
+      'SELECT price, is_recurring, rounds FROM estimate_items WHERE estimate_id = ? AND is_included = 1'
+    ).all(estId);
+    const totalPrice = included.reduce(
+      (sum, i) => sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0
+    );
+    const months = (est && est.payment_months) || 8;
+    const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
+    db.prepare('UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(totalPrice, monthlyPrice, estId);
+  }
+
+  res.json({
+    items_fixed: fixed,
+    estimates_affected: affectedEstimates.size
+  });
+});
+
 module.exports = router;
