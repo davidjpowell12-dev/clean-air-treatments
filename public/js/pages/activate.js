@@ -170,6 +170,13 @@ const ActivatePage = {
     // Add first service row
     this.addServiceRow();
 
+    // ─── DIAGNOSTIC: catch anything that silently changes rounds ──────
+    // Temporarily instrument the rounds inputs so we can see in the
+    // browser console exactly what rewrites their values.
+    setTimeout(() => {
+      this._instrumentRoundsInputs();
+    }, 100);
+
     // Auto-fill stripe search email when customer email changes
     const emailInput = document.querySelector('[name="email"]');
     emailInput.addEventListener('blur', () => {
@@ -181,6 +188,45 @@ const ActivatePage = {
   },
 
   _svcRowCount: 0,
+
+  // Install a MutationObserver + value-property trap on all rounds fields
+  // so we can log who is mutating them. Safe to call multiple times —
+  // just re-installs on the current DOM. TEMPORARY DIAGNOSTIC.
+  _instrumentRoundsInputs() {
+    const all = document.querySelectorAll('.svc-rounds');
+    all.forEach(el => {
+      if (el.dataset.instrumented) return;
+      el.dataset.instrumented = '1';
+      const idx = el.dataset.idx;
+      console.log(`[rounds-debug] Watching rounds field for row ${idx}, initial value=${el.value}`);
+
+      // Monkey-patch the input's value setter so any programmatic write
+      // is logged with a stack trace.
+      const proto = Object.getPrototypeOf(el);
+      const desc = Object.getOwnPropertyDescriptor(proto, 'value') ||
+                   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      if (desc && desc.set && !el._valuePatched) {
+        el._valuePatched = true;
+        Object.defineProperty(el, 'value', {
+          configurable: true,
+          get() { return desc.get.call(this); },
+          set(v) {
+            const prev = desc.get.call(this);
+            if (String(prev) !== String(v)) {
+              console.warn(`[rounds-debug] row ${el.dataset.idx} rounds CHANGED: ${prev} → ${v}`);
+              console.trace('[rounds-debug] stack:');
+            }
+            desc.set.call(this, v);
+          }
+        });
+      }
+
+      // Also watch user-initiated input events for completeness
+      el.addEventListener('input', () => {
+        console.log(`[rounds-debug] row ${el.dataset.idx} user typed: value=${el.value}`);
+      });
+    });
+  },
 
   addServiceRow(preset) {
     this._svcRowCount++;
@@ -230,6 +276,10 @@ const ActivatePage = {
       </div>
     `;
     container.appendChild(row);
+    // Instrument the newly added row's rounds field
+    if (typeof this._instrumentRoundsInputs === 'function') {
+      setTimeout(() => this._instrumentRoundsInputs(), 10);
+    }
   },
 
   onServiceSelect(idx) {
