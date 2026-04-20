@@ -204,6 +204,15 @@ const SettingsPage = {
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Find estimates where a line item's rounds/recurring flag doesn't match the current service definition — usually a sign the service was imported as one-time and later flipped to recurring.</p>
             <button class="btn btn-secondary btn-full" id="findRoundsMismatchBtn" onclick="SettingsPage.findRoundsMismatch()">Find Rounds Mismatches</button>
             <div id="roundsMismatchResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Invoice vs Estimate Audit</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Read-only diagnostic. Finds accepted estimates where the displayed season total (plus card fee) doesn't match the sum of invoices on file. Shows you the scope of any mismatches. <strong>Does not fix anything</strong> — just reports.
+            </p>
+            <button class="btn btn-secondary btn-full" id="findInvoiceMismatchBtn" onclick="SettingsPage.findInvoiceMismatch()">Run Audit</button>
+            <div id="invoiceMismatchResults" style="margin-top:12px;"></div>
           </div>
         </div>
 
@@ -867,6 +876,85 @@ const SettingsPage = {
     } catch (err) {
       App.toast('Fix failed: ' + err.message, 'error');
     }
+  },
+
+  async findInvoiceMismatch() {
+    const btn = document.getElementById('findInvoiceMismatchBtn');
+    const container = document.getElementById('invoiceMismatchResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/audit/estimate-invoice-mismatch');
+      if (!r.mismatches || r.mismatches.length === 0) {
+        container.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">No mismatches found across ${r.estimates_scanned} estimate${r.estimates_scanned === 1 ? '' : 's'}.</p>`;
+        return;
+      }
+
+      // Total $ impact across all mismatches
+      const totalImpact = r.mismatches.reduce((sum, m) => sum + Math.abs(m.diff), 0);
+
+      container.innerHTML = `
+        <p style="font-size:13px;color:var(--orange);font-weight:600;margin-bottom:8px;">
+          Found ${r.mismatches.length} mismatch${r.mismatches.length === 1 ? '' : 'es'} across ${r.estimates_scanned} accepted estimate${r.estimates_scanned === 1 ? '' : 's'}.
+        </p>
+        <p style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">
+          Total discrepancy across all clients: $${totalImpact.toFixed(2)}
+        </p>
+        <div>
+          ${r.mismatches.map(m => {
+            const rowColor = m.paid_count > 0 ? 'var(--red)' : 'var(--orange)';
+            const direction = m.diff_sign === 'invoices_higher'
+              ? 'Invoices total higher than estimate'
+              : 'Estimate total higher than invoices';
+            const actionHint = m.diff_sign === 'estimate_higher'
+              ? `⚠ Client is shown ${this.fmtDollar(m.diff)} MORE on their estimate than they will be billed.`
+              : `⚠ Client will be billed ${this.fmtDollar(-m.diff)} MORE than their estimate says.`;
+            return `
+              <div style="border:1px solid var(--gray-200);border-left:4px solid ${rowColor};border-radius:8px;padding:12px;margin-bottom:10px;">
+                <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px;">
+                  <div style="font-weight:600;font-size:14px;color:var(--navy, var(--blue));">${this.esc(m.customer_name)}</div>
+                  <span class="badge badge-${m.paid_count > 0 ? 'red' : 'orange'}" style="font-size:10px;white-space:nowrap;">${m.paid_count > 0 ? m.paid_count + ' paid' : 'none paid yet'}</span>
+                </div>
+                <div style="font-size:12px;color:var(--gray-700);display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin-bottom:8px;">
+                  <div style="color:var(--gray-500);">Estimate shows:</div>
+                  <div>${this.fmtDollar(m.estimate_total)} season · ${this.fmtDollar(m.monthly_price_shown)}/mo${m.payment_method === 'card' ? ` (+3.5% fee = ${this.fmtDollar(m.estimate_total_with_fee)})` : ''}</div>
+
+                  <div style="color:var(--gray-500);">Invoices total:</div>
+                  <div>${this.fmtDollar(m.invoices_total)} (${m.invoice_count} × installments)</div>
+
+                  <div style="color:var(--gray-500);">Already paid:</div>
+                  <div>${this.fmtDollar(m.invoices_paid)}</div>
+
+                  <div style="color:var(--gray-500);">Unpaid remaining:</div>
+                  <div>${this.fmtDollar(m.invoices_unpaid)}</div>
+
+                  <div style="color:var(--gray-500);">Difference:</div>
+                  <div style="color:${rowColor};font-weight:600;">${this.fmtDollar(Math.abs(m.diff))} (${direction})</div>
+
+                  <div style="color:var(--gray-500);">Plan:</div>
+                  <div>${m.payment_plan} · ${m.payment_method}</div>
+                </div>
+                <div style="font-size:12px;color:${rowColor};padding:6px 8px;background:var(--gray-50);border-radius:4px;">
+                  ${actionHint}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+        <p style="font-size:12px;color:var(--gray-500);margin-top:12px;padding:10px;background:var(--gray-50);border-radius:6px;">
+          <strong>No fixes applied.</strong> Review the list above and decide what to do with each client. Come back when you want to discuss next steps.
+        </p>
+      `;
+    } catch (err) {
+      container.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${err.message}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Run Audit'; }
+    }
+  },
+
+  fmtDollar(n) {
+    const v = Number(n) || 0;
+    const sign = v < 0 ? '-' : '';
+    return sign + '$' + Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   },
 
   async fixAllRoundsMismatch() {

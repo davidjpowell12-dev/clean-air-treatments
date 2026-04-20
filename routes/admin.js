@@ -765,4 +765,86 @@ router.post('/fix/estimate-rounds-mismatch-all', requireAdmin, (req, res) => {
   });
 });
 
+// ─── READ-ONLY DIAGNOSTIC: estimate total vs. sum of invoices ──────────
+// Returns accepted estimates where the displayed estimate total (plus card
+// fee if applicable) doesn't match the sum of generated invoice amounts.
+// NO WRITES. Safe to call. Caller decides what, if anything, to fix.
+router.get('/audit/estimate-invoice-mismatch', requireAdmin, (req, res) => {
+  const db = getDb();
+
+  // Only look at accepted estimates with a monthly or full plan — those are
+  // the ones that generated invoices up-front. Per-service clients have
+  // invoices generated on each visit so a simple sum-compare doesn't apply.
+  const estimates = db.prepare(`
+    SELECT e.id, e.customer_name, e.total_price, e.monthly_price,
+           e.payment_plan, e.payment_method_preference, e.payment_months,
+           e.accepted_at, e.updated_at, e.status
+    FROM estimates e
+    WHERE e.status = 'accepted'
+      AND (e.payment_plan = 'monthly' OR e.payment_plan = 'full')
+    ORDER BY e.customer_name
+  `).all();
+
+  const results = [];
+
+  for (const est of estimates) {
+    // Sum all non-voided invoices for this estimate
+    const invoiceStats = db.prepare(`
+      SELECT
+        COUNT(*) as invoice_count,
+        SUM(amount_cents) as total_invoice_cents,
+        SUM(CASE WHEN status = 'paid' THEN amount_cents ELSE 0 END) as paid_cents,
+        SUM(CASE WHEN status IN ('scheduled','pending') THEN amount_cents ELSE 0 END) as unpaid_cents,
+        SUM(CASE WHEN status = 'paid' THEN 1 ELSE 0 END) as paid_count,
+        MIN(due_date) as first_due,
+        MAX(due_date) as last_due
+      FROM invoices
+      WHERE estimate_id = ?
+    `).get(est.id);
+
+    const invoiceCount = invoiceStats.invoice_count || 0;
+    if (invoiceCount === 0) continue; // No invoices, nothing to compare
+
+    const actualCents = invoiceStats.total_invoice_cents || 0;
+    const totalPriceCents = Math.round((est.total_price || 0) * 100);
+    const method = est.payment_method_preference || 'card';
+    const expectedCents = method === 'card'
+      ? Math.round(totalPriceCents * 1.035)
+      : totalPriceCents;
+
+    const diffCents = actualCents - expectedCents;
+    // Tolerance: 50 cents of rounding drift is normal
+    const isMismatch = Math.abs(diffCents) > 50;
+    if (!isMismatch) continue;
+
+    results.push({
+      estimate_id: est.id,
+      customer_name: est.customer_name,
+      payment_plan: est.payment_plan,
+      payment_method: method,
+      payment_months: est.payment_months,
+      estimate_total: est.total_price,
+      estimate_total_with_fee: expectedCents / 100,
+      monthly_price_shown: est.monthly_price,
+      invoice_count: invoiceCount,
+      invoices_total: actualCents / 100,
+      invoices_paid: (invoiceStats.paid_cents || 0) / 100,
+      invoices_unpaid: (invoiceStats.unpaid_cents || 0) / 100,
+      paid_count: invoiceStats.paid_count || 0,
+      diff: diffCents / 100,
+      diff_sign: diffCents > 0 ? 'invoices_higher' : 'estimate_higher',
+      first_due: invoiceStats.first_due,
+      last_due: invoiceStats.last_due,
+      accepted_at: est.accepted_at,
+      updated_at: est.updated_at
+    });
+  }
+
+  res.json({
+    total_mismatches: results.length,
+    estimates_scanned: estimates.length,
+    mismatches: results
+  });
+});
+
 module.exports = router;
