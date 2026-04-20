@@ -897,4 +897,54 @@ router.get('/audit/estimate/:id', requireAdmin, (req, res) => {
   });
 });
 
+// ─── READ-ONLY: dump everything about a property's active schedule + estimates
+// For diagnosing why the Schedule Job modal doesn't match an existing season.
+router.get('/audit/property/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+  if (!prop) return res.status(404).json({ error: 'Property not found' });
+
+  const year = new Date().getFullYear();
+  const schedules = db.prepare(`
+    SELECT id, scheduled_date, service_type, status, round_number, total_rounds,
+           program_id, estimate_id, notes
+    FROM schedules
+    WHERE property_id = ? AND scheduled_date LIKE ?
+    ORDER BY scheduled_date, id
+  `).all(req.params.id, year + '%');
+
+  const estimates = db.prepare(`
+    SELECT id, status, total_price, monthly_price, payment_plan,
+           payment_method_preference, accepted_at, updated_at
+    FROM estimates
+    WHERE property_id = ?
+    ORDER BY id DESC
+  `).all(req.params.id);
+
+  // For each estimate, include its line items
+  for (const e of estimates) {
+    e.items = db.prepare(`
+      SELECT id, service_name, price, is_recurring, rounds, is_included, sort_order
+      FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id
+    `).all(e.id);
+  }
+
+  // Group schedules by service_type to show the modal's lookup
+  const scheduleGroups = {};
+  for (const s of schedules) {
+    const key = s.service_type || '(no service_type)';
+    if (!scheduleGroups[key]) scheduleGroups[key] = [];
+    scheduleGroups[key].push({ id: s.id, date: s.scheduled_date, status: s.status });
+  }
+
+  res.json({
+    property: {
+      id: prop.id, customer_name: prop.customer_name, address: prop.address
+    },
+    schedule_count: schedules.length,
+    schedule_groups: scheduleGroups,
+    estimates
+  });
+});
+
 module.exports = router;
