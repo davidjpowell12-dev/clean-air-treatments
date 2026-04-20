@@ -7,6 +7,54 @@ const email = require('../utils/email');
 
 const router = express.Router();
 
+// Find-or-create a property record for a given estimate's customer info.
+// Used anywhere an estimate is written so estimates never end up
+// orphaned with property_id = NULL. De-dupes by normalized address first,
+// then creates a new property if nothing matches.
+//
+// Returns the resulting property_id (or null if we truly don't have
+// enough info — i.e. no customer name and no address).
+function findOrCreatePropertyForEstimate(db, info) {
+  const name = (info.customer_name || '').trim();
+  const address = (info.address || '').trim();
+  if (!name && !address) return null;
+
+  // Normalize whitespace in name for dedupe (fixes "John  Smith" vs "John Smith")
+  const normalizedName = name.replace(/\s+/g, ' ');
+
+  // 1. Match on address (case-insensitive, trimmed)
+  if (address) {
+    const byAddr = db.prepare(
+      'SELECT id FROM properties WHERE LOWER(TRIM(address)) = LOWER(TRIM(?)) LIMIT 1'
+    ).get(address);
+    if (byAddr) return byAddr.id;
+  }
+
+  // 2. Match on normalized name (collapse whitespace)
+  if (normalizedName) {
+    const byName = db.prepare(
+      "SELECT id FROM properties WHERE LOWER(TRIM(REPLACE(REPLACE(customer_name, '  ', ' '), '  ', ' '))) = LOWER(TRIM(?)) LIMIT 1"
+    ).get(normalizedName.toLowerCase());
+    if (byName) return byName.id;
+  }
+
+  // 3. Nothing matched — create a new property row
+  const result = db.prepare(`
+    INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    normalizedName || 'Unknown',
+    address || '',
+    (info.city || '').trim(),
+    (info.state || 'MI').trim(),
+    (info.zip || '').trim(),
+    (info.email || '').trim(),
+    (info.phone || '').trim(),
+    info.property_sqft || null
+  );
+  return result.lastInsertRowid;
+}
+
 // Helper: get pricing for a sqft value from a service
 function getPriceForSqft(db, serviceId, sqft) {
   // Find exact or next-higher tier
@@ -546,6 +594,13 @@ router.post('/', requireAuth, (req, res) => {
 
     const token = crypto.randomBytes(32).toString('hex');
 
+    // Always make sure this estimate has a linked property — find-or-create.
+    // Fixes the long-running bug where estimates created via "Estimates → + New"
+    // (without arriving from a property page) had property_id = NULL.
+    const linkedPropertyId = property_id || findOrCreatePropertyForEstimate(db, {
+      customer_name, address, city, state, zip, email, phone, property_sqft
+    });
+
     const result = db.prepare(`
       INSERT INTO estimates (
         property_id, customer_name, address, city, state, zip,
@@ -553,7 +608,7 @@ router.post('/', requireAuth, (req, res) => {
         payment_months, token, valid_until, notes, customer_message, created_by
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      property_id || null, customer_name, address, city, state || 'MI', zip,
+      linkedPropertyId, customer_name, address, city, state || 'MI', zip,
       email, phone, property_sqft, totalPrice, monthlyPrice,
       months, token, valid_until || null, notes || null, customer_message || null,
       req.session.userId
@@ -667,6 +722,26 @@ router.put('/:id', requireAuth, (req, res) => {
   });
 
   update();
+
+  // Ensure this estimate has a linked property — fixes the long-standing
+  // orphan bug where estimates edited after creation still had property_id NULL.
+  const postUpdate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!postUpdate.property_id && postUpdate.customer_name) {
+    const newPropertyId = findOrCreatePropertyForEstimate(db, {
+      customer_name: postUpdate.customer_name,
+      address: postUpdate.address,
+      city: postUpdate.city,
+      state: postUpdate.state,
+      zip: postUpdate.zip,
+      email: postUpdate.email,
+      phone: postUpdate.phone,
+      property_sqft: postUpdate.property_sqft
+    });
+    if (newPropertyId) {
+      db.prepare('UPDATE estimates SET property_id = ? WHERE id = ?').run(newPropertyId, req.params.id);
+      console.log(`[estimates] Linked estimate ${req.params.id} to property ${newPropertyId} (was orphaned)`);
+    }
+  }
 
   const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   est.items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id').all(req.params.id);
@@ -915,6 +990,21 @@ router.put('/:id/status', requireAuth, (req, res) => {
       autoCompleteLinkedFollowUps(db, Number(req.params.id), req.session.userId);
     } catch (followupErr) {
       console.error('[status-change] follow-up auto-complete failed (non-fatal):', followupErr.message);
+    }
+
+    // Also make sure an orphan estimate gets linked to a property when
+    // accepted — without this the property-detail, scheduling, and
+    // application flows all fail for manually-accepted estimates.
+    if (!est.property_id) {
+      const newPropertyId = findOrCreatePropertyForEstimate(db, {
+        customer_name: est.customer_name,
+        address: est.address, city: est.city, state: est.state, zip: est.zip,
+        email: est.email, phone: est.phone, property_sqft: est.property_sqft
+      });
+      if (newPropertyId) {
+        db.prepare('UPDATE estimates SET property_id = ? WHERE id = ?').run(newPropertyId, req.params.id);
+        console.log(`[status-change] Linked estimate ${req.params.id} to property ${newPropertyId}`);
+      }
     }
   }
 

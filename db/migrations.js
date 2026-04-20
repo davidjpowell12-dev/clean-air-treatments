@@ -459,6 +459,51 @@ function runMigrations(db) {
       console.log(`[schema-repair] Recalculated estimate ${est.id}: total=$${total}, monthly=$${monthly}`);
     }
   }
+
+  // Backfill: link every estimate with property_id=NULL to a property.
+  // De-dupes by address first, then by normalized name, otherwise creates
+  // a property from the estimate's stored customer info.
+  const orphanEstimates = db.prepare(`
+    SELECT id, customer_name, address, city, state, zip, email, phone, property_sqft
+    FROM estimates WHERE property_id IS NULL AND customer_name IS NOT NULL
+  `).all();
+  if (orphanEstimates.length > 0) {
+    console.log(`[schema-repair] Found ${orphanEstimates.length} estimate(s) with no linked property — backfilling...`);
+    for (const e of orphanEstimates) {
+      const name = (e.customer_name || '').trim();
+      const addr = (e.address || '').trim();
+      const normalizedName = name.replace(/\s+/g, ' ');
+
+      let pid = null;
+      if (addr) {
+        const byAddr = db.prepare(
+          'SELECT id FROM properties WHERE LOWER(TRIM(address)) = LOWER(TRIM(?)) LIMIT 1'
+        ).get(addr);
+        if (byAddr) pid = byAddr.id;
+      }
+      if (!pid && normalizedName) {
+        const byName = db.prepare(
+          "SELECT id FROM properties WHERE LOWER(TRIM(REPLACE(REPLACE(customer_name, '  ', ' '), '  ', ' '))) = LOWER(?) LIMIT 1"
+        ).get(normalizedName.toLowerCase());
+        if (byName) pid = byName.id;
+      }
+      if (!pid) {
+        const result = db.prepare(`
+          INSERT INTO properties (customer_name, address, city, state, zip, email, phone, sqft)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          normalizedName || 'Unknown',
+          addr || '', (e.city || '').trim(), (e.state || 'MI').trim(),
+          (e.zip || '').trim(), (e.email || '').trim(), (e.phone || '').trim(),
+          e.property_sqft || null
+        );
+        pid = result.lastInsertRowid;
+        console.log(`[schema-repair] Created property ${pid} for estimate ${e.id} (${normalizedName})`);
+      }
+      db.prepare('UPDATE estimates SET property_id = ? WHERE id = ?').run(pid, e.id);
+    }
+    console.log(`[schema-repair] Backfilled ${orphanEstimates.length} orphan estimate(s)`);
+  }
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.
