@@ -847,4 +847,54 @@ router.get('/audit/estimate-invoice-mismatch', requireAdmin, (req, res) => {
   });
 });
 
+// ─── READ-ONLY: deep look at a single estimate's line items + invoices ─
+router.get('/audit/estimate/:id', requireAdmin, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const items = db.prepare(`
+    SELECT ei.*, s.is_recurring as service_is_recurring, s.rounds as service_rounds
+    FROM estimate_items ei
+    LEFT JOIN services s ON LOWER(s.name) = LOWER(ei.service_name)
+    WHERE ei.estimate_id = ?
+    ORDER BY ei.sort_order, ei.id
+  `).all(req.params.id);
+
+  const invoices = db.prepare(`
+    SELECT id, invoice_number, amount_cents, status, installment_number,
+           total_installments, due_date, paid_at, payment_method
+    FROM invoices WHERE estimate_id = ?
+    ORDER BY COALESCE(installment_number, 0), due_date, id
+  `).all(req.params.id);
+
+  // Rebuild what the estimate's total_price *should* be from its included items
+  const included = items.filter(i => i.is_included);
+  const lineSubtotal = included.reduce((sum, i) =>
+    sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0);
+
+  res.json({
+    estimate: {
+      id: est.id,
+      customer_name: est.customer_name,
+      status: est.status,
+      payment_plan: est.payment_plan,
+      payment_method_preference: est.payment_method_preference,
+      payment_months: est.payment_months,
+      total_price: est.total_price,
+      monthly_price: est.monthly_price,
+      accepted_at: est.accepted_at,
+      updated_at: est.updated_at
+    },
+    items,
+    computed_line_subtotal: Number(lineSubtotal.toFixed(2)),
+    invoices,
+    invoice_totals: {
+      count: invoices.length,
+      sum_cents: invoices.reduce((s, i) => s + (i.amount_cents || 0), 0),
+      sum_dollars: invoices.reduce((s, i) => s + (i.amount_cents || 0), 0) / 100
+    }
+  });
+});
+
 module.exports = router;
