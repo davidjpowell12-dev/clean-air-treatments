@@ -576,20 +576,24 @@ router.post('/', requireAuth, (req, res) => {
   const {
     property_id, customer_name, address, city, state, zip,
     email, phone, property_sqft, payment_months,
-    valid_until, notes, customer_message, items
+    valid_until, notes, customer_message, items,
+    // Optional admin billing fields — used when migrating existing clients.
+    payment_plan, payment_method_preference, stripe_customer_id, bundle_discount
   } = req.body;
 
   if (!customer_name) return res.status(400).json({ error: 'Customer name required' });
   if (!items || !items.length) return res.status(400).json({ error: 'At least one item required' });
 
   const months = payment_months || 8;
+  const discount = Math.max(0, parseFloat(bundle_discount) || 0);
 
   const create = db.transaction(() => {
-    // Calculate totals from included items
+    // Calculate totals from included items, minus bundle discount
     const includedItems = items.filter(i => i.is_included);
-    const totalPrice = includedItems.reduce((sum, i) => {
+    const subtotal = includedItems.reduce((sum, i) => {
       return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
     }, 0);
+    const totalPrice = Math.max(0, subtotal - discount);
     const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
 
     const token = crypto.randomBytes(32).toString('hex');
@@ -605,12 +609,15 @@ router.post('/', requireAuth, (req, res) => {
       INSERT INTO estimates (
         property_id, customer_name, address, city, state, zip,
         email, phone, property_sqft, total_price, monthly_price,
-        payment_months, token, valid_until, notes, customer_message, created_by
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        payment_months, token, valid_until, notes, customer_message,
+        payment_plan, payment_method_preference, stripe_customer_id,
+        created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       linkedPropertyId, customer_name, address, city, state || 'MI', zip,
       email, phone, property_sqft, totalPrice, monthlyPrice,
       months, token, valid_until || null, notes || null, customer_message || null,
+      payment_plan || null, payment_method_preference || null, stripe_customer_id || null,
       req.session.userId
     );
 
@@ -630,12 +637,22 @@ router.post('/', requireAuth, (req, res) => {
       );
     }
 
+    // Add a bundle discount line item so it shows on the estimate + proposal
+    if (discount > 0) {
+      db.prepare(`
+        INSERT INTO estimate_items (
+          estimate_id, service_name, description, price,
+          is_recurring, rounds, is_included, sort_order
+        ) VALUES (?, 'Bundle Discount', 'Multi-service discount', ?, 0, 1, 1, ?)
+      `).run(estId, -discount, items.length);
+    }
+
     return estId;
   });
 
   const estId = create();
   const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(estId);
-  est.items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ?').all(estId);
+  est.items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id').all(estId);
 
   logAudit(db, 'estimate', estId, req.session.userId, 'create', {
     customer_name, total: est.total_price, items: items.length
@@ -653,10 +670,13 @@ router.put('/:id', requireAuth, (req, res) => {
   const {
     customer_name, address, city, state, zip, email, phone,
     property_sqft, payment_months, valid_until, notes,
-    customer_message, status, items
+    customer_message, status, items,
+    // Admin billing fields — optional
+    payment_plan, payment_method_preference, stripe_customer_id, bundle_discount
   } = req.body;
 
   const months = payment_months || existing.payment_months;
+  const discount = bundle_discount !== undefined ? Math.max(0, parseFloat(bundle_discount) || 0) : null;
 
   const update = db.transaction(() => {
     // If items provided, recalculate totals and replace items
@@ -684,9 +704,22 @@ router.put('/:id', requireAuth, (req, res) => {
       }
 
       const included = items.filter(i => i.is_included);
-      totalPrice = included.reduce((sum, i) => {
+      const subtotal = included.reduce((sum, i) => {
         return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
       }, 0);
+
+      // Apply bundle discount if provided on this update
+      if (discount !== null && discount > 0) {
+        db.prepare(`
+          INSERT INTO estimate_items (
+            estimate_id, service_name, description, price,
+            is_recurring, rounds, is_included, sort_order
+          ) VALUES (?, 'Bundle Discount', 'Multi-service discount', ?, 0, 1, 1, ?)
+        `).run(req.params.id, -discount, items.length);
+        totalPrice = Math.max(0, subtotal - discount);
+      } else {
+        totalPrice = subtotal;
+      }
       monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
     }
 
@@ -707,6 +740,9 @@ router.put('/:id', requireAuth, (req, res) => {
         notes = ?,
         customer_message = ?,
         status = COALESCE(?, status),
+        payment_plan = COALESCE(?, payment_plan),
+        payment_method_preference = COALESCE(?, payment_method_preference),
+        stripe_customer_id = COALESCE(?, stripe_customer_id),
         updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(
@@ -717,7 +753,11 @@ router.put('/:id', requireAuth, (req, res) => {
       valid_until !== undefined ? valid_until : existing.valid_until,
       notes !== undefined ? notes : existing.notes,
       customer_message !== undefined ? customer_message : existing.customer_message,
-      status || null, req.params.id
+      status || null,
+      payment_plan || null,
+      payment_method_preference || null,
+      stripe_customer_id !== undefined && stripe_customer_id !== '' ? stripe_customer_id : null,
+      req.params.id
     );
   });
 
@@ -1005,6 +1045,24 @@ router.put('/:id/status', requireAuth, (req, res) => {
         db.prepare('UPDATE estimates SET property_id = ? WHERE id = ?').run(newPropertyId, req.params.id);
         console.log(`[status-change] Linked estimate ${req.params.id} to property ${newPropertyId}`);
       }
+    }
+
+    // Generate invoices if they don't already exist. This makes admin-side
+    // "mark accepted" equivalent to customer-side proposal acceptance —
+    // so the migration workflow (create estimate → mark accepted →
+    // generate season) produces the same billing as a live acceptance.
+    try {
+      const existingInvoices = db.prepare('SELECT COUNT(*) as n FROM invoices WHERE estimate_id = ?')
+        .get(req.params.id);
+      if (!existingInvoices || existingInvoices.n === 0) {
+        const plan = est.payment_plan || 'monthly';
+        const method = est.payment_method_preference || 'card';
+        const stripeUtils = require('../utils/stripe');
+        const invoices = stripeUtils.createInvoicesForEstimate(db, Number(req.params.id), plan, method);
+        console.log(`[status-change] Generated ${invoices.length} invoice(s) for estimate ${req.params.id}`);
+      }
+    } catch (invErr) {
+      console.error('[status-change] invoice generation failed (non-fatal):', invErr.message);
     }
   }
 

@@ -3,8 +3,39 @@ const ActivatePage = {
 
   async render() {
     const main = document.getElementById('mainContent');
-    main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
-
+    // Activate Client is deprecated — a long list of silent-data-corruption
+    // bugs came out of it. Use the Estimates → + New flow with the new
+    // Admin Billing Details section and Mark as Accepted button instead.
+    main.innerHTML = `
+      <div class="page-header"><h2>Activate Client</h2></div>
+      <div class="card" style="border-left:4px solid var(--orange);">
+        <div class="card-body" style="padding:24px;">
+          <h3 style="color:var(--orange);margin-bottom:8px;">⚠ This feature has been deprecated</h3>
+          <p style="font-size:14px;color:var(--gray-700);line-height:1.6;margin-bottom:16px;">
+            Use the regular <strong>Estimates → + New</strong> flow for migrating existing clients.
+            It now includes an "Admin Billing Details" section (payment plan, method, Stripe ID,
+            bundle discount) and a <strong>Mark as Accepted</strong> button that generates
+            invoices — same end result, without the bugs this form caused.
+          </p>
+          <div style="background:var(--gray-50);border-radius:8px;padding:16px;font-size:13px;color:var(--gray-700);margin-bottom:16px;">
+            <strong>Migration workflow:</strong>
+            <ol style="margin:8px 0 0 20px;padding:0;">
+              <li>Properties → find or add the client</li>
+              <li>From property detail → <strong>+ New Estimate</strong></li>
+              <li>Fill in services from the pricing matrix</li>
+              <li>Expand <strong>Admin Billing Details</strong> → set payment plan, method, Stripe ID, discount</li>
+              <li>Save</li>
+              <li>On the estimate detail page → <strong>Mark as Accepted (migration)</strong></li>
+              <li>→ <strong>Schedule This Job</strong> to generate the season</li>
+            </ol>
+          </div>
+          <button class="btn btn-primary btn-full" onclick="App.navigate('estimates')">Go to Estimates →</button>
+        </div>
+      </div>
+    `;
+    return;
+    // eslint-disable-next-line no-unreachable
+    /* legacy code below preserved for reference but no longer reachable */
     try {
       this._services = await Api.get('/api/services');
     } catch (e) {

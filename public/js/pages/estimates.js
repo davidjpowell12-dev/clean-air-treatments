@@ -311,6 +311,46 @@ const EstimatesPage = {
           </div>
         </div>
 
+        <!-- Admin billing details — used when migrating existing clients -->
+        <div class="card est-section" style="margin-bottom:12px;">
+          <div class="card-header est-section-toggle" onclick="this.parentElement.classList.toggle('collapsed')">
+            <h3>Admin Billing Details</h3>
+            <span class="est-toggle-icon">▾</span>
+          </div>
+          <div class="card-body est-section-body">
+            <p style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">
+              Optional — fill in when migrating an existing client so that Mark as Accepted generates invoices correctly. New prospects accept via the proposal link and pick these themselves.
+            </p>
+            <div class="form-group">
+              <label>Payment Plan</label>
+              <select id="estPaymentPlan" class="est-input">
+                <option value="">— leave blank (customer picks at acceptance) —</option>
+                <option value="monthly" ${estimate?.payment_plan === 'monthly' ? 'selected' : ''}>Monthly</option>
+                <option value="per_service" ${estimate?.payment_plan === 'per_service' ? 'selected' : ''}>Per Service</option>
+                <option value="full" ${estimate?.payment_plan === 'full' ? 'selected' : ''}>Pay in Full</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Payment Method</label>
+              <select id="estPaymentMethod" class="est-input">
+                <option value="">— leave blank —</option>
+                <option value="card" ${estimate?.payment_method_preference === 'card' ? 'selected' : ''}>Card (+3.5% fee)</option>
+                <option value="check" ${estimate?.payment_method_preference === 'check' ? 'selected' : ''}>Check / ACH</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label>Stripe Customer ID (if paying by card)</label>
+              <input type="text" id="estStripeCustomerId" class="est-input" value="${this._esc(estimate?.stripe_customer_id || '')}" placeholder="cus_xxxxxxxxxxxx">
+              <p class="form-hint">Paste from Stripe dashboard. Required for auto-charging monthly card clients.</p>
+            </div>
+            <div class="form-group">
+              <label>Bundle Discount ($)</label>
+              <input type="number" step="0.01" min="0" id="estBundleDiscount" class="est-input" value="${estimate?.bundle_discount || ''}" placeholder="0.00">
+              <p class="form-hint">Applied to the season total. Shown as a line item on the estimate.</p>
+            </div>
+          </div>
+        </div>
+
         <!-- Actions -->
         <div class="est-actions">
           <button class="btn btn-primary btn-full" onclick="EstimatesPage.saveEstimate()" id="saveEstBtn">
@@ -482,6 +522,11 @@ const EstimatesPage = {
         valid_until: document.getElementById('estValidUntil').value || null,
         customer_message: document.getElementById('estMessage').value || null,
         notes: document.getElementById('estNotes').value || null,
+        // Admin billing details (optional — only populated when migrating clients)
+        payment_plan: document.getElementById('estPaymentPlan')?.value || null,
+        payment_method_preference: document.getElementById('estPaymentMethod')?.value || null,
+        stripe_customer_id: document.getElementById('estStripeCustomerId')?.value.trim() || null,
+        bundle_discount: parseFloat(document.getElementById('estBundleDiscount')?.value) || 0,
         items: this._currentItems.map((item, i) => ({
           ...item,
           sort_order: i,
@@ -645,6 +690,10 @@ const EstimatesPage = {
               <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.markSentManually(${est.id})">
                 ✉️ Mark as Sent (I emailed it)
               </button>
+              <button class="btn btn-secondary btn-full" style="margin-top:8px;background:var(--green);color:white;" onclick="EstimatesPage.markAccepted(${est.id})">
+                ✓ Mark as Accepted (migration)
+              </button>
+              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">For clients migrating in — bypasses the send/accept flow and generates invoices immediately.</p>
             ` : ''}
           ` : ''}
           ${est.status !== 'accepted' && est.status !== 'declined' && est.status !== 'expired' ? `
@@ -815,9 +864,11 @@ const EstimatesPage = {
   },
 
   async markAccepted(id) {
+    const ok = confirm('Mark as accepted? This will generate invoices based on the Admin Billing Details (payment plan, method, etc.). Make sure those are set correctly first.');
+    if (!ok) return;
     try {
       await Api.put(`/api/estimates/${id}/status`, { status: 'accepted' });
-      App.toast('Estimate accepted! 🎉', 'success');
+      App.toast('Estimate accepted — invoices generated 🎉', 'success');
       this.renderDetail(id);
     } catch (err) { App.toast(err.message, 'error'); }
   },
