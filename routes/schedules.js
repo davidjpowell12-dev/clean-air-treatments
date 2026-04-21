@@ -157,25 +157,12 @@ router.get('/unscheduled-programs', requireAuth, (req, res) => {
   const { year, search, service_type } = req.query;
   if (!year) return res.status(400).json({ error: 'Year parameter required' });
 
-  // First, backfill any schedule entries missing service_type by looking at linked estimate_items
-  const nullEntries = db.prepare(`
-    SELECT s.id, s.estimate_id FROM schedules s
-    WHERE s.service_type IS NULL AND s.estimate_id IS NOT NULL AND s.program_id IS NOT NULL
-  `).all();
-  if (nullEntries.length > 0) {
-    const updateStmt = db.prepare('UPDATE schedules SET service_type = ? WHERE id = ?');
-    for (const entry of nullEntries) {
-      // Get the primary recurring service name from the estimate
-      const item = db.prepare(`
-        SELECT service_name FROM estimate_items
-        WHERE estimate_id = ? AND is_included = 1 AND is_recurring = 1
-        ORDER BY sort_order, id LIMIT 1
-      `).get(entry.estimate_id);
-      if (item) {
-        updateStmt.run(item.service_name, entry.id);
-      }
-    }
-  }
+  // NOTE: previously this endpoint mass-backfilled NULL service_type
+  // schedule entries by picking the "first recurring item" from their
+  // linked estimate. For multi-service clients (Fert & Weed + Mowing)
+  // this was wrong — it silently rewrote all NULL entries to whichever
+  // service sorted first (often Mowing), clobbering any manual pencil
+  // edits. Removed. NULL service_types stay NULL until manually labeled.
 
   let subquery;
   const params = [];

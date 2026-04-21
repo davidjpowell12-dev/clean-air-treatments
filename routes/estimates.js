@@ -470,40 +470,18 @@ router.get('/:id', requireAuth, (req, res) => {
     'SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id'
   ).all(est.id);
 
-  // Include existing schedule info so the Schedule Job modal knows what's already scheduled
+  // Include existing schedule info so the Schedule Job modal knows what's already scheduled.
+  //
+  // NOTE: we used to "backfill" NULL service_type entries here by picking the
+  // first recurring item from the estimate and rewriting every schedule
+  // row for that program_id to that service name. That was a bug — for
+  // a multi-service client (Fert & Weed + Mowing), the first item sorted
+  // by sort_order is often Mowing, so every NULL-service schedule row
+  // got mass-rewritten to "Mowing" on each modal open. That broke any
+  // pencil-edits the user had made. Removed entirely — NULL service
+  // types stay NULL and the user relabels manually via the pencil button.
   if (est.property_id) {
     const currentYear = new Date().getFullYear() + '%';
-
-    // Backfill any NULL service_type entries for this property before querying
-    const nullEntries = db.prepare(`
-      SELECT s.id, s.estimate_id, s.program_id FROM schedules s
-      WHERE s.property_id = ? AND s.service_type IS NULL AND s.program_id IS NOT NULL
-      AND s.scheduled_date LIKE ?
-    `).all(est.property_id, currentYear);
-
-    if (nullEntries.length > 0) {
-      const updateStmt = db.prepare('UPDATE schedules SET service_type = ? WHERE program_id = ?');
-      const seen = new Set();
-      for (const entry of nullEntries) {
-        if (seen.has(entry.program_id)) continue;
-        seen.add(entry.program_id);
-        // Try to infer service type from linked estimate items, or from the estimate's items
-        let serviceName = null;
-        if (entry.estimate_id) {
-          const item = db.prepare(`SELECT service_name FROM estimate_items WHERE estimate_id = ? AND is_included = 1 AND is_recurring = 1 ORDER BY sort_order, id LIMIT 1`).get(entry.estimate_id);
-          if (item) serviceName = item.service_name;
-        }
-        if (!serviceName) {
-          // Check if there's an accepted estimate for this property
-          const item = db.prepare(`SELECT ei.service_name FROM estimate_items ei JOIN estimates e ON e.id = ei.estimate_id WHERE e.property_id = ? AND e.status = 'accepted' AND ei.is_included = 1 AND ei.is_recurring = 1 ORDER BY ei.sort_order, ei.id LIMIT 1`).get(est.property_id);
-          if (item) serviceName = item.service_name;
-        }
-        if (serviceName) {
-          updateStmt.run(serviceName, entry.program_id);
-        }
-      }
-    }
-
     const existingSchedules = db.prepare(`
       SELECT service_type, COUNT(*) as count,
              MIN(scheduled_date) as first_date, MAX(scheduled_date) as last_date,
