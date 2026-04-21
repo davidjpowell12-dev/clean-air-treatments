@@ -207,6 +207,15 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Relabel Unlabeled Schedule Entries</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              One-time cleanup. Finds every schedule entry with no service_type label and relabels them all to <strong>Fert &amp; Weed Control</strong> — since that's the only service performed so far. Use after you've stopped seeing the auto-relabel bug so historical data matches reality.
+            </p>
+            <button class="btn btn-secondary btn-full" id="relabelNullServicesBtn" onclick="SettingsPage.relabelNullServiceTypes()">Relabel all NULL schedules \u2192 Fert & Weed Control</button>
+            <div id="relabelNullResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Invoice vs Estimate Audit</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Read-only diagnostic. Finds accepted estimates where the displayed season total (plus card fee) doesn't match the sum of invoices on file. Shows you the scope of any mismatches. <strong>Does not fix anything</strong> — just reports.
@@ -875,6 +884,23 @@ const SettingsPage = {
       this.findRoundsMismatch();
     } catch (err) {
       App.toast('Fix failed: ' + err.message, 'error');
+    }
+  },
+
+  async relabelNullServiceTypes() {
+    const ok = confirm('This will relabel EVERY schedule entry that has no service_type as "Fert & Weed Control". Run this only if Fert & Weed Control is the only service you\'ve performed so far. Continue?');
+    if (!ok) return;
+    const btn = document.getElementById('relabelNullServicesBtn');
+    const box = document.getElementById('relabelNullResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Working...'; }
+    try {
+      const r = await Api.post('/api/admin/fix/relabel-null-service-types', { service_type: 'Fert & Weed Control' });
+      box.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">Relabeled ${r.entries_updated} of ${r.entries_before} unlabeled schedule entries to "${r.target_service_type}".</p>`;
+      App.toast(`Relabeled ${r.entries_updated} schedule entries`, 'success');
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${err.message}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Relabel all NULL schedules \u2192 Fert & Weed Control'; }
     }
   },
 

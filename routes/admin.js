@@ -947,4 +947,33 @@ router.get('/audit/property/:id', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Bulk relabel NULL-service schedule entries to a specified service. ─
+// One-time cleanup for the historical state where every existing client's
+// only scheduled work was a single round of Fert & Weed Control (one
+// service performed before the app existed). Default target is
+// "Fert & Weed Control" but can be overridden.
+router.post('/fix/relabel-null-service-types', requireAdmin, (req, res) => {
+  const db = getDb();
+  const target = (req.body && req.body.service_type) || 'Fert & Weed Control';
+
+  // Count first so we can report what would be changed
+  const before = db.prepare(`
+    SELECT COUNT(*) as n FROM schedules
+    WHERE service_type IS NULL OR TRIM(service_type) = ''
+  `).get();
+
+  const result = db.prepare(`
+    UPDATE schedules SET
+      service_type = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE service_type IS NULL OR TRIM(service_type) = ''
+  `).run(target);
+
+  res.json({
+    target_service_type: target,
+    entries_before: before.n,
+    entries_updated: result.changes
+  });
+});
+
 module.exports = router;
