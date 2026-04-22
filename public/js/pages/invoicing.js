@@ -5,6 +5,10 @@ const InvoicingPage = {
   },
 
   // ─── List View ───────────────────────────────────────────
+  //
+  // Customer-grouped layout: one card per customer showing aggregate state,
+  // collapsible to show their individual invoices. Answers "Did X pay?"
+  // and "Who owes me money?" at a glance without scrolling.
   async renderList() {
     const main = document.getElementById('mainContent');
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
@@ -16,15 +20,21 @@ const InvoicingPage = {
       ]);
 
       const today = new Date().toISOString().split('T')[0];
+      this._allInvoices = invoices;
+      this._today = today;
+      this._currentView = this._currentView || 'attention';
 
       main.innerHTML = `
         <div class="page-header">
           <h2>Invoicing</h2>
-          <button class="btn btn-primary btn-sm" id="autoChargeBtn" onclick="InvoicingPage.runAutoCharge()">⚡ Run Auto-Charge</button>
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-outline btn-sm" onclick="InvoicingPage.exportCSV()" title="Export CSV for reporting">⬇ CSV</button>
+            <button class="btn btn-primary btn-sm" id="autoChargeBtn" onclick="InvoicingPage.runAutoCharge()">⚡ Auto-Charge</button>
+          </div>
         </div>
 
-        <!-- Dashboard Stats -->
-        <div class="stat-grid" style="margin-bottom:16px;">
+        <!-- Stats -->
+        <div class="stat-grid" style="margin-bottom:12px;">
           <div class="stat-card" style="border-top:3px solid var(--green);">
             <div class="stat-value" style="color:var(--green);">$${(stats.total_collected_month_cents / 100).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</div>
             <div class="stat-label">Collected This Month</div>
@@ -43,54 +53,282 @@ const InvoicingPage = {
           </div>
         </div>
 
-        ${invoices.length > 0 ? `
-          <div class="est-status-tabs">
-            <button class="est-tab active" data-filter="all">All <span class="est-tab-count">${invoices.length}</span></button>
-            <button class="est-tab" data-filter="pending">Pending <span class="est-tab-count">${invoices.filter(i => i.status === 'pending').length}</span></button>
-            <button class="est-tab" data-filter="scheduled">Scheduled <span class="est-tab-count">${invoices.filter(i => i.status === 'scheduled').length}</span></button>
-            <button class="est-tab" data-filter="paid">Paid <span class="est-tab-count">${invoices.filter(i => i.status === 'paid').length}</span></button>
-            <button class="est-tab" data-filter="failed">Failed <span class="est-tab-count">${invoices.filter(i => i.status === 'failed').length}</span></button>
-            <button class="est-tab" data-filter="overdue">Overdue <span class="est-tab-count">${invoices.filter(i => i.status === 'pending' && i.due_date < today).length}</span></button>
-          </div>
-        ` : ''}
-
-        <div id="invoicesList">
-          ${invoices.length > 0 ? invoices.map(inv => this._renderInvoiceRow(inv, today)).join('') : `
-            <div class="empty-state" style="padding:48px 16px;text-align:center;">
-              <div style="font-size:48px;margin-bottom:12px;">\uD83D\uDCCB</div>
-              <h3 style="margin-bottom:8px;">No invoices yet</h3>
-              <p style="color:var(--gray-500);">Invoices are created when customers accept proposals.</p>
-            </div>
-          `}
+        <!-- Search bar -->
+        <div style="margin-bottom:10px;">
+          <input type="text" id="invSearch" placeholder="Search customer, invoice #, or amount..."
+                 style="width:100%;padding:10px 12px;border:1px solid var(--gray-200);border-radius:8px;font-size:14px;box-sizing:border-box;">
         </div>
+
+        <!-- View tabs -->
+        <div class="est-status-tabs">
+          <button class="est-tab ${this._currentView === 'attention' ? 'active' : ''}" data-view="attention">
+            Needs Attention <span class="est-tab-count" id="countAttention">0</span>
+          </button>
+          <button class="est-tab ${this._currentView === 'upcoming' ? 'active' : ''}" data-view="upcoming">
+            Upcoming <span class="est-tab-count" id="countUpcoming">0</span>
+          </button>
+          <button class="est-tab ${this._currentView === 'history' ? 'active' : ''}" data-view="history">
+            History <span class="est-tab-count" id="countHistory">0</span>
+          </button>
+          <button class="est-tab ${this._currentView === 'all' ? 'active' : ''}" data-view="all">
+            All <span class="est-tab-count" id="countAll">${invoices.length}</span>
+          </button>
+        </div>
+
+        <div id="invoicesList">${this._renderCustomerGroups(invoices, '')}</div>
       `;
 
-      // Filter tabs
+      // Wire tabs
       main.querySelectorAll('.est-tab').forEach(tab => {
         tab.addEventListener('click', () => {
+          this._currentView = tab.dataset.view;
           main.querySelectorAll('.est-tab').forEach(t => t.classList.remove('active'));
           tab.classList.add('active');
-          const filter = tab.dataset.filter;
-          main.querySelectorAll('.inv-row').forEach(row => {
-            if (filter === 'all') { row.style.display = ''; return; }
-            if (filter === 'overdue') {
-              row.style.display = (row.dataset.status === 'pending' && row.dataset.due < today) ? '' : 'none';
-            } else {
-              row.style.display = row.dataset.status === filter ? '' : 'none';
-            }
-          });
+          this._refreshInvoiceList();
         });
       });
 
-      // Auto-filter if URL hash contains a filter hint (e.g., from dashboard failed alert)
+      // Wire search
+      let searchTimer;
+      const searchEl = document.getElementById('invSearch');
+      searchEl.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(() => this._refreshInvoiceList(), 120);
+      });
+
+      this._refreshInvoiceList();
+
+      // Auto-filter hint from dashboard link
       const hashFilter = window.location.hash.split('?filter=')[1];
-      if (hashFilter) {
-        const tab = main.querySelector(`.est-tab[data-filter="${hashFilter}"]`);
-        if (tab) tab.click();
+      if (hashFilter === 'failed') {
+        this._currentView = 'attention';
+        this._refreshInvoiceList();
       }
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
+  },
+
+  // Apply the current view + search, then re-render the customer groups
+  // and update the tab counts.
+  _refreshInvoiceList() {
+    const query = (document.getElementById('invSearch')?.value || '').toLowerCase().trim();
+    const invoices = this._allInvoices || [];
+    const today = this._today;
+    const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+    const in30Str = in30.toISOString().slice(0, 10);
+
+    // Count each view (so the tab numbers are always accurate)
+    let cAttention = 0, cUpcoming = 0, cHistory = 0;
+    for (const i of invoices) {
+      const overdue = (i.status === 'pending' || i.status === 'failed') &&
+                      i.due_date && i.due_date < today;
+      if (i.status === 'failed' || overdue) cAttention++;
+      else if (i.status === 'scheduled' || (i.status === 'pending' && i.due_date && i.due_date <= in30Str)) cUpcoming++;
+      else if (i.status === 'paid' || i.status === 'void') cHistory++;
+    }
+    const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
+    setCount('countAttention', cAttention);
+    setCount('countUpcoming', cUpcoming);
+    setCount('countHistory', cHistory);
+    setCount('countAll', invoices.length);
+
+    // Filter to current view
+    const view = this._currentView;
+    let filtered = invoices.filter(i => {
+      if (view === 'all') return true;
+      const overdue = (i.status === 'pending' || i.status === 'failed') &&
+                      i.due_date && i.due_date < today;
+      if (view === 'attention') return i.status === 'failed' || overdue;
+      if (view === 'upcoming') {
+        return i.status === 'scheduled' ||
+               (i.status === 'pending' && i.due_date && i.due_date <= in30Str);
+      }
+      if (view === 'history') return i.status === 'paid' || i.status === 'void';
+      return true;
+    });
+
+    // Apply search
+    if (query) {
+      filtered = filtered.filter(i => {
+        const amount = ((i.amount_cents || 0) / 100).toFixed(2);
+        return (i.customer_name || '').toLowerCase().includes(query) ||
+               (i.invoice_number || '').toLowerCase().includes(query) ||
+               amount.includes(query) ||
+               (i.payment_method || '').toLowerCase().includes(query);
+      });
+    }
+
+    const list = document.getElementById('invoicesList');
+    if (list) list.innerHTML = this._renderCustomerGroups(filtered, query);
+  },
+
+  // Group invoices by customer_name and render one collapsible card per group.
+  // Sort: customers with outstanding balance first (highest $ first), then
+  // all-paid customers alphabetical.
+  _renderCustomerGroups(invoices, query) {
+    const today = this._today;
+    if (invoices.length === 0) {
+      return `
+        <div class="empty-state" style="padding:40px 16px;text-align:center;">
+          <div style="font-size:40px;margin-bottom:10px;">\uD83D\uDCCB</div>
+          <h3 style="margin-bottom:6px;">${query ? 'No matches' : 'Nothing here'}</h3>
+          <p style="color:var(--gray-500);font-size:14px;">${query ? 'Try a different search.' : 'No invoices match this view.'}</p>
+        </div>
+      `;
+    }
+
+    // Group by customer name (fall back to invoice.estimate_id if no name)
+    const groups = new Map();
+    for (const inv of invoices) {
+      const key = inv.customer_name || ('Estimate #' + inv.estimate_id);
+      if (!groups.has(key)) {
+        groups.set(key, { name: key, address: inv.address, invoices: [] });
+      }
+      groups.get(key).invoices.push(inv);
+    }
+
+    // Compute per-customer aggregates
+    const rows = [];
+    for (const g of groups.values()) {
+      let outstandingCents = 0, paidCents = 0, overdueCount = 0;
+      let unpaidCount = 0, totalCount = g.invoices.length;
+      for (const i of g.invoices) {
+        const amt = i.amount_cents || 0;
+        if (i.status === 'paid') paidCents += amt;
+        else if (i.status !== 'void') {
+          outstandingCents += amt;
+          unpaidCount++;
+          if ((i.status === 'pending' || i.status === 'failed') &&
+              i.due_date && i.due_date < today) overdueCount++;
+        }
+      }
+      rows.push({ ...g, outstandingCents, paidCents, overdueCount, unpaidCount, totalCount });
+    }
+
+    // Sort: outstanding > 0 first (biggest first), then alphabetical
+    rows.sort((a, b) => {
+      if (a.outstandingCents !== b.outstandingCents) {
+        return b.outstandingCents - a.outstandingCents;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    // Auto-expand if there's only one group (i.e., search narrowed to one customer)
+    const autoExpand = rows.length === 1 || query;
+
+    return rows.map(r => this._renderCustomerGroup(r, autoExpand)).join('');
+  },
+
+  _renderCustomerGroup(group, expanded) {
+    const today = this._today;
+    const outstanding = (group.outstandingCents / 100).toFixed(2);
+    const paid = (group.paidCents / 100).toFixed(2);
+    const statusLine = group.outstandingCents > 0
+      ? `<span style="color:${group.overdueCount > 0 ? 'var(--red)' : 'var(--orange)'};font-weight:600;">$${outstanding} unpaid</span>` +
+        (group.overdueCount > 0 ? ` &middot; <span style="color:var(--red);">${group.overdueCount} overdue</span>` : '') +
+        (group.paidCents > 0 ? ` &middot; <span style="color:var(--gray-500);">paid $${paid}</span>` : '')
+      : `<span style="color:var(--green-dark,#2d6a1e);font-weight:600;">All paid</span>` +
+        (group.paidCents > 0 ? ` &middot; $${paid} collected` : '');
+
+    const borderColor = group.overdueCount > 0 ? 'var(--red)' :
+                        group.outstandingCents > 0 ? 'var(--orange)' :
+                        'var(--green)';
+
+    const rowsHtml = group.invoices
+      .sort((a, b) => (a.due_date || '').localeCompare(b.due_date || '') || (a.id - b.id))
+      .map(inv => this._renderInvoiceRow(inv, today))
+      .join('');
+
+    const gid = 'grp-' + (group.name || 'x').replace(/[^a-z0-9]/gi, '_');
+
+    return `
+      <div class="inv-customer-group" style="border:1px solid var(--gray-200);border-left:4px solid ${borderColor};border-radius:10px;margin-bottom:10px;background:white;">
+        <div class="inv-group-header" onclick="InvoicingPage._toggleGroup('${gid}')"
+             style="padding:12px 16px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:10px;">
+          <div style="min-width:0;flex:1;">
+            <div style="font-weight:700;font-size:15px;color:var(--navy, var(--blue));">${this._esc(group.name)}</div>
+            <div style="font-size:12px;margin-top:2px;">${statusLine} &middot; <span style="color:var(--gray-500);">${group.totalCount} invoice${group.totalCount === 1 ? '' : 's'}</span></div>
+          </div>
+          <span class="inv-group-caret" id="${gid}-caret" style="font-size:14px;color:var(--gray-400);flex-shrink:0;">${expanded ? '▾' : '▸'}</span>
+        </div>
+        <div class="inv-group-body" id="${gid}-body" style="${expanded ? '' : 'display:none;'}border-top:1px solid var(--gray-100);">
+          ${rowsHtml}
+        </div>
+      </div>
+    `;
+  },
+
+  _toggleGroup(gid) {
+    const body = document.getElementById(gid + '-body');
+    const caret = document.getElementById(gid + '-caret');
+    if (!body) return;
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : '';
+    if (caret) caret.textContent = open ? '▸' : '▾';
+  },
+
+  // Export all currently-visible invoices to CSV — useful for franchise
+  // controller reporting. Respects the active view + search filter.
+  exportCSV() {
+    const query = (document.getElementById('invSearch')?.value || '').toLowerCase().trim();
+    const today = this._today;
+    const in30 = new Date(); in30.setDate(in30.getDate() + 30);
+    const in30Str = in30.toISOString().slice(0, 10);
+    const view = this._currentView || 'all';
+    const invoices = (this._allInvoices || []).filter(i => {
+      if (view === 'attention') {
+        const overdue = (i.status === 'pending' || i.status === 'failed') && i.due_date && i.due_date < today;
+        if (!(i.status === 'failed' || overdue)) return false;
+      } else if (view === 'upcoming') {
+        if (!(i.status === 'scheduled' || (i.status === 'pending' && i.due_date && i.due_date <= in30Str))) return false;
+      } else if (view === 'history') {
+        if (!(i.status === 'paid' || i.status === 'void')) return false;
+      }
+      if (query) {
+        const amount = ((i.amount_cents || 0) / 100).toFixed(2);
+        const hay = (i.customer_name + ' ' + i.invoice_number + ' ' + amount + ' ' + (i.payment_method || '')).toLowerCase();
+        if (!hay.includes(query)) return false;
+      }
+      return true;
+    });
+
+    const headers = [
+      'Invoice Number', 'Customer', 'Address', 'Amount',
+      'Status', 'Payment Plan', 'Installment',
+      'Due Date', 'Paid Date', 'Payment Method', 'Check Number', 'Notes'
+    ];
+    const rows = invoices.map(i => [
+      i.invoice_number || '',
+      i.customer_name || '',
+      (i.address || '') + (i.city ? ', ' + i.city : ''),
+      ((i.amount_cents || 0) / 100).toFixed(2),
+      i.status || '',
+      i.payment_plan || '',
+      i.total_installments ? `${i.installment_number}/${i.total_installments}` : '',
+      i.due_date || '',
+      i.paid_at ? i.paid_at.slice(0, 10) : '',
+      i.payment_method || '',
+      i.check_number || '',
+      (i.notes || '').replace(/\r?\n/g, ' ')
+    ]);
+
+    const csvLine = arr => arr.map(v => {
+      const s = String(v == null ? '' : v);
+      return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+    }).join(',');
+
+    const csv = [csvLine(headers)].concat(rows.map(csvLine)).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `invoices-${view}-${new Date().toISOString().slice(0,10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    App.toast(`Exported ${rows.length} invoice${rows.length === 1 ? '' : 's'}`, 'success');
   },
 
   _renderInvoiceRow(inv, today) {
