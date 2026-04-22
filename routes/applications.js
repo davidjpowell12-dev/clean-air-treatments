@@ -263,10 +263,14 @@ router.post('/', requireAuth, (req, res) => {
     console.error('[messaging] Could not queue completion draft:', err.message);
   }
 
-  // ─── Pay-Per-Service Invoice Trigger ─────────────────────
-  // If property has an accepted estimate with per_service payment plan,
-  // auto-create an invoice for this treatment
-  if (b.property_id) {
+  // ─── Pay-Per-Service Invoice Trigger (fallback for schedule-less visits) ─
+  // ONLY fires when there's no schedule_id — i.e., this was a walk-in or
+  // ad-hoc application logged without being tied to a scheduled job. When
+  // schedule_id IS set, the block at line ~180 already created the right
+  // invoice for this specific service; we must not run again or we'd
+  // double-bill (which is exactly the bug that hit Amanda Boman: $92 for
+  // the fert + $172 for the sum of every recurring service).
+  if (b.property_id && !b.schedule_id) {
     try {
       const estimate = db.prepare(`
         SELECT * FROM estimates
@@ -289,7 +293,7 @@ router.post('/', requireAuth, (req, res) => {
           const desc = `Treatment on ${b.application_date || new Date().toISOString().split('T')[0]}`;
           const invoice = stripeUtils.createPerServiceInvoice(db, estimate.id, amountCents, desc);
 
-          console.log(`[per-service] Invoice ${invoice.invoice_number} created for $${(amountCents/100).toFixed(2)}`);
+          console.log(`[per-service] Fallback invoice ${invoice.invoice_number} created for $${(amountCents/100).toFixed(2)} (no schedule_id)`);
 
           // Send payment request email if email is configured and customer has email
           if (emailUtils.isEnabled() && estimate.email) {
