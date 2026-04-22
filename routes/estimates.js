@@ -7,6 +7,66 @@ const email = require('../utils/email');
 
 const router = express.Router();
 
+// When an estimate is accepted, link any pre-existing schedule entries
+// that were created for this property but have estimate_id = NULL (e.g.
+// a mowing season the admin generated for a property before the estimate
+// was built). Matches by fuzzy service_type ↔ estimate_item.service_name.
+//
+// Why this matters: when a tech completes a visit, the billing triggers
+// require schedule.estimate_id to be set — otherwise no invoice gets
+// created (per-service) or activated (monthly). Linking at accept time
+// makes pre-scheduled visits billable normally.
+//
+// Returns the number of schedule entries newly linked.
+function linkUnlinkedSchedulesToEstimate(db, estimate) {
+  if (!estimate || !estimate.property_id) return 0;
+  // Pull the estimate's included service names — those are the match targets
+  const items = db.prepare(`
+    SELECT service_name FROM estimate_items
+    WHERE estimate_id = ? AND is_included = 1
+  `).all(estimate.id);
+  if (!items.length) return 0;
+  const serviceNames = items.map(i => (i.service_name || '').toLowerCase()).filter(Boolean);
+
+  // Find every schedule entry for this property that has no estimate_id yet
+  const orphans = db.prepare(`
+    SELECT id, service_type FROM schedules
+    WHERE property_id = ? AND estimate_id IS NULL
+  `).all(estimate.property_id);
+  if (!orphans.length) return 0;
+
+  const updateStmt = db.prepare(
+    'UPDATE schedules SET estimate_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  );
+
+  // Fuzzy-match each schedule's service_type against any estimate service.
+  // Considered a match if they share the first word OR one contains the other
+  // (e.g. "Fert & Weed Control" matches "Fert & Weed Control", "Mowing" matches "Mowing").
+  const matches = (scheduleType, name) => {
+    if (!scheduleType || !name) return false;
+    const s = scheduleType.toLowerCase().trim();
+    const n = name.toLowerCase().trim();
+    if (s === n) return true;
+    if (s.includes(n) || n.includes(s)) return true;
+    const sFirst = s.split(/[\s&,]/)[0];
+    const nFirst = n.split(/[\s&,]/)[0];
+    return sFirst && nFirst && sFirst === nFirst;
+  };
+
+  let linked = 0;
+  for (const sched of orphans) {
+    const hasMatch = serviceNames.some(name => matches(sched.service_type, name));
+    if (hasMatch) {
+      updateStmt.run(estimate.id, sched.id);
+      linked++;
+    }
+  }
+  if (linked > 0) {
+    console.log(`[auto-link] Linked ${linked} schedule entries to estimate ${estimate.id} (${estimate.customer_name})`);
+  }
+  return linked;
+}
+
 // Find-or-create a property record for a given estimate's customer info.
 // Used anywhere an estimate is written so estimates never end up
 // orphaned with property_id = NULL. De-dupes by normalized address first,
@@ -310,6 +370,15 @@ router.post('/public/:token/accept', async (req, res) => {
       autoCompleteLinkedFollowUps(db, est.id, null);
     } catch (followupErr) {
       console.error('[accept] follow-up auto-complete failed (non-fatal):', followupErr.message);
+    }
+
+    // Step 7: Link any pre-existing unlinked schedule entries (same rationale
+    // as admin accept). Fires even when customer accepts via the public link.
+    try {
+      const refreshed = db.prepare('SELECT * FROM estimates WHERE id = ?').get(est.id);
+      linkUnlinkedSchedulesToEstimate(db, refreshed);
+    } catch (linkErr) {
+      console.error('[accept] schedule auto-link failed (non-fatal):', linkErr.message);
     }
 
     console.log('[accept] SUCCESS for estimate', est.id);
@@ -1143,6 +1212,15 @@ router.put('/:id/status', requireAuth, (req, res) => {
       }
     } catch (invErr) {
       console.error('[status-change] invoice generation failed (non-fatal):', invErr.message);
+    }
+
+    // Link any pre-existing unlinked schedule entries for this property
+    // to this newly-accepted estimate so tech-visit billing triggers fire.
+    try {
+      const refreshed = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+      linkUnlinkedSchedulesToEstimate(db, refreshed);
+    } catch (linkErr) {
+      console.error('[status-change] schedule auto-link failed (non-fatal):', linkErr.message);
     }
   }
 
