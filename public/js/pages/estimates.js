@@ -374,7 +374,16 @@ const EstimatesPage = {
   _renderServiceToggle(item, index) {
     const isOn = item.is_included;
     const seasonTotal = item.is_recurring ? item.price * item.rounds : item.price;
-    const typeLabel = item.is_recurring ? `${item.rounds} treatments` : 'One-time';
+
+    // Editable round count for recurring services (e.g. Mowing 28 → 13 for bi-weekly).
+    const typeLabel = item.is_recurring
+      ? `<input type="number" class="est-rounds-input" value="${item.rounds || 1}" min="1" max="52"
+              data-index="${index}"
+              onclick="event.stopPropagation()"
+              onchange="EstimatesPage.updateRounds(${index}, this.value)"
+              style="width:48px;padding:2px 6px;border:1px solid var(--gray-200);border-radius:4px;font-size:13px;margin-right:4px;"
+              ${!isOn ? 'tabindex="-1"' : ''}> treatments`
+      : 'One-time';
 
     return `
       <div class="est-service-item ${isOn ? 'included' : 'excluded'}" data-index="${index}" id="svcItem${index}">
@@ -385,7 +394,7 @@ const EstimatesPage = {
         </div>
         <div class="est-service-info" onclick="EstimatesPage.toggleService(${index})">
           <div class="est-service-name">${this._esc(item.service_name)}</div>
-          <div class="est-service-type">${typeLabel}</div>
+          <div class="est-service-type" onclick="event.stopPropagation()">${typeLabel}</div>
         </div>
         <div class="est-service-price">
           <input type="number" class="est-price-input" value="${item.price.toFixed(2)}" step="0.01" min="0"
@@ -393,10 +402,26 @@ const EstimatesPage = {
             onclick="event.stopPropagation()"
             onchange="EstimatesPage.updatePrice(${index}, this.value)"
             ${!isOn ? 'tabindex="-1"' : ''}>
-          ${item.is_recurring ? `<div class="est-service-season">$${seasonTotal.toFixed(0)}/season</div>` : ''}
+          ${item.is_recurring ? `<div class="est-service-season" id="seasonDisplay${index}">$${seasonTotal.toFixed(0)}/season</div>` : ''}
         </div>
       </div>
     `;
+  },
+
+  // Update the rounds on a recurring line item. Used on the create/edit
+  // estimate page to support e.g. bi-weekly mowing (13 rounds) vs the
+  // default 28 weekly rounds.
+  updateRounds(index, value) {
+    const rounds = Math.max(1, parseInt(value) || 1);
+    this._currentItems[index].rounds = rounds;
+    // Update season display inline
+    const item = this._currentItems[index];
+    const seasonEl = document.getElementById(`seasonDisplay${index}`);
+    if (seasonEl) {
+      const seasonTotal = item.is_recurring ? item.price * rounds : item.price;
+      seasonEl.textContent = '$' + seasonTotal.toFixed(0) + '/season';
+    }
+    this._recalcTotals();
   },
 
   toggleService(index) {
