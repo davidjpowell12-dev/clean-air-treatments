@@ -225,6 +225,9 @@ const InvoicingPage = {
               Void Invoice
             </button>
           ` : ''}
+          <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="InvoicingPage.editInvoice(${inv.id})">
+            ✎ Edit Invoice
+          </button>
           <a href="#estimates/view/${inv.estimate_id || ''}" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
             View Estimate
           </a>
@@ -345,6 +348,113 @@ const InvoicingPage = {
       this.renderDetail(id);
     } catch (err) {
       App.toast(err.message, 'error');
+    }
+  },
+
+  // Open an edit modal for any invoice field: amount, due date, status,
+  // payment method, check #, notes. Used for one-off corrections
+  // (e.g. customer paid a different amount than billed, or status needs
+  // to be manually flipped without going through Stripe).
+  async editInvoice(id) {
+    let inv;
+    try {
+      inv = await Api.get(`/api/payments/invoices/${id}`);
+    } catch (err) {
+      return App.toast('Could not load invoice: ' + err.message, 'error');
+    }
+
+    document.querySelector('.modal-overlay.inv-edit-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay inv-edit-modal';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Edit Invoice ${this._esc(inv.invoice_number)}</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label>Amount ($)</label>
+            <input type="number" step="0.01" min="0" id="invEditAmount" value="${(inv.amount_cents / 100).toFixed(2)}">
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="invEditStatus">
+              <option value="scheduled" ${inv.status === 'scheduled' ? 'selected' : ''}>Scheduled</option>
+              <option value="pending" ${inv.status === 'pending' ? 'selected' : ''}>Pending</option>
+              <option value="paid" ${inv.status === 'paid' ? 'selected' : ''}>Paid</option>
+              <option value="failed" ${inv.status === 'failed' ? 'selected' : ''}>Failed</option>
+              <option value="void" ${inv.status === 'void' ? 'selected' : ''}>Void</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Due date</label>
+            <input type="date" id="invEditDueDate" value="${inv.due_date || ''}">
+          </div>
+          <div class="form-group">
+            <label>Payment method</label>
+            <select id="invEditMethod">
+              <option value="">— not set —</option>
+              <option value="card" ${inv.payment_method === 'card' ? 'selected' : ''}>Card</option>
+              <option value="check" ${inv.payment_method === 'check' ? 'selected' : ''}>Check</option>
+              <option value="ach" ${inv.payment_method === 'ach' ? 'selected' : ''}>ACH</option>
+              <option value="cash" ${inv.payment_method === 'cash' ? 'selected' : ''}>Cash</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Check number (if applicable)</label>
+            <input type="text" id="invEditCheckNumber" value="${this._esc(inv.check_number || '')}">
+          </div>
+          <div class="form-group">
+            <label>Paid date (if marking paid)</label>
+            <input type="date" id="invEditPaidAt" value="${inv.paid_at ? inv.paid_at.slice(0,10) : ''}">
+          </div>
+          <div class="form-group">
+            <label>Notes</label>
+            <textarea id="invEditNotes" rows="2">${this._esc(inv.notes || '')}</textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-danger btn-sm" onclick="InvoicingPage._deleteInvoice(${inv.id})">Delete</button>
+          <button class="btn btn-outline" style="margin-left:auto;" onclick="this.closest('.modal-overlay').remove()">Cancel</button>
+          <button class="btn btn-primary" onclick="InvoicingPage._saveInvoiceEdit(${inv.id})">Save</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    overlay.querySelector('.modal-close').addEventListener('click', () => overlay.remove());
+  },
+
+  async _saveInvoiceEdit(id) {
+    const body = {
+      amount_cents: Math.round((parseFloat(document.getElementById('invEditAmount').value) || 0) * 100),
+      status: document.getElementById('invEditStatus').value,
+      due_date: document.getElementById('invEditDueDate').value || null,
+      payment_method: document.getElementById('invEditMethod').value || null,
+      check_number: document.getElementById('invEditCheckNumber').value.trim() || null,
+      paid_at: document.getElementById('invEditPaidAt').value || null,
+      notes: document.getElementById('invEditNotes').value.trim() || null
+    };
+    try {
+      await Api.put('/api/payments/invoices/' + id, body);
+      App.toast('Invoice updated', 'success');
+      document.querySelector('.modal-overlay.inv-edit-modal')?.remove();
+      this.renderDetail(id);
+    } catch (err) {
+      App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  async _deleteInvoice(id) {
+    if (!confirm('Delete this invoice permanently? This cannot be undone. If the customer paid, use Void instead.')) return;
+    try {
+      await Api.delete('/api/payments/invoices/' + id);
+      App.toast('Invoice deleted', 'success');
+      document.querySelector('.modal-overlay.inv-edit-modal')?.remove();
+      App.navigate('invoicing');
+    } catch (err) {
+      App.toast('Delete failed: ' + err.message, 'error');
     }
   },
 

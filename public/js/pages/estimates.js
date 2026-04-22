@@ -598,8 +598,11 @@ const EstimatesPage = {
             ${est.payment_method_preference === 'card' ? `<div style="font-size:12px;color:rgba(255,255,255,0.7);margin-top:6px;">+ 3.5% card fee · $${Math.round(est.monthly_price * 1.035)}/mo billed</div>` : ''}
           </div>
 
-          <div class="est-proposal-services">
-            <h4>Included Services</h4>
+          <div class="est-proposal-services" id="estServicesBlock">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <h4 style="margin:0;">Included Services</h4>
+              <button class="btn btn-outline btn-sm" onclick="EstimatesPage.enterLineItemEditMode(${est.id})">✎ Edit</button>
+            </div>
             ${included.map(i => `
               <div class="est-proposal-line">
                 <div>
@@ -720,6 +723,10 @@ const EstimatesPage = {
               </button>
               <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use if customer needs to save a card on file</p>
             ` : ''}
+            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.regenerateInvoices(${est.id})">
+              ↻ Regenerate Unpaid Invoices
+            </button>
+            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use after editing the estimate's line items, payment plan, or method</p>
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
@@ -861,6 +868,189 @@ const EstimatesPage = {
       App.toast('Estimate marked as sent', 'success');
       this.renderDetail(id);
     } catch (err) { App.toast(err.message, 'error'); }
+  },
+
+  // ─── Inline edit for line items on the estimate detail page ──────
+  // Swaps the read-only services block for an editable form so you can
+  // change service names, prices, rounds, is_recurring, is_included, and
+  // add/remove custom items — without leaving the detail page. Saves via
+  // the normal PUT /api/estimates/:id, which recalculates totals. If the
+  // estimate is already accepted, prompts to regenerate unpaid invoices.
+  async enterLineItemEditMode(id) {
+    try {
+      const est = await Api.get(`/api/estimates/${id}`);
+      this._editingEstimate = est;
+      this._editingItems = (est.items || []).map(i => ({
+        id: i.id,
+        service_name: i.service_name,
+        description: i.description || '',
+        price: i.price,
+        is_recurring: i.is_recurring ? 1 : 0,
+        rounds: i.rounds || 1,
+        is_included: i.is_included ? 1 : 0
+      }));
+      this._renderLineItemEditor();
+    } catch (err) {
+      App.toast('Could not load estimate: ' + err.message, 'error');
+    }
+  },
+
+  _renderLineItemEditor() {
+    const block = document.getElementById('estServicesBlock');
+    if (!block) return;
+    const est = this._editingEstimate;
+
+    const rowsHtml = this._editingItems.map((it, idx) => `
+      <div class="est-edit-row" data-idx="${idx}" style="padding:10px 0;border-bottom:1px solid var(--gray-100);">
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+          <input type="text" class="est-edit-name" placeholder="Service name" value="${this._esc(it.service_name || '')}"
+                 style="flex:1;padding:8px;border:1px solid var(--gray-200);border-radius:6px;font-size:14px;">
+          <button class="btn btn-sm btn-outline" style="color:var(--red);border-color:var(--red);padding:6px 10px;"
+                  onclick="EstimatesPage._editRemoveItem(${idx})">×</button>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600);">
+            <input type="checkbox" class="est-edit-included" ${it.is_included ? 'checked' : ''}>
+            Included
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600);">
+            <input type="checkbox" class="est-edit-recurring" ${it.is_recurring ? 'checked' : ''}
+                   onchange="EstimatesPage._editToggleRecurring(${idx}, this.checked)">
+            Recurring
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600);${it.is_recurring ? '' : 'opacity:0.4;'}">
+            Rounds
+            <input type="number" class="est-edit-rounds" min="1" value="${it.rounds || 1}" ${it.is_recurring ? '' : 'disabled'}
+                   style="width:60px;padding:4px 6px;border:1px solid var(--gray-200);border-radius:4px;font-size:13px;">
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;font-size:12px;color:var(--gray-600);margin-left:auto;">
+            ${it.is_recurring ? 'Per-round $' : 'Price $'}
+            <input type="number" step="0.01" min="0" class="est-edit-price" value="${it.price || 0}"
+                   style="width:90px;padding:4px 6px;border:1px solid var(--gray-200);border-radius:4px;font-size:13px;text-align:right;">
+          </label>
+        </div>
+      </div>
+    `).join('');
+
+    block.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <h4 style="margin:0;">Edit Services</h4>
+        <div style="display:flex;gap:6px;">
+          <button class="btn btn-sm btn-outline" onclick="EstimatesPage._editCancel(${est.id})">Cancel</button>
+          <button class="btn btn-sm btn-primary" onclick="EstimatesPage._editSave(${est.id})">Save</button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:var(--gray-500);margin-bottom:10px;">
+        Uncheck "Included" to keep a line on the estimate but exclude from totals. Per-round price × rounds = line total.
+      </p>
+      <div id="estEditRows">${rowsHtml}</div>
+      <div style="display:flex;gap:6px;margin-top:12px;">
+        <button class="btn btn-outline btn-sm" onclick="EstimatesPage._editAddItem()">+ Add custom line</button>
+      </div>
+    `;
+  },
+
+  _collectEditingItems() {
+    const rows = document.querySelectorAll('.est-edit-row');
+    const items = [];
+    rows.forEach((row, idx) => {
+      const it = this._editingItems[Number(row.dataset.idx)];
+      const name = row.querySelector('.est-edit-name').value.trim();
+      const price = parseFloat(row.querySelector('.est-edit-price').value) || 0;
+      const rounds = parseInt(row.querySelector('.est-edit-rounds').value) || 1;
+      const recurring = row.querySelector('.est-edit-recurring').checked ? 1 : 0;
+      const included = row.querySelector('.est-edit-included').checked ? 1 : 0;
+      items.push({
+        id: it.id || null,
+        service_name: name,
+        description: it.description || null,
+        price,
+        is_recurring: recurring,
+        rounds: recurring ? rounds : 1,
+        is_included: included,
+        sort_order: idx
+      });
+    });
+    return items;
+  },
+
+  _editAddItem() {
+    // Collect current form state first so we don't wipe changes on re-render
+    this._editingItems = this._collectEditingItems();
+    this._editingItems.push({
+      id: null,
+      service_name: '',
+      description: '',
+      price: 0,
+      is_recurring: 0,
+      rounds: 1,
+      is_included: 1
+    });
+    this._renderLineItemEditor();
+  },
+
+  _editRemoveItem(idx) {
+    this._editingItems = this._collectEditingItems();
+    this._editingItems.splice(idx, 1);
+    this._renderLineItemEditor();
+  },
+
+  _editToggleRecurring(idx, checked) {
+    this._editingItems = this._collectEditingItems();
+    this._editingItems[idx].is_recurring = checked ? 1 : 0;
+    if (!checked) this._editingItems[idx].rounds = 1;
+    this._renderLineItemEditor();
+  },
+
+  _editCancel(id) {
+    this._editingEstimate = null;
+    this._editingItems = null;
+    this.renderDetail(id);
+  },
+
+  async _editSave(estimateId) {
+    const items = this._collectEditingItems();
+    if (items.length === 0) return App.toast('Add at least one line item', 'error');
+    const hasName = items.every(i => i.service_name && i.service_name.length > 0);
+    if (!hasName) return App.toast('Every line item needs a service name', 'error');
+
+    try {
+      await Api.put(`/api/estimates/${estimateId}`, { items });
+      App.toast('Services updated', 'success');
+
+      // If already accepted, offer to regenerate unpaid invoices
+      const est = this._editingEstimate;
+      if (est && est.status === 'accepted') {
+        const regenerate = confirm('This estimate is already accepted. Regenerate unpaid invoices to match the new total? (Already-paid invoices stay untouched.)');
+        if (regenerate) {
+          try {
+            const r = await Api.post(`/api/estimates/${estimateId}/regenerate-invoices`, {});
+            App.toast(`Voided ${r.voided_count} · Created ${r.created_count} · Kept ${r.paid_preserved} paid`, 'success');
+          } catch (err) {
+            App.toast('Regenerate failed: ' + err.message, 'error');
+          }
+        }
+      }
+
+      this._editingEstimate = null;
+      this._editingItems = null;
+      this.renderDetail(estimateId);
+    } catch (err) {
+      App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  // Standalone button for accepted estimates: regenerate unpaid invoices to match current total.
+  async regenerateInvoices(estimateId) {
+    const ok = confirm('Regenerate unpaid invoices to match the current estimate total? Voids any scheduled/pending invoices and creates fresh ones. Already-paid invoices are kept.');
+    if (!ok) return;
+    try {
+      const r = await Api.post(`/api/estimates/${estimateId}/regenerate-invoices`, {});
+      App.toast(`Voided ${r.voided_count} · Created ${r.created_count} · Kept ${r.paid_preserved} paid`, 'success');
+      this.renderDetail(estimateId);
+    } catch (err) {
+      App.toast('Regenerate failed: ' + err.message, 'error');
+    }
   },
 
   async markAccepted(id) {

@@ -209,10 +209,9 @@ const SettingsPage = {
 
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Relabel Unlabeled Schedule Entries</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
-              One-time cleanup. Finds every schedule entry with no service_type label and relabels them all to <strong>Fert &amp; Weed Control</strong> — since that's the only service performed so far. Use after you've stopped seeing the auto-relabel bug so historical data matches reality.
+              <strong>Disabled.</strong> This tool applied one service label to every NULL-service entry in the database — no way to opt individual clients out. Now that you have pest-only clients who should never be labeled "Fert &amp; Weed Control," use the per-visit pencil button on the scheduling page instead.
             </p>
-            <button class="btn btn-secondary btn-full" id="relabelNullServicesBtn" onclick="SettingsPage.relabelNullServiceTypes()">Relabel all NULL schedules \u2192 Fert & Weed Control</button>
-            <div id="relabelNullResults" style="margin-top:12px;"></div>
+            <button class="btn btn-outline btn-full" disabled style="opacity:0.5;cursor:not-allowed;">Bulk Relabel — Disabled</button>
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 

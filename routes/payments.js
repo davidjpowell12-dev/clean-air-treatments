@@ -113,6 +113,68 @@ router.post('/invoices/:id/void', requireAuth, (req, res) => {
   res.json({ success: true, invoice_number: invoice.invoice_number });
 });
 
+// General-purpose invoice edit. Accepts any subset of editable fields and
+// updates them. Used for one-off corrections (amount mis-billed, status
+// needs manual flip, notes, payment method). Any field omitted from the
+// body is left alone.
+router.put('/invoices/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+
+  const b = req.body || {};
+  const next = {
+    amount_cents: b.amount_cents !== undefined ? Number(b.amount_cents) : existing.amount_cents,
+    status: b.status !== undefined ? b.status : existing.status,
+    due_date: b.due_date !== undefined ? b.due_date : existing.due_date,
+    paid_at: b.paid_at !== undefined ? b.paid_at : existing.paid_at,
+    payment_method: b.payment_method !== undefined ? b.payment_method : existing.payment_method,
+    check_number: b.check_number !== undefined ? b.check_number : existing.check_number,
+    check_date: b.check_date !== undefined ? b.check_date : existing.check_date,
+    notes: b.notes !== undefined ? b.notes : existing.notes
+  };
+
+  // If newly marked paid and no paid_at supplied, stamp today
+  if (next.status === 'paid' && !next.paid_at) {
+    next.paid_at = new Date().toISOString();
+  }
+
+  db.prepare(`
+    UPDATE invoices SET
+      amount_cents = ?, status = ?, due_date = ?, paid_at = ?,
+      payment_method = ?, check_number = ?, check_date = ?, notes = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    next.amount_cents, next.status, next.due_date, next.paid_at,
+    next.payment_method, next.check_number, next.check_date, next.notes,
+    req.params.id
+  );
+
+  logAudit(db, 'invoice', existing.id, req.session.userId, 'update', {
+    invoice_number: existing.invoice_number, before: existing, after: next
+  });
+
+  const updated = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+  res.json(updated);
+});
+
+// Hard delete an invoice. Audited. Use Void for paid invoices instead of
+// delete; this is for correcting mistakes (duplicate invoice, wrong client, etc).
+router.delete('/invoices/:id', requireAuth, (req, res) => {
+  const db = getDb();
+  const existing = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Invoice not found' });
+
+  logAudit(db, 'invoice', existing.id, req.session.userId, 'delete', {
+    invoice_number: existing.invoice_number,
+    amount_cents: existing.amount_cents, status: existing.status
+  });
+
+  db.prepare('DELETE FROM invoices WHERE id = ?').run(req.params.id);
+  res.json({ success: true });
+});
+
 // Manually charge a specific invoice (card on file)
 router.post('/invoices/:id/charge', requireAuth, async (req, res) => {
   const db = getDb();

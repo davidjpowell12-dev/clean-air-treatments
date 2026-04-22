@@ -772,6 +772,108 @@ router.put('/:id', requireAuth, (req, res) => {
 });
 
 // Toggle a single item's included status
+// Regenerate unpaid invoices for an accepted estimate.
+// Voids every 'scheduled' or 'pending' invoice, then creates fresh invoices
+// to cover the remainder based on the estimate's CURRENT total_price,
+// payment_plan, and payment_method_preference. Already-paid invoices are
+// left untouched — we only regenerate what hasn't been collected yet.
+//
+// This is the general-purpose "I edited the estimate after acceptance and
+// need the invoices to match" button.
+router.post('/:id/regenerate-invoices', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.status !== 'accepted') {
+    return res.status(400).json({ error: 'Can only regenerate invoices on accepted estimates' });
+  }
+
+  const CARD_FEE = 0.035;
+  const method = est.payment_method_preference || 'card';
+  const plan = est.payment_plan || 'monthly';
+
+  // Snapshot current invoice state
+  const invoices = db.prepare(`
+    SELECT id, amount_cents, status, installment_number
+    FROM invoices WHERE estimate_id = ? ORDER BY COALESCE(installment_number, 0), id
+  `).all(est.id);
+  const paid = invoices.filter(i => i.status === 'paid');
+  const unpaid = invoices.filter(i => i.status === 'scheduled' || i.status === 'pending');
+
+  const paidCents = paid.reduce((s, i) => s + (i.amount_cents || 0), 0);
+  const totalCents = Math.round((est.total_price || 0) * 100);
+  const totalWithFee = method === 'card' ? Math.round(totalCents * (1 + CARD_FEE)) : totalCents;
+  const remainingCents = Math.max(0, totalWithFee - paidCents);
+
+  // Transaction: void unpaid invoices, create new ones covering the remainder
+  const run = db.transaction(() => {
+    // Void every unpaid invoice
+    for (const inv of unpaid) {
+      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+    }
+
+    const newInvoices = [];
+    if (remainingCents <= 0 || plan === 'per_service') {
+      return newInvoices; // nothing to schedule
+    }
+
+    const stripeUtils = require('../utils/stripe');
+
+    if (plan === 'full') {
+      // Single invoice for the remainder, due immediately
+      const invNumber = stripeUtils.generateInvoiceNumber(db);
+      const today = new Date().toISOString().split('T')[0];
+      db.prepare(`
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
+        VALUES (?, ?, ?, 'pending', 'full', ?)
+      `).run(invNumber, est.id, remainingCents, today);
+      newInvoices.push(invNumber);
+    } else {
+      // Monthly: spread remainingCents across the number of months still due.
+      // Use the estimate's original payment_months minus how many have already
+      // been paid. If that's zero or negative, default to 1 month.
+      const paidInstallments = paid.length;
+      const monthsRemaining = Math.max(1, (est.payment_months || 8) - paidInstallments);
+      const perMonth = Math.floor(remainingCents / monthsRemaining);
+      let remainder = remainingCents - perMonth * monthsRemaining;
+      const now = new Date();
+      for (let i = 0; i < monthsRemaining; i++) {
+        const invNumber = stripeUtils.generateInvoiceNumber(db);
+        // Tack any rounding leftover onto the LAST installment so totals are exact
+        const amount = i === monthsRemaining - 1 ? perMonth + remainder : perMonth;
+        const due = new Date(now.getFullYear(), now.getMonth() + 1 + i, 1);
+        const dueStr = due.toISOString().split('T')[0];
+        db.prepare(`
+          INSERT INTO invoices (
+            invoice_number, estimate_id, amount_cents, status, payment_plan,
+            installment_number, total_installments, due_date
+          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?)
+        `).run(invNumber, est.id, amount, paidInstallments + i + 1, est.payment_months || monthsRemaining, dueStr);
+        newInvoices.push(invNumber);
+      }
+    }
+    return newInvoices;
+  });
+
+  const newInvoiceNumbers = run();
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'regenerate_invoices', {
+    voided_count: unpaid.length,
+    created_count: newInvoiceNumbers.length,
+    paid_preserved: paid.length,
+    new_total_cents: totalWithFee,
+    remaining_cents: remainingCents
+  });
+
+  res.json({
+    success: true,
+    voided_count: unpaid.length,
+    created_count: newInvoiceNumbers.length,
+    paid_preserved: paid.length,
+    remaining_amount: remainingCents / 100
+  });
+});
+
 router.put('/:id/items/:itemId/toggle', requireAuth, (req, res) => {
   const db = getDb();
   const item = db.prepare('SELECT * FROM estimate_items WHERE id = ? AND estimate_id = ?')
