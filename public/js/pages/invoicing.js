@@ -221,11 +221,40 @@ const InvoicingPage = {
   _renderCustomerGroups(invoices, query) {
     const today = this._today;
     if (invoices.length === 0) {
+      // Build a list of active filters so the user knows WHY they're seeing nothing —
+      // common cause: stacked filters (e.g. Card + Pay in Full = 0) without realizing.
+      const active = [];
+      const viewLabels = { attention: 'Needs Attention', upcoming: 'Upcoming', history: 'History' };
+      if (this._currentView && this._currentView !== 'all' && viewLabels[this._currentView]) {
+        active.push({ type: 'view', label: viewLabels[this._currentView] });
+      }
+      if (this._methodFilter && this._methodFilter !== 'all') {
+        active.push({ type: 'method', label: 'Method: ' + this._methodFilter.toUpperCase() });
+      }
+      if (this._cadenceFilter && this._cadenceFilter !== 'all') {
+        const cadenceLabels = { monthly: 'Monthly', per_service: 'Per Service', full: 'Pay in Full' };
+        active.push({ type: 'cadence', label: 'Cadence: ' + (cadenceLabels[this._cadenceFilter] || this._cadenceFilter) });
+      }
+      if (query) {
+        active.push({ type: 'search', label: 'Search: "' + query + '"' });
+      }
+
+      const filtersHtml = active.length > 0 ? `
+        <div style="margin-top:12px;padding:10px 14px;background:var(--gray-50);border-radius:8px;display:inline-block;max-width:100%;">
+          <div style="font-size:12px;color:var(--gray-500);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Active filters</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center;margin-bottom:10px;">
+            ${active.map(a => `<span style="background:white;border:1px solid var(--gray-200);border-radius:12px;padding:3px 10px;font-size:12px;color:var(--gray-700);">${a.label}</span>`).join('')}
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="InvoicingPage.clearAllFilters()">Clear all filters</button>
+        </div>
+      ` : '';
+
       return `
         <div class="empty-state" style="padding:40px 16px;text-align:center;">
           <div style="font-size:40px;margin-bottom:10px;">\uD83D\uDCCB</div>
-          <h3 style="margin-bottom:6px;">${query ? 'No matches' : 'Nothing here'}</h3>
-          <p style="color:var(--gray-500);font-size:14px;">${query ? 'Try a different search.' : 'No invoices match this view.'}</p>
+          <h3 style="margin-bottom:6px;">Nothing here</h3>
+          <p style="color:var(--gray-500);font-size:14px;">${active.length > 0 ? 'No invoices match the current filter combination.' : 'No invoices to show.'}</p>
+          ${filtersHtml}
         </div>
       `;
     }
@@ -309,6 +338,18 @@ const InvoicingPage = {
         </div>
       </div>
     `;
+  },
+
+  // Reset every filter (view, method, cadence, search) back to defaults.
+  // Called from the empty-state "Clear all filters" button when the user
+  // has accidentally stacked filters that produce zero results.
+  clearAllFilters() {
+    this._currentView = 'all';
+    this._methodFilter = 'all';
+    this._cadenceFilter = 'all';
+    const searchEl = document.getElementById('invSearch');
+    if (searchEl) searchEl.value = '';
+    this.renderList();
   },
 
   _toggleGroup(gid) {
