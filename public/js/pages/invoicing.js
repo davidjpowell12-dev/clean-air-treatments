@@ -183,11 +183,18 @@ const InvoicingPage = {
       return true;
     });
 
-    // Apply method + cadence chip filters
+    // Apply method + cadence chip filters.
+    // For method: use invoice.payment_method if paid, else fall back to the
+    // estimate's preferred_method (the intended method at setup). Without
+    // the fallback, every unpaid invoice would match nothing since
+    // payment_method is NULL until a payment is recorded.
     const methodFilter = this._methodFilter || 'all';
     const cadenceFilter = this._cadenceFilter || 'all';
     if (methodFilter !== 'all') {
-      filtered = filtered.filter(i => (i.payment_method || '') === methodFilter);
+      filtered = filtered.filter(i => {
+        const m = i.payment_method || i.preferred_method || '';
+        return m === methodFilter;
+      });
     }
     if (cadenceFilter !== 'all') {
       filtered = filtered.filter(i => (i.payment_plan || '') === cadenceFilter);
@@ -332,7 +339,10 @@ const InvoicingPage = {
       } else if (view === 'history') {
         if (!(i.status === 'paid' || i.status === 'void')) return false;
       }
-      if (methodFilter !== 'all' && (i.payment_method || '') !== methodFilter) return false;
+      if (methodFilter !== 'all') {
+        const m = i.payment_method || i.preferred_method || '';
+        if (m !== methodFilter) return false;
+      }
       if (cadenceFilter !== 'all' && (i.payment_plan || '') !== cadenceFilter) return false;
       if (query) {
         const amount = ((i.amount_cents || 0) / 100).toFixed(2);
@@ -345,7 +355,8 @@ const InvoicingPage = {
     const headers = [
       'Invoice Number', 'Customer', 'Address', 'Amount',
       'Status', 'Payment Plan', 'Installment',
-      'Due Date', 'Paid Date', 'Payment Method', 'Check Number', 'Notes'
+      'Due Date', 'Paid Date', 'Payment Method', 'Preferred Method',
+      'Check Number', 'Notes'
     ];
     const rows = invoices.map(i => [
       i.invoice_number || '',
@@ -358,6 +369,7 @@ const InvoicingPage = {
       i.due_date || '',
       i.paid_at ? i.paid_at.slice(0, 10) : '',
       i.payment_method || '',
+      i.preferred_method || '',
       i.check_number || '',
       (i.notes || '').replace(/\r?\n/g, ' ')
     ]);
