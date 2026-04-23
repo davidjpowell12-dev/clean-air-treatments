@@ -205,6 +205,11 @@ app.get('/sms-terms', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'sms-terms.html'));
 });
 
+// Public branded receipt page — no auth, token-scoped
+app.get('/receipt/:token', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'receipt.html'));
+});
+
 // SPA fallback - serve app.html for authenticated routes
 app.get('/app', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'app.html'));

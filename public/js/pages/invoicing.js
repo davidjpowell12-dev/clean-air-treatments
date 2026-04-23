@@ -75,6 +75,27 @@ const InvoicingPage = {
           </button>
         </div>
 
+        <!-- Method + cadence filter chips (stack on top of view + search) -->
+        <div class="inv-chips" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;">
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+            <span style="color:var(--gray-500);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-right:4px;">Method</span>
+            ${['all','card','check','ach','cash'].map(m => `
+              <button class="inv-chip inv-chip-method" data-method="${m}" style="padding:4px 10px;border-radius:14px;border:1px solid var(--gray-200);background:${(this._methodFilter || 'all') === m ? 'var(--green)' : 'white'};color:${(this._methodFilter || 'all') === m ? 'white' : 'var(--gray-700)'};font-weight:600;font-size:12px;cursor:pointer;">${m === 'all' ? 'All' : m.toUpperCase()}</button>
+            `).join('')}
+          </div>
+          <div style="display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
+            <span style="color:var(--gray-500);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;margin-right:4px;">Cadence</span>
+            ${[
+              { key: 'all', label: 'All' },
+              { key: 'monthly', label: 'Monthly' },
+              { key: 'per_service', label: 'Per Service' },
+              { key: 'full', label: 'Pay in Full' }
+            ].map(c => `
+              <button class="inv-chip inv-chip-cadence" data-cadence="${c.key}" style="padding:4px 10px;border-radius:14px;border:1px solid var(--gray-200);background:${(this._cadenceFilter || 'all') === c.key ? 'var(--blue,#1d428a)' : 'white'};color:${(this._cadenceFilter || 'all') === c.key ? 'white' : 'var(--gray-700)'};font-weight:600;font-size:12px;cursor:pointer;">${c.label}</button>
+            `).join('')}
+          </div>
+        </div>
+
         <div id="invoicesList">${this._renderCustomerGroups(invoices, '')}</div>
       `;
 
@@ -85,6 +106,20 @@ const InvoicingPage = {
           main.querySelectorAll('.est-tab').forEach(t => t.classList.remove('active'));
           tab.classList.add('active');
           this._refreshInvoiceList();
+        });
+      });
+
+      // Wire method + cadence filter chips (single-select per group)
+      main.querySelectorAll('.inv-chip-method').forEach(chip => {
+        chip.addEventListener('click', () => {
+          this._methodFilter = chip.dataset.method;
+          this.renderList(); // full re-render so chip colors update
+        });
+      });
+      main.querySelectorAll('.inv-chip-cadence').forEach(chip => {
+        chip.addEventListener('click', () => {
+          this._cadenceFilter = chip.dataset.cadence;
+          this.renderList();
         });
       });
 
@@ -147,6 +182,16 @@ const InvoicingPage = {
       if (view === 'history') return i.status === 'paid' || i.status === 'void';
       return true;
     });
+
+    // Apply method + cadence chip filters
+    const methodFilter = this._methodFilter || 'all';
+    const cadenceFilter = this._cadenceFilter || 'all';
+    if (methodFilter !== 'all') {
+      filtered = filtered.filter(i => (i.payment_method || '') === methodFilter);
+    }
+    if (cadenceFilter !== 'all') {
+      filtered = filtered.filter(i => (i.payment_plan || '') === cadenceFilter);
+    }
 
     // Apply search
     if (query) {
@@ -276,6 +321,8 @@ const InvoicingPage = {
     const in30 = new Date(); in30.setDate(in30.getDate() + 30);
     const in30Str = in30.toISOString().slice(0, 10);
     const view = this._currentView || 'all';
+    const methodFilter = this._methodFilter || 'all';
+    const cadenceFilter = this._cadenceFilter || 'all';
     const invoices = (this._allInvoices || []).filter(i => {
       if (view === 'attention') {
         const overdue = (i.status === 'pending' || i.status === 'failed') && i.due_date && i.due_date < today;
@@ -285,6 +332,8 @@ const InvoicingPage = {
       } else if (view === 'history') {
         if (!(i.status === 'paid' || i.status === 'void')) return false;
       }
+      if (methodFilter !== 'all' && (i.payment_method || '') !== methodFilter) return false;
+      if (cadenceFilter !== 'all' && (i.payment_plan || '') !== cadenceFilter) return false;
       if (query) {
         const amount = ((i.amount_cents || 0) / 100).toFixed(2);
         const hay = (i.customer_name + ' ' + i.invoice_number + ' ' + amount + ' ' + (i.payment_method || '')).toLowerCase();
@@ -466,6 +515,17 @@ const InvoicingPage = {
           <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="InvoicingPage.editInvoice(${inv.id})">
             ✎ Edit Invoice
           </button>
+          ${inv.token ? `
+            <a href="/receipt/${inv.token}" target="_blank" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
+              👁 View Receipt (public link)
+            </a>
+            ${inv.status === 'paid' ? `
+              <button class="btn btn-primary btn-full" style="margin-top:8px;" onclick="InvoicingPage.sendReceipt(${inv.id})">
+                📱 Send Receipt via SMS
+              </button>
+              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Creates a draft in Messaging you can review before sending</p>
+            ` : ''}
+          ` : ''}
           <a href="#estimates/view/${inv.estimate_id || ''}" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
             View Estimate
           </a>
@@ -681,6 +741,20 @@ const InvoicingPage = {
       this.renderDetail(id);
     } catch (err) {
       App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  async sendReceipt(invoiceId) {
+    try {
+      const r = await Api.post('/api/messaging/compose/receipt/' + invoiceId, {});
+      if (r.already_existed) {
+        App.toast('Receipt draft already exists — opening Messaging', 'success');
+      } else {
+        App.toast('Receipt draft created — review and send', 'success');
+      }
+      App.navigate('messaging');
+    } catch (err) {
+      App.toast('Could not create receipt draft: ' + err.message, 'error');
     }
   },
 

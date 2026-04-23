@@ -397,6 +397,20 @@ function runMigrations(db) {
   ensureColumn(db, 'purchases', 'sales_order_original_name', 'TEXT');
   ensureColumn(db, 'follow_ups', 'linked_estimate_id', 'INTEGER REFERENCES estimates(id) ON DELETE SET NULL');
 
+  // Receipts: each invoice gets a unique public token so customers can view
+  // a branded receipt page at /receipt/:token without authentication.
+  ensureColumn(db, 'invoices', 'token', 'TEXT');
+  // Backfill tokens for any existing invoices that lack one
+  const missingTokens = db.prepare("SELECT id FROM invoices WHERE token IS NULL OR token = ''").all();
+  if (missingTokens.length > 0) {
+    const crypto = require('crypto');
+    const stmt = db.prepare('UPDATE invoices SET token = ? WHERE id = ?');
+    for (const row of missingTokens) {
+      stmt.run(crypto.randomBytes(16).toString('hex'), row.id);
+    }
+    console.log(`[schema-repair] Backfilled receipt tokens for ${missingTokens.length} invoice(s)`);
+  }
+
   // Messaging: per-service text templates used when composing SMS drafts.
   ensureColumn(db, 'services', 'heads_up_text', 'TEXT');
   ensureColumn(db, 'services', 'completion_text', 'TEXT');

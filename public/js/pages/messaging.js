@@ -52,6 +52,9 @@ const MessagingPage = {
           <button class="fu-tab ${this.currentTab === 'completion' ? 'active' : ''}" data-tab="completion">
             ✅ Completions <span class="fu-tab-count">${counts.completion_ready || 0}</span>
           </button>
+          <button class="fu-tab ${this.currentTab === 'receipt' ? 'active' : ''}" data-tab="receipt">
+            🧾 Receipts <span class="fu-tab-count">${counts.receipt_ready || 0}</span>
+          </button>
           <button class="fu-tab ${this.currentTab === 'sent' ? 'active' : ''}" data-tab="sent">
             📨 Sent
           </button>

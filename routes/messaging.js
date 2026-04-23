@@ -163,12 +163,14 @@ router.get('/drafts/counts', requireAuth, (req, res) => {
     SELECT
       SUM(CASE WHEN type = 'heads_up' AND status = 'draft' THEN 1 ELSE 0 END) as heads_up_ready,
       SUM(CASE WHEN type = 'completion' AND status = 'draft' THEN 1 ELSE 0 END) as completion_ready,
+      SUM(CASE WHEN type = 'receipt' AND status = 'draft' THEN 1 ELSE 0 END) as receipt_ready,
       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
     FROM message_drafts
   `).get();
   res.json({
     heads_up_ready: row.heads_up_ready || 0,
     completion_ready: row.completion_ready || 0,
+    receipt_ready: row.receipt_ready || 0,
     failed: row.failed || 0
   });
 });
@@ -303,6 +305,78 @@ router.put('/property/:id/opt-in', requireAuth, (req, res) => {
   db.prepare('UPDATE properties SET sms_opted_in = ? WHERE id = ?').run(val, req.params.id);
   logAudit(db, 'property', Number(req.params.id), req.session.userId, 'sms_opt_change', { sms_opted_in: val });
   res.json({ success: true, sms_opted_in: val });
+});
+
+// Compose a SMS draft with a payment receipt link for a specific invoice.
+// Called from the Invoice detail page after you record a payment.
+// Uses the same edit-before-send flow as heads-ups and completions.
+router.post('/compose/receipt/:invoiceId', requireAuth, (req, res) => {
+  const db = getDb();
+  const inv = db.prepare(`
+    SELECT i.*, e.customer_name, e.phone, e.property_id, p.phone as property_phone,
+           p.sms_opted_in
+    FROM invoices i
+    LEFT JOIN estimates e ON e.id = i.estimate_id
+    LEFT JOIN properties p ON p.id = e.property_id
+    WHERE i.id = ?
+  `).get(req.params.invoiceId);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (!inv.token) return res.status(400).json({ error: 'Invoice has no receipt token — save and retry' });
+
+  const phone = inv.property_phone || inv.phone;
+  if (!phone || !phone.trim()) {
+    return res.status(400).json({ error: 'No phone number on file for this customer' });
+  }
+  if (inv.property_id) {
+    const prop = db.prepare('SELECT sms_opted_in FROM properties WHERE id = ?').get(inv.property_id);
+    if (prop && prop.sms_opted_in === 0) {
+      return res.status(400).json({ error: 'This customer has opted out of SMS' });
+    }
+  }
+
+  // Pull business name + opt-out line from settings
+  const row = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('msg_business_name', 'msg_opt_out')").all();
+  const settings = {};
+  for (const r of row) settings[r.key] = r.value;
+  const businessName = settings.msg_business_name || 'Clean Air Lawn Care';
+  const optOut = settings.msg_opt_out || 'Reply STOP to unsubscribe.';
+
+  const first = (inv.customer_name || 'there').split(/\s+/)[0];
+  const amount = (inv.amount_cents / 100).toFixed(2);
+  const host = req.get('host');
+  const proto = req.protocol === 'https' ? 'https' : (req.get('x-forwarded-proto') || 'https');
+  const url = `${proto}://${host}/receipt/${inv.token}`;
+
+  const composed = `Hi ${first}, thanks for your payment of $${amount} to ${businessName}. Your receipt: ${url}\n\n${optOut}`;
+
+  // Dedupe: if a receipt draft already exists for this invoice, return it
+  // rather than creating duplicates.
+  const existing = db.prepare(`
+    SELECT id FROM message_drafts
+    WHERE type = 'receipt' AND application_id IS NULL AND service_summary = ?
+  `).get('invoice:' + inv.id);
+  if (existing) {
+    return res.json({ draft_id: existing.id, already_existed: true });
+  }
+
+  const result = db.prepare(`
+    INSERT INTO message_drafts (
+      property_id, type, service_date, service_summary,
+      composed_text, to_phone, status
+    ) VALUES (?, 'receipt', ?, ?, ?, ?, 'draft')
+  `).run(
+    inv.property_id,
+    new Date().toISOString().slice(0, 10),
+    'invoice:' + inv.id,
+    composed,
+    phone
+  );
+
+  logAudit(db, 'invoice', inv.id, req.session.userId, 'compose_receipt_draft', {
+    invoice_number: inv.invoice_number, draft_id: result.lastInsertRowid
+  });
+
+  res.json({ draft_id: result.lastInsertRowid, already_existed: false });
 });
 
 // ─── Twilio inbound webhook (STOP/HELP/START keyword handling) ──────────

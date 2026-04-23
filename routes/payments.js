@@ -97,6 +97,53 @@ router.post('/invoices/:id/record-check', requireAuth, (req, res) => {
 });
 
 // Void an unpaid invoice
+// Public receipt data endpoint — no auth, token-scoped.
+// Returns enough info for the receipt page: invoice details, customer info,
+// and the business's messaging settings (for header branding).
+router.get('/public/receipt/:token', (req, res) => {
+  const db = getDb();
+  const inv = db.prepare(`
+    SELECT i.*, e.customer_name, e.address, e.city, e.state, e.zip,
+           e.email, e.phone, e.payment_method_preference
+    FROM invoices i
+    LEFT JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.token = ?
+  `).get(req.params.token);
+  if (!inv) return res.status(404).json({ error: 'Receipt not found' });
+
+  // Pull business branding from app_settings (falls back to defaults)
+  const settings = {};
+  const rows = db.prepare(
+    "SELECT key, value FROM app_settings WHERE key LIKE 'msg_%'"
+  ).all();
+  for (const r of rows) settings[r.key] = r.value;
+
+  res.json({
+    invoice_number: inv.invoice_number,
+    amount_dollars: (inv.amount_cents / 100).toFixed(2),
+    status: inv.status,
+    due_date: inv.due_date,
+    paid_at: inv.paid_at,
+    payment_method: inv.payment_method,
+    check_number: inv.check_number,
+    payment_plan: inv.payment_plan,
+    installment_number: inv.installment_number,
+    total_installments: inv.total_installments,
+    notes: inv.notes,
+    customer: {
+      name: inv.customer_name,
+      address: inv.address,
+      city: inv.city,
+      state: inv.state,
+      zip: inv.zip
+    },
+    business: {
+      name: settings.msg_business_name || 'Clean Air Lawn Care',
+      review_link: settings.msg_review_link || ''
+    }
+  });
+});
+
 router.post('/invoices/:id/void', requireAuth, (req, res) => {
   const db = getDb();
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(req.params.id);

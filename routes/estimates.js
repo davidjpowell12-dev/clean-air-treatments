@@ -893,9 +893,9 @@ router.post('/:id/regenerate-invoices', requireAuth, (req, res) => {
       const invNumber = stripeUtils.generateInvoiceNumber(db);
       const today = new Date().toISOString().split('T')[0];
       db.prepare(`
-        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
-        VALUES (?, ?, ?, 'pending', 'full', ?)
-      `).run(invNumber, est.id, remainingCents, today);
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, token)
+        VALUES (?, ?, ?, 'pending', 'full', ?, ?)
+      `).run(invNumber, est.id, remainingCents, today, crypto.randomBytes(16).toString('hex'));
       newInvoices.push(invNumber);
     } else {
       // Monthly: spread remainingCents across the number of months still due.
@@ -915,9 +915,9 @@ router.post('/:id/regenerate-invoices', requireAuth, (req, res) => {
         db.prepare(`
           INSERT INTO invoices (
             invoice_number, estimate_id, amount_cents, status, payment_plan,
-            installment_number, total_installments, due_date
-          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?)
-        `).run(invNumber, est.id, amount, paidInstallments + i + 1, est.payment_months || monthsRemaining, dueStr);
+            installment_number, total_installments, due_date, token
+          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?, ?)
+        `).run(invNumber, est.id, amount, paidInstallments + i + 1, est.payment_months || monthsRemaining, dueStr, crypto.randomBytes(16).toString('hex'));
         newInvoices.push(invNumber);
       }
     }

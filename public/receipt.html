@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>Payment Receipt | Clean Air Lawn Care</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <meta name="description" content="Payment receipt from Clean Air Lawn Care of Grand Rapids, operated by Evolved Lawn and Garden Services LLC.">
+  <style>
+    :root {
+      --green: #78be20;
+      --green-dark: #5a9616;
+      --green-light: #e8f5d8;
+      --navy: #1a2744;
+      --gray-50: #f9fafb;
+      --gray-100: #f3f4f6;
+      --gray-200: #e5e7eb;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+      --radius: 14px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-900);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+    }
+    .receipt-wrap {
+      max-width: 520px;
+      margin: 0 auto;
+      padding: 0 0 40px;
+    }
+    header {
+      background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+      color: white;
+      padding: 28px 20px 32px;
+      text-align: center;
+    }
+    header img { height: 44px; margin-bottom: 6px; }
+    header .biz { font-size: 18px; font-weight: 700; opacity: 0.98; }
+    header .sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
+
+    .card {
+      background: white;
+      margin: -24px 16px 12px;
+      border-radius: var(--radius);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+      padding: 28px 24px 24px;
+      text-align: center;
+      position: relative;
+    }
+    .checkmark {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: var(--green-light);
+      color: var(--green-dark);
+      display: flex; align-items: center; justify-content: center;
+      margin: 0 auto 12px;
+      font-size: 32px;
+      font-weight: 800;
+    }
+    .card h1 { font-size: 20px; font-weight: 700; color: var(--navy); margin-bottom: 4px; }
+    .card .sub { font-size: 13px; color: var(--gray-500); }
+    .amount {
+      font-size: 44px; font-weight: 800; color: var(--green-dark);
+      margin: 20px 0 6px;
+      letter-spacing: -0.02em;
+    }
+    .amount-label { font-size: 13px; color: var(--gray-500); }
+
+    .invoice-num {
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 13px;
+      color: var(--gray-500);
+      padding: 12px 0;
+      border-top: 1px solid var(--gray-100);
+      border-bottom: 1px solid var(--gray-100);
+      margin-top: 20px;
+      letter-spacing: 1px;
+    }
+
+    .details {
+      background: white;
+      margin: 0 16px 12px;
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    .details h3 {
+      font-size: 11px;
+      color: var(--gray-400);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .detail-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 14px;
+    }
+    .detail-row:last-child { border-bottom: none; }
+    .detail-row .label { color: var(--gray-500); }
+    .detail-row .value { color: var(--gray-900); font-weight: 600; text-align: right; }
+
+    .thank-you {
+      background: var(--green-light);
+      margin: 0 16px 12px;
+      padding: 18px 24px;
+      border-radius: var(--radius);
+      text-align: center;
+      color: var(--green-dark);
+      font-size: 15px;
+      font-weight: 600;
+      line-height: 1.5;
+    }
+
+    .review-cta {
+      margin: 0 16px 12px;
+      padding: 20px 24px;
+      background: white;
+      border-radius: var(--radius);
+      text-align: center;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+    }
+    .review-cta p { color: var(--gray-700); font-size: 14px; margin-bottom: 14px; line-height: 1.5; }
+    .review-cta a {
+      display: inline-block;
+      background: var(--green);
+      color: white;
+      padding: 12px 22px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.02em;
+      box-shadow: 0 2px 10px rgba(120,190,32,0.3);
+    }
+
+    footer {
+      text-align: center;
+      font-size: 11px;
+      color: var(--gray-400);
+      padding: 20px;
+      line-height: 1.6;
+    }
+    footer a { color: var(--gray-500); text-decoration: none; margin: 0 6px; }
+
+    .loading, .error {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--gray-500);
+    }
+    .error h2 { color: var(--navy); font-size: 20px; margin-bottom: 8px; }
+
+    @media print {
+      body { background: white; }
+      .review-cta { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root" class="loading">Loading receipt…</div>
+
+  <script>
+    async function loadReceipt() {
+      const token = window.location.pathname.split('/').pop();
+      const root = document.getElementById('root');
+      try {
+        const res = await fetch('/api/payments/public/receipt/' + encodeURIComponent(token));
+        if (!res.ok) throw new Error('Not found');
+        const data = await res.json();
+        render(data);
+      } catch (err) {
+        root.className = 'error';
+        root.innerHTML = `
+          <h2>Receipt not found</h2>
+          <p>This link may be invalid or expired.</p>
+        `;
+      }
+    }
+
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
+    }
+
+    function fmtDate(iso) {
+      if (!iso) return '';
+      const d = new Date(iso);
+      return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+
+    function methodLabel(m) {
+      if (!m) return 'On file';
+      const map = { card: 'Credit/Debit Card', check: 'Check', ach: 'Bank Transfer', cash: 'Cash' };
+      return map[m] || m;
+    }
+
+    function render(d) {
+      const root = document.getElementById('root');
+      const isPaid = d.status === 'paid';
+      const dateLine = isPaid ? fmtDate(d.paid_at || new Date().toISOString()) : fmtDate(d.due_date);
+      const dateLabel = isPaid ? 'Paid on' : 'Due on';
+
+      const planLabel = d.payment_plan === 'per_service' ? 'Per Service' :
+                        d.payment_plan === 'monthly' ? 'Monthly Plan' :
+                        d.payment_plan === 'full' ? 'Pay in Full' : '';
+
+      const installment = d.installment_number && d.total_installments
+        ? `Installment ${d.installment_number} of ${d.total_installments}`
+        : '';
+
+      root.className = '';
+      root.innerHTML = `
+        <div class="receipt-wrap">
+          <header>
+            <img src="/logo.png" alt="Clean Air Lawn Care">
+            <div class="biz">${esc(d.business.name)}</div>
+            <div class="sub">Grand Rapids, Michigan</div>
+          </header>
+
+          <div class="card">
+            <div class="checkmark">${isPaid ? '\u2713' : '\u25CB'}</div>
+            <h1>${isPaid ? 'Payment Received' : 'Invoice'}</h1>
+            <div class="sub">Thank you, ${esc(d.customer.name || 'customer')}</div>
+
+            <div class="amount">$${esc(d.amount_dollars)}</div>
+            <div class="amount-label">${dateLabel} ${dateLine}</div>
+
+            <div class="invoice-num">${esc(d.invoice_number)}</div>
+          </div>
+
+          <div class="details">
+            <h3>Payment Details</h3>
+            <div class="detail-row">
+              <span class="label">Customer</span>
+              <span class="value">${esc(d.customer.name)}</span>
+            </div>
+            ${d.customer.address ? `
+              <div class="detail-row">
+                <span class="label">Property</span>
+                <span class="value">${esc(d.customer.address)}${d.customer.city ? ', ' + esc(d.customer.city) : ''}</span>
+              </div>
+            ` : ''}
+            <div class="detail-row">
+              <span class="label">Amount</span>
+              <span class="value">$${esc(d.amount_dollars)}</span>
+            </div>
+            ${planLabel ? `
+              <div class="detail-row">
+                <span class="label">Plan</span>
+                <span class="value">${esc(planLabel)}</span>
+              </div>
+            ` : ''}
+            ${installment ? `
+              <div class="detail-row">
+                <span class="label">Installment</span>
+                <span class="value">${esc(installment)}</span>
+              </div>
+            ` : ''}
+            ${isPaid ? `
+              <div class="detail-row">
+                <span class="label">Payment method</span>
+                <span class="value">${esc(methodLabel(d.payment_method))}</span>
+              </div>
+              ${d.check_number ? `
+                <div class="detail-row">
+                  <span class="label">Check #</span>
+                  <span class="value">${esc(d.check_number)}</span>
+                </div>
+              ` : ''}
+              <div class="detail-row">
+                <span class="label">Payment date</span>
+                <span class="value">${esc(fmtDate(d.paid_at))}</span>
+              </div>
+            ` : ''}
+            ${d.notes ? `
+              <div class="detail-row">
+                <span class="label">For</span>
+                <span class="value" style="max-width:60%;text-align:right;">${esc(d.notes)}</span>
+              </div>
+            ` : ''}
+          </div>
+
+          ${isPaid ? `
+            <div class="thank-you">Thank you for your business.<br>We appreciate you choosing Clean Air Lawn Care.</div>
+
+            ${d.business.review_link ? `
+              <div class="review-cta">
+                <p>Enjoying our service? A quick Google review helps neighbors find us.</p>
+                <a href="${esc(d.business.review_link)}" target="_blank" rel="noopener">Leave a Review \u2192</a>
+              </div>
+            ` : ''}
+          ` : ''}
+
+          <footer>
+            Evolved Lawn and Garden Services LLC<br>
+            2309 Elmridge Dr. NW, Grand Rapids, MI 49504<br>
+            <a href="mailto:dave@cleanairlawncare.com">dave@cleanairlawncare.com</a> &middot;
+            <a href="tel:+16168225876">(616) 822-5876</a><br>
+            <a href="/privacy">Privacy</a> &middot; <a href="/sms-terms">SMS Terms</a>
+          </footer>
+        </div>
+      `;
+    }
+
+    loadReceipt();
+  </script>
+</body>
+</html>

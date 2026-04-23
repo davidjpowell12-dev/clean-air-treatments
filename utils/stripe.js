@@ -1,4 +1,10 @@
 // Stripe payment utilities — invoice numbering, Checkout sessions, customer management
+const crypto = require('crypto');
+
+// Unique public token for receipt URLs: /receipt/:token
+function generateInvoiceToken() {
+  return crypto.randomBytes(16).toString('hex');
+}
 
 // Lazy-load Stripe
 // Fallback: base64-encoded key for Railway env var injection bug
@@ -251,9 +257,9 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan, paymentMethodPre
       const today = new Date().toISOString().split('T')[0];
       const amount = applyCardFee(totalCents, method);
       db.prepare(`
-        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
-        VALUES (?, ?, ?, 'pending', 'full', ?)
-      `).run(invoiceNumber, estimateId, amount, today);
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, token)
+        VALUES (?, ?, ?, 'pending', 'full', ?, ?)
+      `).run(invoiceNumber, estimateId, amount, today, generateInvoiceToken());
 
       const inv = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);
       invoices.push(inv);
@@ -280,9 +286,9 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan, paymentMethodPre
         db.prepare(`
           INSERT INTO invoices (
             invoice_number, estimate_id, amount_cents, status, payment_plan,
-            installment_number, total_installments, due_date
-          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?)
-        `).run(invoiceNumber, estimateId, installmentAmount, i + 1, months, dueDateStr);
+            installment_number, total_installments, due_date, token
+          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?, ?)
+        `).run(invoiceNumber, estimateId, installmentAmount, i + 1, months, dueDateStr, generateInvoiceToken());
 
         const inv = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);
         invoices.push(inv);
@@ -311,9 +317,9 @@ function createPerServiceInvoice(db, estimateId, amountCents, description) {
 
   db.prepare(`
     INSERT INTO invoices (
-      invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, notes
-    ) VALUES (?, ?, ?, 'pending', 'per_service', ?, ?)
-  `).run(invoiceNumber, estimateId, finalAmount, today, description || null);
+      invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, notes, token
+    ) VALUES (?, ?, ?, 'pending', 'per_service', ?, ?, ?)
+  `).run(invoiceNumber, estimateId, finalAmount, today, description || null, generateInvoiceToken());
 
   return db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invoiceNumber);
 }
