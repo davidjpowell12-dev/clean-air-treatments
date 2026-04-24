@@ -415,6 +415,22 @@ function runMigrations(db) {
   ensureColumn(db, 'services', 'heads_up_text', 'TEXT');
   ensureColumn(db, 'services', 'completion_text', 'TEXT');
   ensureColumn(db, 'services', 'client_action', 'TEXT');
+  // Does completing a visit of this service require a full MDARD-
+  // compliant application record (product, EPA#, rates, etc), or is
+  // a simple "done" click enough? Default 1 (safe — assumes chemical).
+  // Admin can uncheck for non-chemical services like Mowing, Clean-Ups,
+  // Aeration, Seeding, Compost Topdressing.
+  ensureColumn(db, 'services', 'requires_application', 'INTEGER DEFAULT 1');
+  // Backfill: unset for obvious non-chemical services (one-time on first boot
+  // after deploy; subsequent boots no-op because names already match)
+  const nonChemicalPatterns = ['%mow%', '%clean%', '%aerat%', '%seed%', '%compost%', '%topdres%'];
+  for (const pattern of nonChemicalPatterns) {
+    db.prepare(
+      "UPDATE services SET requires_application = 0 WHERE requires_application IS NULL OR (requires_application = 1 AND LOWER(name) LIKE ? AND (SELECT value FROM app_settings WHERE key = 'migration_nonchem_backfill_done') IS NULL)"
+    ).run(pattern);
+  }
+  // Sentinel so we don't clobber admin changes on subsequent boots
+  db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('migration_nonchem_backfill_done', '1')").run();
   // Messaging: per-property opt-in flag (default 1 — existing clients grandfathered in,
   // consistent with "established business relationship" for transactional messages).
   ensureColumn(db, 'properties', 'sms_opted_in', 'INTEGER DEFAULT 1');

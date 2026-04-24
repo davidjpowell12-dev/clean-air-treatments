@@ -169,6 +169,13 @@ const SettingsPage = {
                       <label style="font-size:12px;">Client action (optional)</label>
                       <input type="text" data-field="client_action" placeholder="e.g. Water within 24 hours to activate" value="${this.esc(s.client_action || '')}">
                     </div>
+                    <div class="form-group" style="margin-bottom:8px;display:flex;align-items:flex-start;gap:8px;">
+                      <input type="checkbox" data-field="requires_application" ${s.requires_application ? 'checked' : ''} style="margin-top:3px;">
+                      <div>
+                        <label style="font-size:12px;font-weight:600;">Requires pesticide application record</label>
+                        <p style="font-size:11px;color:var(--gray-500);margin:2px 0 0;">Checked = completing a visit of this service opens the full MDARD-compliant application form (product, EPA#, rates, etc). Unchecked = simple "done" click. Uncheck for non-chemical services like Mowing, Clean-Ups, Aeration.</p>
+                      </div>
+                    </div>
                     <button class="btn btn-primary btn-sm" onclick="SettingsPage.saveServiceTemplate(${s.id})">Save</button>
                   </div>
                 `).join('')}
@@ -552,14 +559,16 @@ const SettingsPage = {
   async saveServiceTemplate(serviceId) {
     const row = document.querySelector(`.fu-svc-tmpl[data-svc-id="${serviceId}"]`);
     if (!row) return;
+    const reqEl = row.querySelector('[data-field="requires_application"]');
     const body = {
       heads_up_text:   row.querySelector('[data-field="heads_up_text"]').value.trim() || null,
       completion_text: row.querySelector('[data-field="completion_text"]').value.trim() || null,
-      client_action:   row.querySelector('[data-field="client_action"]').value.trim() || null
+      client_action:   row.querySelector('[data-field="client_action"]').value.trim() || null,
+      requires_application: reqEl ? (reqEl.checked ? 1 : 0) : undefined
     };
     try {
       await Api.put('/api/services/' + serviceId, body);
-      App.toast('Service template saved', 'success');
+      App.toast('Service settings saved', 'success');
     } catch (err) {
       App.toast('Save failed: ' + err.message, 'error');
     }

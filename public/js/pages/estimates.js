@@ -1279,7 +1279,7 @@ const EstimatesPage = {
               return `
               <div style="background:${isScheduled ? '#f0f9e8' : 'var(--gray-50, #f8f9fa)'};border-radius:12px;padding:14px;margin-bottom:10px;${isScheduled ? 'border:1px solid var(--green);opacity:0.7;' : ''}" data-svc-idx="${idx}">
                 <div style="font-weight:600;font-size:14px;margin-bottom:8px;display:flex;align-items:center;gap:8px;">
-                  ${this._esc(item.service_name)} <span style="color:var(--gray-400);font-weight:400;font-size:12px;">${item.rounds || 6} rounds</span>
+                  ${this._esc(item.service_name)} <span style="color:var(--gray-400);font-weight:400;font-size:12px;">${item.rounds || 6} treatments</span>
                   ${isScheduled ? `<span style="background:var(--green);color:white;font-size:10px;font-weight:700;padding:2px 8px;border-radius:10px;white-space:nowrap;">✓ SCHEDULED${info && info.completed ? ' · ' + info.completed + ' done' : ''}</span>` : ''}
                 </div>
                 ${isScheduled ? `

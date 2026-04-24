@@ -322,9 +322,36 @@ const SchedulingPage = {
         const date = btn.dataset.date;
         const round = btn.dataset.round;
         const total = btn.dataset.total;
-        // Store schedule context BEFORE navigating so the application form picks it up
-        window._scheduleContext = { scheduleId, propertyId, date, round, total };
-        App.navigate('applications', 'new', null);
+
+        // Look up the entry's service_type and find a matching service to see
+        // if it requires a full MDARD application record. Non-chemical services
+        // (Mowing, Clean-Ups, Aeration, etc) get a quick-complete modal
+        // instead of the full application form — just notes + save.
+        const entry = entries.find(e => String(e.id) === String(scheduleId));
+        const serviceType = (entry && entry.service_type) || '';
+        let requiresApp = true;
+        if (serviceType) {
+          try {
+            const services = await Api.get('/api/services');
+            const match = (services || []).find(s =>
+              s.name && (
+                s.name.toLowerCase() === serviceType.toLowerCase() ||
+                serviceType.toLowerCase().includes(s.name.toLowerCase()) ||
+                s.name.toLowerCase().includes(serviceType.toLowerCase())
+              )
+            );
+            if (match) requiresApp = match.requires_application !== 0;
+          } catch (e) { /* default to requiring application for safety */ }
+        }
+
+        if (requiresApp) {
+          // Full application form (original behavior)
+          window._scheduleContext = { scheduleId, propertyId, date, round, total };
+          App.navigate('applications', 'new', null);
+        } else {
+          // Quick-complete modal: notes + save only
+          this._showQuickCompleteModal(scheduleId, entry);
+        }
       });
     });
 
@@ -380,7 +407,7 @@ const SchedulingPage = {
         const name = btn.dataset.name;
         const round = btn.dataset.round;
         const total = btn.dataset.total;
-        const info = round ? `Round ${round} of ${total} for ${name}` : name;
+        const info = round ? `Treatment ${round} of ${total} for ${name}` : name;
         document.getElementById('rescheduleInfo').textContent = info;
         document.getElementById('rescheduleDate').value = '';
         document.getElementById('rescheduleModal').classList.add('open');
@@ -394,6 +421,63 @@ const SchedulingPage = {
           this.renderDaily();
         };
       });
+    });
+  },
+
+  _esc(str) {
+    if (str == null) return '';
+    return String(str).replace(/[&<>"']/g, c =>
+      ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])
+    );
+  },
+
+  // Quick-complete modal for non-chemical services (Mowing, Clean-Ups,
+  // Aeration, etc). Just a notes field + Save — no product, no EPA, no
+  // app rates. Skips the full MDARD application form entirely.
+  _showQuickCompleteModal(scheduleId, entry) {
+    const customerName = (entry && entry.customer_name) || 'this visit';
+    const serviceType = (entry && entry.service_type) || 'Service';
+    document.querySelector('.modal-overlay.quick-complete-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay quick-complete-modal';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Mark Complete</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;"><strong>${this._esc ? this._esc(customerName) : customerName}</strong></p>
+          <p style="font-size:13px;color:var(--gray-500);margin-bottom:14px;">${this._esc ? this._esc(serviceType) : serviceType}</p>
+          <div class="form-group" style="margin-bottom:0;">
+            <label style="font-size:13px;">Notes (optional)</label>
+            <textarea id="quickCompleteNotes" rows="3" placeholder="e.g. Mowed everything, left the side gate locked" style="width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;font-size:14px;"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="qcCancel" style="margin-left:auto;">Cancel</button>
+          <button class="btn btn-primary" id="qcSave">\u2713 Mark Complete</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    const close = () => { overlay.classList.remove('open'); setTimeout(() => overlay.remove(), 200); };
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('#qcCancel').addEventListener('click', close);
+    overlay.querySelector('#qcSave').addEventListener('click', async () => {
+      const notes = document.getElementById('quickCompleteNotes').value.trim();
+      try {
+        await Api.put('/api/schedules/' + scheduleId, {
+          status: 'completed',
+          notes: notes || null
+        });
+        App.toast('Marked complete', 'success');
+        close();
+        this.renderDaily();
+      } catch (err) {
+        App.toast('Failed: ' + err.message, 'error');
+      }
     });
   },
 
@@ -633,17 +717,8 @@ const SchedulingPage = {
               <input type="date" id="seasonStart" value="${startDate}">
             </div>
             <div class="form-group">
-              <label>Rounds</label>
-              <select id="seasonRounds">
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6" selected>6</option>
-                <option value="7">7</option>
-                <option value="8">8</option>
-              </select>
+              <label>Treatments</label>
+              <input type="number" id="seasonRounds" min="1" max="52" value="6" style="width:100%;padding:8px 10px;border:2px solid var(--gray-200);border-radius:6px;font-size:16px;font-weight:600;">
             </div>
             <div class="form-group">
               <label>Weeks Apart</label>

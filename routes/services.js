@@ -56,7 +56,7 @@ router.put('/:id', requireAuth, (req, res) => {
 
   const {
     name, description, is_recurring, rounds, display_order, is_active,
-    heads_up_text, completion_text, client_action
+    heads_up_text, completion_text, client_action, requires_application
   } = req.body;
 
   db.prepare(`
@@ -69,7 +69,8 @@ router.put('/:id', requireAuth, (req, res) => {
       is_active = COALESCE(?, is_active),
       heads_up_text = ?,
       completion_text = ?,
-      client_action = ?
+      client_action = ?,
+      requires_application = COALESCE(?, requires_application)
     WHERE id = ?
   `).run(
     name || null,
@@ -81,6 +82,7 @@ router.put('/:id', requireAuth, (req, res) => {
     heads_up_text !== undefined ? heads_up_text : existing.heads_up_text,
     completion_text !== undefined ? completion_text : existing.completion_text,
     client_action !== undefined ? client_action : existing.client_action,
+    requires_application !== undefined ? (requires_application ? 1 : 0) : null,
     req.params.id
   );
 
