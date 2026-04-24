@@ -427,11 +427,66 @@ const SchedulingPage = {
     });
   },
 
+  // Ensure the reschedule modal DOM is present. The daily view renders it
+  // inline as part of its HTML, but the calendar view doesn't — so drag-drop
+  // from the calendar was calling getElementById('rescheduleModal') and
+  // getting null, silently failing the series flow.
+  _ensureRescheduleModal() {
+    if (document.getElementById('rescheduleModal')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div id="rescheduleModal" class="modal-overlay">
+        <div class="modal">
+          <div class="modal-header">
+            <h3>Reschedule Visit</h3>
+            <button class="modal-close" id="rescheduleClose">&times;</button>
+          </div>
+          <div class="modal-body">
+            <p id="rescheduleInfo"></p>
+            <div class="form-group">
+              <label>Move to Date</label>
+              <input type="date" id="rescheduleDate">
+            </div>
+            <div id="rescheduleSeriesGroup" class="form-group" style="display:none;">
+              <label style="font-weight:600;color:var(--gray-700);margin-bottom:6px;">Apply to:</label>
+              <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+                <input type="radio" name="rescheduleScope" value="series" checked style="margin-top:3px;">
+                <div>
+                  <div style="font-weight:600;font-size:14px;">This + all future visits in the series</div>
+                  <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Shifts every remaining visit to the same day-of-week as the new date.</div>
+                </div>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--gray-200);border-radius:6px;cursor:pointer;">
+                <input type="radio" name="rescheduleScope" value="this" style="margin-top:3px;">
+                <div>
+                  <div style="font-weight:600;font-size:14px;">Just this one visit</div>
+                  <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Other visits in the series stay where they are.</div>
+                </div>
+              </label>
+            </div>
+            <button id="rescheduleConfirm" class="btn btn-primary btn-full">Move Visit</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(wrap.firstElementChild);
+    // Wire close + backdrop-click to close
+    document.getElementById('rescheduleClose').addEventListener('click', () => {
+      document.getElementById('rescheduleModal').classList.remove('open');
+    });
+    document.getElementById('rescheduleModal').addEventListener('click', (e) => {
+      if (e.target.id === 'rescheduleModal') {
+        document.getElementById('rescheduleModal').classList.remove('open');
+      }
+    });
+  },
+
   // Shared reschedule modal — used by the Reschedule button AND by drag-drop.
   // Shows the "just this / whole series" choice when the entry is part of a
   // program (has program_id) so moving one mowing shifts all future mowings
   // to the same day-of-week.
   _openRescheduleModal(scheduleId, entry, prefillDate) {
+    this._ensureRescheduleModal();
     const name = (entry && entry.customer_name) || '';
     const round = (entry && entry.round_number) || '';
     const total = (entry && entry.total_rounds) || '';
