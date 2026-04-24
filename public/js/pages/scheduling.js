@@ -596,7 +596,16 @@ const SchedulingPage = {
     const main = document.getElementById('mainContent');
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
-    const techs = await this._loadTechs();
+    // Load services + techs in parallel. Service dropdown is populated
+    // from the pricing matrix so whatever the admin has configured
+    // (including Mowing, Fert & Weed Control, Mosquito & Tick Control,
+    // etc) shows up here with exact name matching — no more drift
+    // between estimate items and schedule service types.
+    const [techs, services] = await Promise.all([
+      this._loadTechs(),
+      Api.get('/api/services').catch(() => [])
+    ]);
+    const activeServices = (services || []).filter(s => s.is_active !== 0);
     const startDate = this._nextMonday();
     const year = startDate.slice(0, 4);
 
@@ -605,16 +614,15 @@ const SchedulingPage = {
       <div class="card">
         <div class="card-header"><h3>Generate Season</h3></div>
         <div class="card-body">
-          <p class="form-hint" style="margin-bottom: 16px;">Generate a season program for selected properties. Pick a service type to schedule separately (e.g., fert first, then mosquito).</p>
+          <p class="form-hint" style="margin-bottom: 16px;">Generate a season program for selected properties. Pick a service type to schedule separately (e.g., mowing first, then fert &amp; weed).</p>
 
           <div class="form-group">
             <label>Service Type</label>
             <select id="seasonServiceType" style="font-weight:600;">
-              <option value="Fertilization & Weed Control">Fertilization & Weed Control</option>
-              <option value="Mosquito & Tick">Mosquito & Tick</option>
-              <option value="Aeration & Overseeding">Aeration & Overseeding</option>
-              <option value="Spring Cleanup">Spring Cleanup</option>
-              <option value="Fall Cleanup">Fall Cleanup</option>
+              ${activeServices.map(s => {
+                const safe = String(s.name || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+                return `<option value="${safe}">${safe}</option>`;
+              }).join('')}
               <option value="">Other / General</option>
             </select>
           </div>
