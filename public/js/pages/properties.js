@@ -68,14 +68,18 @@ const PropertiesPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const [prop, applications, ipmCases, scheduleRounds, soilTests, followUps] = await Promise.all([
-        Api.get(`/api/properties/${id}`),
+      const [overview, applications, ipmCases, scheduleRounds, soilTests, followUps] = await Promise.all([
+        Api.get(`/api/properties/${id}/overview`),
         Api.get(`/api/properties/${id}/applications`),
         Api.get(`/api/properties/${id}/ipm-cases`),
         Api.get(`/api/schedules/property/${id}`).catch(() => []),
         Api.get(`/api/soil-tests/property/${id}`).catch(() => []),
         Api.get(`/api/follow-ups?property_id=${id}&status=open`).catch(() => [])
       ]);
+      const prop = overview.property;
+      const estimates = overview.estimates || [];
+      const invoices = overview.invoices || [];
+      const stats = prop.overview_stats || {};
       const isAdmin = App.user.role === 'admin';
 
       const zones = prop.zones || [];
@@ -114,6 +118,12 @@ const PropertiesPage = {
             ` : ''}
           </div>
         </div>
+
+        ${this._renderOverviewStats(stats)}
+
+        ${this._renderEstimatesSection(estimates, prop.id)}
+
+        ${this._renderInvoicesSection(invoices)}
 
         <div class="card" style="margin-bottom:12px;">
           <div class="card-header">
@@ -1148,5 +1158,186 @@ const PropertiesPage = {
     const d = document.createElement('div');
     d.textContent = String(str);
     return d.innerHTML;
+  },
+
+  // ─── Customer 360° overview sections ──────────────────────────────
+  // Three helpers that render the Summary / Estimates / Invoices cards
+  // on the property detail page. All data comes from the new
+  // /api/properties/:id/overview endpoint.
+
+  _renderOverviewStats(stats) {
+    // Quick health read — season total, outstanding, paid, last visit,
+    // next visit, plan. Only render if there's anything meaningful to show.
+    if (!stats || (!stats.season_total && !stats.outstanding && !stats.paid && !stats.last_visit_date && !stats.next_visit_date)) {
+      return '';
+    }
+    const fmt = (v) => '$' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    const fmtDate = (iso) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
+    const planLabel = stats.payment_plan === 'monthly' ? 'Monthly'
+                   : stats.payment_plan === 'per_service' ? 'Per Service'
+                   : stats.payment_plan === 'full' ? 'Pay in Full'
+                   : '—';
+    return `
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-header" style="padding:10px 14px;"><h3 style="font-size:14px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;margin:0;">Customer Overview</h3></div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--gray-100);">
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Season Total</div>
+            <div style="font-size:18px;font-weight:700;color:var(--navy,var(--blue));margin-top:2px;">${fmt(stats.season_total)}</div>
+          </div>
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Outstanding</div>
+            <div style="font-size:18px;font-weight:700;color:${stats.outstanding > 0 ? 'var(--orange)' : 'var(--gray-400)'};margin-top:2px;">${fmt(stats.outstanding)}</div>
+          </div>
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Paid</div>
+            <div style="font-size:18px;font-weight:700;color:${stats.paid > 0 ? 'var(--green-dark,#2d6a1e)' : 'var(--gray-400)'};margin-top:2px;">${fmt(stats.paid)}</div>
+          </div>
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Last Visit</div>
+            <div style="font-size:14px;font-weight:600;color:var(--gray-800);margin-top:2px;">${fmtDate(stats.last_visit_date)}</div>
+          </div>
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Next Visit</div>
+            <div style="font-size:14px;font-weight:600;color:var(--gray-800);margin-top:2px;">${fmtDate(stats.next_visit_date)}${stats.next_visit_service ? '<br><span style="font-size:11px;color:var(--gray-500);font-weight:400;">' + this.esc(stats.next_visit_service) + '</span>' : ''}</div>
+          </div>
+          <div style="background:white;padding:12px 14px;">
+            <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Plan</div>
+            <div style="font-size:14px;font-weight:600;color:var(--gray-800);margin-top:2px;">${planLabel}${stats.payment_method ? '<br><span style="font-size:11px;color:var(--gray-500);font-weight:400;text-transform:capitalize;">' + this.esc(stats.payment_method) + '</span>' : ''}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  },
+
+  _renderEstimatesSection(estimates, propertyId) {
+    const statusConfig = {
+      draft: { label: 'Draft', class: 'badge-gray' },
+      sent: { label: 'Sent', class: 'badge-blue' },
+      viewed: { label: 'Viewed', class: 'badge-orange' },
+      accepted: { label: 'Accepted', class: 'badge-green' },
+      declined: { label: 'Declined', class: 'badge-red' },
+      expired: { label: 'Expired', class: 'badge-gray' }
+    };
+    const fmtDate = (iso) => iso ? new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+    return `
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-header">
+          <h3 style="font-size:16px;">📄 Estimates ${estimates.length > 0 ? `<span style="color:var(--gray-500);font-weight:500;font-size:13px;">(${estimates.length})</span>` : ''}</h3>
+          <button class="btn btn-sm btn-outline" onclick="App.navigate('estimates', 'new');EstimatesPage._currentProperty={id:${propertyId}};" title="Start a new estimate for this customer">+ New</button>
+        </div>
+        ${estimates.length === 0 ? `
+          <div style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
+            No estimates yet for this customer.
+          </div>
+        ` : `
+          <div>
+            ${estimates.map(e => {
+              const s = statusConfig[e.status] || statusConfig.draft;
+              const dateLabel = e.accepted_at ? 'Accepted ' + fmtDate(e.accepted_at)
+                              : e.sent_at ? 'Sent ' + fmtDate(e.sent_at)
+                              : 'Created ' + fmtDate(e.created_at);
+              return `
+                <div class="data-row" style="cursor:pointer;" onclick="App.navigate('estimates','view',${e.id})">
+                  <div class="data-row-main">
+                    <h4>$${Number(e.total_price || 0).toFixed(0)}${e.status === 'accepted' && e.monthly_price ? ` <span style="font-weight:400;color:var(--gray-500);font-size:13px;">· $${Number(e.monthly_price).toFixed(0)}/mo</span>` : ''}</h4>
+                    ${e.services_summary ? `<p style="color:var(--gray-700);font-size:13px;">${this.esc(e.services_summary)}</p>` : ''}
+                    <p style="color:var(--gray-500);font-size:12px;margin-top:2px;">${dateLabel}</p>
+                  </div>
+                  <div class="data-row-right">
+                    <span class="badge ${s.class}">${s.label}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        `}
+      </div>
+    `;
+  },
+
+  _renderInvoicesSection(invoices) {
+    if (!invoices.length) {
+      return `
+        <div class="card" style="margin-bottom:12px;">
+          <div class="card-header"><h3 style="font-size:16px;">💵 Invoices</h3></div>
+          <div style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
+            No invoices yet. Generated automatically when an estimate is accepted.
+          </div>
+        </div>
+      `;
+    }
+
+    // Group by estimate_id so we can show "Monthly · 2 of 8 paid" per plan
+    const groups = new Map();
+    for (const inv of invoices) {
+      const key = inv.estimate_id || 'unlinked';
+      if (!groups.has(key)) groups.set(key, { estimate_id: inv.estimate_id, plan: inv.payment_plan, items: [] });
+      groups.get(key).items.push(inv);
+    }
+    const today = new Date().toISOString().slice(0, 10);
+
+    const groupHtml = Array.from(groups.values()).map(g => {
+      const paid = g.items.filter(i => i.status === 'paid').length;
+      const total = g.items.length;
+      const outstandingCents = g.items.reduce((s, i) =>
+        s + ((i.status !== 'paid' && i.status !== 'void') ? (i.amount_cents || 0) : 0), 0);
+      const planLabel = g.plan === 'monthly' ? `Monthly · ${paid} of ${total} paid`
+                     : g.plan === 'per_service' ? `Per Service · ${paid} of ${total} paid`
+                     : g.plan === 'full' ? `Pay in Full · ${paid === total ? 'Paid' : 'Outstanding'}`
+                     : `${total} invoice${total === 1 ? '' : 's'}`;
+      const rows = g.items.map(inv => {
+        const overdue = (inv.status === 'pending' || inv.status === 'failed') && inv.due_date && inv.due_date < today;
+        const statusClass = inv.status === 'paid' ? 'badge-green'
+                          : inv.status === 'void' ? 'badge-gray'
+                          : inv.status === 'failed' ? 'badge-red'
+                          : overdue ? 'badge-red'
+                          : inv.status === 'scheduled' ? 'badge-muted'
+                          : 'badge-orange';
+        const statusLabel = inv.status === 'paid' ? 'Paid'
+                          : inv.status === 'void' ? 'Void'
+                          : inv.status === 'failed' ? 'Failed'
+                          : overdue ? 'Overdue'
+                          : inv.status === 'scheduled' ? 'Scheduled'
+                          : 'Pending';
+        const dueStr = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
+        const installment = inv.total_installments ? ` · ${inv.installment_number}/${inv.total_installments}` : '';
+        return `
+          <div class="data-row" style="cursor:pointer;padding:10px 14px;" onclick="App.navigate('invoicing','view',${inv.id})">
+            <div class="data-row-main">
+              <h4 style="font-family:monospace;font-size:13px;letter-spacing:0.5px;">${this.esc(inv.invoice_number)}${installment}</h4>
+              <p style="color:var(--gray-500);font-size:12px;">${inv.status === 'paid' && inv.paid_at ? 'Paid ' + new Date(inv.paid_at).toLocaleDateString() : dueStr ? 'Due ' + dueStr : ''}</p>
+            </div>
+            <div class="data-row-right" style="display:flex;gap:8px;align-items:center;">
+              <span style="font-weight:600;">$${((inv.amount_cents || 0) / 100).toFixed(2)}</span>
+              <span class="badge ${statusClass}" style="font-size:11px;">${statusLabel}</span>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const groupId = 'inv-group-' + (g.estimate_id || 'unlinked');
+      return `
+        <div style="border-top:1px solid var(--gray-100);">
+          <div onclick="const b=document.getElementById('${groupId}');b.style.display=b.style.display==='none'?'':'none';" style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--gray-50);">
+            <div>
+              <div style="font-size:13px;font-weight:600;color:var(--navy,var(--blue));">${planLabel}</div>
+              ${outstandingCents > 0 ? `<div style="font-size:12px;color:var(--orange);margin-top:2px;">$${(outstandingCents/100).toFixed(2)} outstanding</div>` : ''}
+            </div>
+            <span style="color:var(--gray-400);font-size:12px;">▾</span>
+          </div>
+          <div id="${groupId}" style="display:none;">
+            ${rows}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-header"><h3 style="font-size:16px;">💵 Invoices <span style="color:var(--gray-500);font-weight:500;font-size:13px;">(${invoices.length})</span></h3></div>
+        ${groupHtml}
+      </div>
+    `;
   }
 };

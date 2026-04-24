@@ -64,6 +64,102 @@ router.get('/:id', requireAuth, (req, res) => {
   res.json(prop);
 });
 
+// 360° customer overview — property basics + estimates + invoices + stats.
+// Built to back the CRM-style property detail page so everything about one
+// customer is visible in one place without extra round trips.
+router.get('/:id/overview', requireAuth, (req, res) => {
+  const db = getDb();
+  const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+  if (!prop) return res.status(404).json({ error: 'Property not found' });
+
+  // Same baseline fields the /:id endpoint returns (so the frontend can
+  // swap fetches with no detail-page regression)
+  const appCount = db.prepare('SELECT COUNT(*) as count FROM applications WHERE property_id = ?').get(req.params.id);
+  const ipmCount = db.prepare("SELECT COUNT(*) as count FROM ipm_cases WHERE property_id = ? AND status != 'resolved'").get(req.params.id);
+  const lastApp = db.prepare('SELECT application_date FROM applications WHERE property_id = ? ORDER BY application_date DESC LIMIT 1').get(req.params.id);
+  prop.application_count = appCount.count;
+  prop.active_ipm_cases = ipmCount.count;
+  prop.last_application_date = lastApp ? lastApp.application_date : null;
+  prop.zones = db.prepare('SELECT * FROM property_zones WHERE property_id = ? ORDER BY sort_order, id').all(req.params.id);
+  const profitability = db.prepare(`
+    SELECT
+      COALESCE(SUM(revenue), 0) as total_revenue,
+      COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0) as total_cost,
+      COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0)) as total_margin,
+      CASE WHEN COALESCE(SUM(revenue), 0) > 0
+        THEN ROUND(((COALESCE(SUM(revenue), 0) - (COALESCE(SUM(labor_cost), 0) + COALESCE(SUM(material_cost), 0))) / COALESCE(SUM(revenue), 0)) * 100, 1)
+        ELSE 0
+      END as margin_pct
+    FROM applications WHERE property_id = ?
+  `).get(req.params.id);
+  prop.profitability = profitability;
+
+  // Estimates for this property — most recent first. Include a short summary
+  // of included services so the list is scannable without drilling in.
+  const estimates = db.prepare(`
+    SELECT id, status, total_price, monthly_price, payment_plan,
+           payment_method_preference, payment_months,
+           accepted_at, sent_at, declined_at, valid_until, created_at, updated_at
+    FROM estimates
+    WHERE property_id = ?
+    ORDER BY COALESCE(accepted_at, created_at) DESC, id DESC
+  `).all(req.params.id);
+  for (const e of estimates) {
+    const items = db.prepare(`
+      SELECT service_name, is_recurring, rounds, is_included
+      FROM estimate_items WHERE estimate_id = ? AND is_included = 1
+      ORDER BY sort_order, id
+    `).all(e.id);
+    // Short human-readable summary: "Fert & Weed · Mowing · Mosquito & Tick"
+    e.services_summary = items
+      .filter(i => i.service_name !== 'Bundle Discount')
+      .map(i => i.service_name)
+      .join(' · ');
+    e.item_count = items.length;
+  }
+
+  // Invoices for this property — joined through estimates. Group by estimate
+  // so the frontend can show "Monthly · 2 of 8 paid" style summaries.
+  const invoices = db.prepare(`
+    SELECT i.id, i.invoice_number, i.estimate_id, i.amount_cents, i.status,
+           i.payment_plan, i.installment_number, i.total_installments,
+           i.due_date, i.paid_at, i.payment_method, i.check_number,
+           i.token, i.notes
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE e.property_id = ?
+    ORDER BY i.due_date ASC, COALESCE(i.installment_number, 0) ASC, i.id ASC
+  `).all(req.params.id);
+
+  // Top-of-page summary stats: the "is this customer healthy?" quick read.
+  const acceptedEst = estimates.find(e => e.status === 'accepted') || null;
+  const today = new Date().toISOString().slice(0, 10);
+  let outstandingCents = 0, paidCents = 0;
+  for (const inv of invoices) {
+    if (inv.status === 'paid') paidCents += inv.amount_cents || 0;
+    else if (inv.status !== 'void') outstandingCents += inv.amount_cents || 0;
+  }
+  const nextVisit = db.prepare(`
+    SELECT scheduled_date, service_type FROM schedules
+    WHERE property_id = ? AND status != 'completed' AND status != 'cancelled'
+      AND scheduled_date >= ?
+    ORDER BY scheduled_date ASC LIMIT 1
+  `).get(req.params.id, today);
+
+  prop.overview_stats = {
+    season_total: acceptedEst ? acceptedEst.total_price : 0,
+    outstanding: outstandingCents / 100,
+    paid: paidCents / 100,
+    last_visit_date: prop.last_application_date,
+    next_visit_date: nextVisit ? nextVisit.scheduled_date : null,
+    next_visit_service: nextVisit ? nextVisit.service_type : null,
+    payment_plan: acceptedEst ? acceptedEst.payment_plan : null,
+    payment_method: acceptedEst ? acceptedEst.payment_method_preference : null
+  };
+
+  res.json({ property: prop, estimates, invoices });
+});
+
 // Get applications for a property
 router.get('/:id/applications', requireAuth, (req, res) => {
   const db = getDb();
