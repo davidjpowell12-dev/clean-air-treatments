@@ -722,15 +722,7 @@ const SchedulingPage = {
             </div>
             <div class="form-group">
               <label>Weeks Apart</label>
-              <select id="seasonInterval">
-                <option value="2">2 wks</option>
-                <option value="3">3 wks</option>
-                <option value="4">4 wks</option>
-                <option value="5">5 wks</option>
-                <option value="6" selected>6 wks</option>
-                <option value="7">7 wks</option>
-                <option value="8">8 wks</option>
-              </select>
+              <input type="number" id="seasonInterval" min="1" max="12" value="6" style="width:100%;padding:8px 10px;border:2px solid var(--gray-200);border-radius:6px;font-size:16px;font-weight:600;">
             </div>
           </div>
 
