@@ -594,32 +594,44 @@ router.post('/optimize-route', requireAuth, async (req, res) => {
   const locations = [homeLoc, ...entries.map(e => ({ lat: e.lat, lng: e.lng }))];
   const n = locations.length;
 
-  // Call Distance Matrix API — batched to stay under 100 elements per request
-  // Google limit: max 25 origins, max 25 destinations, max 100 elements (origins × destinations)
+  // Call Distance Matrix API — batched on BOTH origins and destinations.
+  // Google's limits per request: max 25 origins, max 25 destinations,
+  // max 100 elements (origins × destinations). For 46+ stops we have to
+  // send multiple origin batches AND multiple destination batches.
+  //
+  // Batch sizes: max 4 origins × max 25 destinations = 100 elements.
   const allCoords = locations.map(l => `${l.lat},${l.lng}`);
-  const destStr = allCoords.join('|');
-  const MAX_ELEMENTS = 100;
-  const batchSize = Math.max(1, Math.floor(MAX_ELEMENTS / n)); // origins per batch
+  const ORIGIN_BATCH = 4;
+  const DEST_BATCH = 25;
 
-  // Initialize N×N duration matrix
+  // Initialize N×N duration matrix (999999 = "no route known")
   const dur = Array.from({ length: n }, () => Array(n).fill(999999));
 
-  for (let start = 0; start < n; start += batchSize) {
-    const end = Math.min(start + batchSize, n);
-    const originStr = allCoords.slice(start, end).join('|');
-    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originStr}&destinations=${destStr}&key=${apiKey}&mode=driving`;
-    const dmRes = await fetch(dmUrl);
-    const dmData = await dmRes.json();
+  for (let oStart = 0; oStart < n; oStart += ORIGIN_BATCH) {
+    const oEnd = Math.min(oStart + ORIGIN_BATCH, n);
+    const originStr = allCoords.slice(oStart, oEnd).join('|');
 
-    if (dmData.status !== 'OK') {
-      return res.status(400).json({ error: `Distance Matrix API error: ${dmData.status}` });
-    }
+    for (let dStart = 0; dStart < n; dStart += DEST_BATCH) {
+      const dEnd = Math.min(dStart + DEST_BATCH, n);
+      const destStr = allCoords.slice(dStart, dEnd).join('|');
 
-    for (let i = 0; i < dmData.rows.length; i++) {
-      const origIdx = start + i;
-      for (let j = 0; j < dmData.rows[i].elements.length; j++) {
-        const el = dmData.rows[i].elements[j];
-        dur[origIdx][j] = el.status === 'OK' ? el.duration.value : 999999;
+      const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json?origins=${originStr}&destinations=${destStr}&key=${apiKey}&mode=driving`;
+      const dmRes = await fetch(dmUrl);
+      const dmData = await dmRes.json();
+
+      if (dmData.status !== 'OK') {
+        return res.status(400).json({
+          error: `Distance Matrix API error: ${dmData.status}${dmData.error_message ? ' — ' + dmData.error_message : ''}`
+        });
+      }
+
+      for (let i = 0; i < dmData.rows.length; i++) {
+        const origIdx = oStart + i;
+        for (let j = 0; j < dmData.rows[i].elements.length; j++) {
+          const destIdx = dStart + j;
+          const el = dmData.rows[i].elements[j];
+          dur[origIdx][destIdx] = el.status === 'OK' ? el.duration.value : 999999;
+        }
       }
     }
   }
