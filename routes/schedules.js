@@ -241,18 +241,59 @@ router.get('/property/:propertyId', requireAuth, (req, res) => {
   res.json(entries);
 });
 
-// Reschedule a single entry to a new date
+// Reschedule a single entry to a new date.
+// If apply_to_series is true AND the entry has a program_id, shifts every
+// future (not-yet-completed) entry in the same program to the same target
+// day-of-week as the new_date. Used when moving weekly mowing from
+// Mondays to Tuesdays going forward, etc.
 router.put('/:id/reschedule', requireAuth, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Schedule entry not found' });
 
-  const { new_date } = req.body;
+  const { new_date, apply_to_series } = req.body;
   if (!new_date) return res.status(400).json({ error: 'new_date required' });
 
+  // Always update the one entry first
   db.prepare(
     'UPDATE schedules SET scheduled_date = ?, sort_order = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
   ).run(new_date, req.params.id);
+
+  let seriesShiftedCount = 0;
+
+  // If requested + part of a program, shift future visits to the same day-of-week
+  if (apply_to_series && existing.program_id) {
+    const targetDow = new Date(new_date + 'T12:00:00').getDay(); // 0=Sun..6=Sat
+
+    // Find future non-completed entries in the same program, excluding the one we already moved
+    const futureEntries = db.prepare(`
+      SELECT id, scheduled_date FROM schedules
+      WHERE program_id = ?
+        AND id != ?
+        AND status != 'completed'
+        AND status != 'cancelled'
+        AND scheduled_date > ?
+    `).all(existing.program_id, req.params.id, existing.scheduled_date);
+
+    const updateStmt = db.prepare(
+      'UPDATE schedules SET scheduled_date = ?, sort_order = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+    );
+
+    for (const fe of futureEntries) {
+      const orig = new Date(fe.scheduled_date + 'T12:00:00');
+      const origDow = orig.getDay();
+      // Shift to same week but target day-of-week. Range: -6 to +6.
+      let delta = targetDow - origDow;
+      // Keep the shift minimal: if moving from Mon(1) to Fri(5), delta = +4.
+      // If moving from Fri(5) to Mon(1), delta = -4 (stay in same week if possible).
+      // No modulo — we want the direct shift so the series keeps its cadence.
+      const shifted = new Date(orig);
+      shifted.setDate(orig.getDate() + delta);
+      const newDateStr = shifted.toISOString().slice(0, 10);
+      updateStmt.run(newDateStr, fe.id);
+      seriesShiftedCount++;
+    }
+  }
 
   const updated = db.prepare(`
     SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.sqft,
@@ -264,9 +305,11 @@ router.put('/:id/reschedule', requireAuth, (req, res) => {
   `).get(req.params.id);
 
   logAudit(db, 'schedule', req.params.id, req.session.userId, 'reschedule', {
-    old_date: existing.scheduled_date, new_date
+    old_date: existing.scheduled_date, new_date,
+    apply_to_series: !!apply_to_series,
+    series_shifted: seriesShiftedCount
   });
-  res.json(updated);
+  res.json({ ...updated, series_shifted: seriesShiftedCount });
 });
 
 // Cancel entire season (delete non-completed program entries)

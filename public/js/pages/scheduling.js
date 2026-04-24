@@ -182,6 +182,23 @@ const SchedulingPage = {
               <label>Move to Date</label>
               <input type="date" id="rescheduleDate">
             </div>
+            <div id="rescheduleSeriesGroup" class="form-group" style="display:none;">
+              <label style="font-weight:600;color:var(--gray-700);margin-bottom:6px;">Apply to:</label>
+              <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--gray-200);border-radius:6px;margin-bottom:6px;cursor:pointer;">
+                <input type="radio" name="rescheduleScope" value="series" checked style="margin-top:3px;">
+                <div>
+                  <div style="font-weight:600;font-size:14px;">This + all future visits in the series</div>
+                  <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Shifts every remaining visit to the same day-of-week as the new date.</div>
+                </div>
+              </label>
+              <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--gray-200);border-radius:6px;cursor:pointer;">
+                <input type="radio" name="rescheduleScope" value="this" style="margin-top:3px;">
+                <div>
+                  <div style="font-weight:600;font-size:14px;">Just this one visit</div>
+                  <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">Other visits in the series stay where they are.</div>
+                </div>
+              </label>
+            </div>
             <button id="rescheduleConfirm" class="btn btn-primary btn-full">Move Visit</button>
           </div>
         </div>
@@ -404,24 +421,57 @@ const SchedulingPage = {
     // Reschedule buttons
     document.querySelectorAll('.sched-reschedule').forEach(btn => {
       btn.addEventListener('click', () => {
-        const name = btn.dataset.name;
-        const round = btn.dataset.round;
-        const total = btn.dataset.total;
-        const info = round ? `Treatment ${round} of ${total} for ${name}` : name;
-        document.getElementById('rescheduleInfo').textContent = info;
-        document.getElementById('rescheduleDate').value = '';
-        document.getElementById('rescheduleModal').classList.add('open');
-
-        document.getElementById('rescheduleConfirm').onclick = async () => {
-          const newDate = document.getElementById('rescheduleDate').value;
-          if (!newDate) return App.toast('Pick a date', 'error');
-          await Api.put(`/api/schedules/${btn.dataset.id}/reschedule`, { new_date: newDate });
-          document.getElementById('rescheduleModal').classList.remove('open');
-          App.toast('Visit rescheduled');
-          this.renderDaily();
-        };
+        const entry = entries.find(x => String(x.id) === String(btn.dataset.id));
+        this._openRescheduleModal(btn.dataset.id, entry);
       });
     });
+  },
+
+  // Shared reschedule modal — used by the Reschedule button AND by drag-drop.
+  // Shows the "just this / whole series" choice when the entry is part of a
+  // program (has program_id) so moving one mowing shifts all future mowings
+  // to the same day-of-week.
+  _openRescheduleModal(scheduleId, entry, prefillDate) {
+    const name = (entry && entry.customer_name) || '';
+    const round = (entry && entry.round_number) || '';
+    const total = (entry && entry.total_rounds) || '';
+    const hasProgram = !!(entry && entry.program_id);
+    const info = round ? `Treatment ${round} of ${total} for ${name}` : name;
+
+    document.getElementById('rescheduleInfo').textContent = info;
+    document.getElementById('rescheduleDate').value = prefillDate || '';
+
+    const seriesGroup = document.getElementById('rescheduleSeriesGroup');
+    if (seriesGroup) {
+      seriesGroup.style.display = hasProgram ? '' : 'none';
+      // Default to "series" when it's a program visit — that's the common case
+      const seriesRadio = document.querySelector('input[name="rescheduleScope"][value="series"]');
+      if (seriesRadio) seriesRadio.checked = true;
+    }
+
+    document.getElementById('rescheduleModal').classList.add('open');
+
+    document.getElementById('rescheduleConfirm').onclick = async () => {
+      const newDate = document.getElementById('rescheduleDate').value;
+      if (!newDate) return App.toast('Pick a date', 'error');
+      const scopeEl = document.querySelector('input[name="rescheduleScope"]:checked');
+      const applyToSeries = hasProgram && scopeEl && scopeEl.value === 'series';
+      try {
+        const result = await Api.put(`/api/schedules/${scheduleId}/reschedule`, {
+          new_date: newDate,
+          apply_to_series: applyToSeries
+        });
+        document.getElementById('rescheduleModal').classList.remove('open');
+        if (applyToSeries && result.series_shifted) {
+          App.toast(`Moved this + ${result.series_shifted} future visit${result.series_shifted === 1 ? '' : 's'}`);
+        } else {
+          App.toast('Visit rescheduled');
+        }
+        this.renderDaily();
+      } catch (err) {
+        App.toast('Reschedule failed: ' + err.message, 'error');
+      }
+    };
   },
 
   _esc(str) {
@@ -1302,9 +1352,19 @@ const SchedulingPage = {
         self._updateCellBadge(document.querySelector(`.cal-cell[data-date="${sourceDate}"]`));
         self._updateCellBadge(currentDropTarget);
 
+        // Drag-drop completion: if the entry belongs to a program, prompt
+        // for series-vs-single. Otherwise just move the one visit.
         try {
-          await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
-          App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+          const meta = await Api.get(`/api/schedules/${entryId}`).catch(() => null);
+          if (meta && meta.program_id) {
+            // Open the shared reschedule modal pre-filled with the drop date —
+            // the user picks series vs single and hits confirm.
+            self.renderCalendar(); // revert visual drop; modal will do the move
+            self._openRescheduleModal(entryId, meta, newDate);
+          } else {
+            await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
+            App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+          }
         } catch (err) {
           App.toast('Reschedule failed: ' + (err.message || 'Unknown error'), 'error');
           self.renderCalendar();
@@ -1520,9 +1580,16 @@ const SchedulingPage = {
           }
         }
 
+        // Same series-vs-single prompt as the other drag-drop path
         try {
-          await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
-          App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+          const meta = await Api.get(`/api/schedules/${entryId}`).catch(() => null);
+          if (meta && meta.program_id) {
+            self.renderCalendar();
+            self._openRescheduleModal(entryId, meta, newDate);
+          } else {
+            await Api.put(`/api/schedules/${entryId}/reschedule`, { new_date: newDate });
+            App.toast(`Moved ${entryName} to ${self._shortDate(newDate)}`);
+          }
         } catch (err) {
           App.toast('Reschedule failed: ' + (err.message || 'Unknown error'), 'error');
           self.renderCalendar();
