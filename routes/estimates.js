@@ -517,10 +517,14 @@ router.get('/needs-scheduling', requireAuth, (req, res) => {
             AND s.scheduled_date LIKE ?
           )
         )
-        -- Also show if NO schedules at all (covers pre-update entries with NULL service_type)
+        -- Also show if NO schedules at all for this estimate OR its property
+        -- (covers pre-update NULL service_type AND the workflow where schedules
+        -- are generated before the estimate exists, so estimate_id is NULL but
+        -- property_id matches)
         OR NOT EXISTS (
           SELECT 1 FROM schedules s
-          WHERE s.estimate_id = e.id AND s.program_id IS NOT NULL
+          WHERE (s.estimate_id = e.id OR s.property_id = e.property_id)
+          AND s.program_id IS NOT NULL
           AND s.scheduled_date LIKE ?
         )
       )
