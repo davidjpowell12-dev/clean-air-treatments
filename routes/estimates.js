@@ -490,58 +490,28 @@ router.post('/:id/card-save-link', requireAuth, async (req, res) => {
 router.get('/needs-scheduling', requireAuth, (req, res) => {
   const db = getDb();
   const currentYear = new Date().getFullYear();
-  // Tolerant match: either name (lower-cased) is a substring of the other.
-  // Catches mismatches like "Fert & Weed Control" vs "Fertilization & Weed Control",
-  // "Mosquito & Tick" vs "Mosquito & Tick Control", "Spring Cleanup" vs "Spring Clean-Up".
-  // Uses EXISTS instead of NOT IN so we can compare per-pair.
+  // Pragmatic definition: an accepted estimate "needs scheduling" if there
+  // are zero schedule entries for its property in the current year.
+  // We tried matching by service-name with various fuzzy strategies, but
+  // legacy name drift made the widget fire false positives. The user's
+  // mental model is simpler: "if I've put anything on the calendar for
+  // this customer, leave them off the urgent list." If they're missing
+  // some services, they'll catch that in the Schedule Job modal which
+  // does per-service matching.
   const estimates = db.prepare(`
     SELECT e.id, e.customer_name, e.address, e.city, e.total_price, e.monthly_price,
            e.payment_months, e.accepted_at, e.property_id,
            (SELECT COUNT(*) FROM estimate_items WHERE estimate_id = e.id AND is_included = 1) as item_count,
-           (SELECT COUNT(DISTINCT ei.service_name) FROM estimate_items ei
-            WHERE ei.estimate_id = e.id AND ei.is_included = 1 AND ei.is_recurring = 1
-            AND NOT EXISTS (
-              SELECT 1 FROM schedules s
-              WHERE s.program_id IS NOT NULL AND s.service_type IS NOT NULL
-              AND (s.estimate_id = e.id OR s.property_id = e.property_id)
-              AND s.scheduled_date LIKE ?
-              AND (
-                LOWER(s.service_type) = LOWER(ei.service_name)
-                OR LOWER(s.service_type) LIKE '%' || LOWER(ei.service_name) || '%'
-                OR LOWER(ei.service_name) LIKE '%' || LOWER(s.service_type) || '%'
-              )
-            )) as unscheduled_services,
            ROUND((julianday('now') - julianday(e.accepted_at))) as days_since_accepted
     FROM estimates e
     WHERE e.status = 'accepted'
-      AND (
-        -- Show if ANY included recurring service hasn't been scheduled yet
-        -- (using fuzzy matching to handle legacy name variations)
-        EXISTS (
-          SELECT 1 FROM estimate_items ei
-          WHERE ei.estimate_id = e.id AND ei.is_included = 1 AND ei.is_recurring = 1
-          AND NOT EXISTS (
-            SELECT 1 FROM schedules s
-            WHERE s.program_id IS NOT NULL AND s.service_type IS NOT NULL
-            AND (s.estimate_id = e.id OR s.property_id = e.property_id)
-            AND s.scheduled_date LIKE ?
-            AND (
-              LOWER(s.service_type) = LOWER(ei.service_name)
-              OR LOWER(s.service_type) LIKE '%' || LOWER(ei.service_name) || '%'
-              OR LOWER(ei.service_name) LIKE '%' || LOWER(s.service_type) || '%'
-            )
-          )
-        )
-        -- Also show if NO schedules at all for this estimate OR its property
-        OR NOT EXISTS (
-          SELECT 1 FROM schedules s
-          WHERE (s.estimate_id = e.id OR s.property_id = e.property_id)
-          AND s.program_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM schedules s
+        WHERE (s.estimate_id = e.id OR s.property_id = e.property_id)
           AND s.scheduled_date LIKE ?
-        )
       )
     ORDER BY e.accepted_at ASC
-  `).all(`${currentYear}%`, `${currentYear}%`, `${currentYear}%`);
+  `).all(`${currentYear}%`);
   res.json(estimates);
 });
 
