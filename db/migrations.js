@@ -411,6 +411,25 @@ function runMigrations(db) {
     console.log(`[schema-repair] Backfilled receipt tokens for ${missingTokens.length} invoice(s)`);
   }
 
+  // Properties without sqft: borrow from the most recent application's
+  // total_area_treated. Idempotent — only updates rows that are still null/0.
+  const sqftBackfill = db.prepare(`
+    UPDATE properties SET sqft = (
+      SELECT a.total_area_treated FROM applications a
+      WHERE a.property_id = properties.id
+        AND a.total_area_treated > 0
+      ORDER BY a.application_date DESC LIMIT 1
+    )
+    WHERE (sqft IS NULL OR sqft = 0)
+      AND EXISTS (
+        SELECT 1 FROM applications a
+        WHERE a.property_id = properties.id AND a.total_area_treated > 0
+      )
+  `).run();
+  if (sqftBackfill.changes > 0) {
+    console.log(`[schema-repair] Backfilled sqft from applications for ${sqftBackfill.changes} property(ies)`);
+  }
+
   // Messaging: per-service text templates used when composing SMS drafts.
   ensureColumn(db, 'services', 'heads_up_text', 'TEXT');
   ensureColumn(db, 'services', 'completion_text', 'TEXT');

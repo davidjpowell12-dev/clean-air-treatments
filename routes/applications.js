@@ -296,6 +296,19 @@ router.post('/', requireAuth, (req, res) => {
     }
   }
 
+  // Backfill property.sqft from the application if the property doesn't
+  // have one yet. Lets the Day Mix Sheet (and other calculators) use the
+  // tech-measured sqft from Round 1 going forward.
+  if (b.property_id && b.total_area_treated) {
+    try {
+      const prop = db.prepare('SELECT sqft FROM properties WHERE id = ?').get(b.property_id);
+      if (prop && (!prop.sqft || prop.sqft === 0)) {
+        db.prepare('UPDATE properties SET sqft = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(Number(b.total_area_treated), b.property_id);
+      }
+    } catch (e) { /* non-fatal */ }
+  }
+
   // Auto-deduct inventory
   if (b.product_id && b.total_product_used) {
     const inv = db.prepare('SELECT * FROM inventory WHERE product_id = ?').get(b.product_id);

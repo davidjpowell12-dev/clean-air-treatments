@@ -547,9 +547,19 @@ router.get('/day-mix/:date', requireAuth, (req, res) => {
   const date = req.params.date;
   if (!date) return res.status(400).json({ error: 'date required' });
 
+  // Pull sqft with fallback: properties.sqft first; if blank, use the most
+  // recent application's total_area_treated for that property. Techs often
+  // enter sqft on Round 1 application forms before the property record gets
+  // updated, so this catches that case.
   const allStops = db.prepare(`
     SELECT s.id, s.service_type, s.status, s.round_number, s.total_rounds,
-           p.id as property_id, p.customer_name, p.address, p.sqft,
+           p.id as property_id, p.customer_name, p.address,
+           COALESCE(
+             NULLIF(p.sqft, 0),
+             (SELECT a.total_area_treated FROM applications a
+              WHERE a.property_id = p.id AND a.total_area_treated > 0
+              ORDER BY a.application_date DESC LIMIT 1)
+           ) as sqft,
            svc.requires_application
     FROM schedules s
     JOIN properties p ON p.id = s.property_id
