@@ -141,6 +141,7 @@ const SchedulingPage = {
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
         ${total >= 2 ? `<button id="optimizeRouteBtn" class="btn btn-outline btn-sm">&#128205; Optimize Route</button>` : ''}
+        ${total >= 1 ? `<button id="dayMixBtn" class="btn btn-outline btn-sm">&#128203; Day Mix Sheet</button>` : ''}
         <div style="display: flex; align-items: center; gap: 6px;">
           <select id="bulkTech" class="form-select-sm">
             <option value="">Assign tech...</option>
@@ -242,6 +243,11 @@ const SchedulingPage = {
           optimizeBtn.innerHTML = '&#128205; Optimize Route';
         }
       });
+    }
+
+    const dayMixBtn = document.getElementById('dayMixBtn');
+    if (dayMixBtn) {
+      dayMixBtn.addEventListener('click', () => this._openDayMixModal(date));
     }
 
     document.getElementById('assignAllBtn').addEventListener('click', async () => {
@@ -534,6 +540,206 @@ const SchedulingPage = {
     return String(str).replace(/[&<>"']/g, c =>
       ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])
     );
+  },
+
+  // Day Mix Sheet — given a date, show total treatment-stop sqft, let user
+  // add products from inventory, auto-fill rates from product records,
+  // calculate total product needed for the day. Optional tank section
+  // computes per-fill product/water volumes and number of refills.
+  async _openDayMixModal(date) {
+    document.querySelector('.modal-overlay.day-mix-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay day-mix-modal';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:560px;">
+        <div class="modal-header">
+          <h3>📋 Day Mix Sheet</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body" id="dayMixBody">
+          <div style="text-align:center;padding:40px;color:var(--gray-500);">Loading…</div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    overlay.querySelector('.modal-close').addEventListener('click', () => {
+      overlay.classList.remove('open');
+      setTimeout(() => overlay.remove(), 200);
+    });
+
+    // Load day data + product list in parallel
+    let dayData, products;
+    try {
+      [dayData, products] = await Promise.all([
+        Api.get('/api/schedules/day-mix/' + encodeURIComponent(date)),
+        Api.get('/api/products').catch(() => [])
+      ]);
+    } catch (err) {
+      document.getElementById('dayMixBody').innerHTML = `<p style="color:var(--red);padding:16px;">Error loading day: ${this._esc(err.message)}</p>`;
+      return;
+    }
+
+    this._mixState = {
+      date,
+      dayData,
+      products,
+      lines: [],   // each: { product_id, name, rate, rate_unit }
+      tank: { capacity: '', spray_rate: '' }
+    };
+
+    this._renderDayMix();
+  },
+
+  _renderDayMix() {
+    const { dayData, products, lines, tank } = this._mixState;
+    const body = document.getElementById('dayMixBody');
+    if (!body) return;
+
+    const SQFT_PER_ACRE = 43560;
+    const fmtN = n => Number(n).toLocaleString(undefined, { maximumFractionDigits: 2 });
+    const fmtInt = n => Math.round(Number(n)).toLocaleString();
+
+    // Compute per-line totals: sqft × rate / 1000
+    const totalSqft = dayData.total_sqft || 0;
+    const lineCalcs = lines.map(l => {
+      const rate = parseFloat(l.rate) || 0;
+      const total = (totalSqft / 1000) * rate;
+      // Most product rates are oz/1000sqft; if the unit is gal/1000 we still
+      // compute the same way and just label.
+      return { ...l, total_amount: total };
+    });
+
+    // Combined product VOLUME in oz (assume rates given as oz/1000sqft).
+    // For tank math we need volume in gallons.
+    const totalProductOz = lineCalcs.reduce((sum, l) => {
+      // If the unit is gal/1000sqft, multiply by 128 to convert to oz.
+      const oz = (l.rate_unit || '').toLowerCase().startsWith('gal') ? l.total_amount * 128 : l.total_amount;
+      return sum + oz;
+    }, 0);
+    const totalProductGal = totalProductOz / 128;
+
+    // Tank math (only when both fields entered)
+    const tankCapGal = parseFloat(tank.capacity) || 0;
+    const sprayRate = parseFloat(tank.spray_rate) || 0; // gal of MIX per 1000 sqft
+    let tankHtml = '';
+    if (tankCapGal > 0 && sprayRate > 0 && totalSqft > 0) {
+      // sqft treated per fill = (tankCapGal × 1000) / sprayRate
+      const sqftPerFill = (tankCapGal * 1000) / sprayRate;
+      const fillsNeeded = Math.ceil(totalSqft / sqftPerFill);
+      // Per-fill product volume = (sqft per fill / 1000) × rate, summed across products
+      const productVolPerFillOz = lineCalcs.reduce((sum, l) => {
+        const ratePer1000 = parseFloat(l.rate) || 0;
+        const ozPer1000 = (l.rate_unit || '').toLowerCase().startsWith('gal') ? ratePer1000 * 128 : ratePer1000;
+        return sum + (sqftPerFill / 1000) * ozPer1000;
+      }, 0);
+      const productVolPerFillGal = productVolPerFillOz / 128;
+      const waterPerFillGal = Math.max(0, tankCapGal - productVolPerFillGal);
+
+      tankHtml = `
+        <div style="background:var(--green-light, #e8f5d8);padding:12px 14px;border-radius:8px;margin-top:10px;font-size:13px;">
+          <div style="font-weight:700;margin-bottom:6px;">Per Tank Fill (${fmtN(tankCapGal)} gal)</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:13px;">
+            <div><span style="color:var(--gray-600);">Product volume:</span> <strong>${fmtN(productVolPerFillGal)} gal</strong></div>
+            <div><span style="color:var(--gray-600);">Water:</span> <strong>${fmtN(waterPerFillGal)} gal</strong></div>
+            <div><span style="color:var(--gray-600);">Sqft per fill:</span> <strong>${fmtInt(sqftPerFill)}</strong></div>
+            <div><span style="color:var(--gray-600);">Fills needed:</span> <strong>${fillsNeeded}</strong></div>
+          </div>
+        </div>
+      `;
+    }
+
+    body.innerHTML = `
+      <div style="margin-bottom:14px;padding-bottom:12px;border-bottom:1px solid var(--gray-200);">
+        <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;">Treatment stops — ${dayData.treatment_stop_count}</div>
+        <div style="font-size:24px;font-weight:800;color:var(--green-dark, var(--green));margin-top:2px;">${fmtN(dayData.total_acres)} acres</div>
+        <div style="font-size:13px;color:var(--gray-600);margin-top:2px;">${fmtInt(totalSqft)} sq ft total</div>
+        ${dayData.excluded_stop_count > 0 ? `<p style="font-size:11px;color:var(--gray-500);margin-top:6px;">${dayData.excluded_stop_count} non-chemical stop${dayData.excluded_stop_count === 1 ? '' : 's'} (mowing/clean-up) excluded.</p>` : ''}
+        ${dayData.stops_missing_sqft > 0 ? `<p style="font-size:11px;color:var(--orange);margin-top:4px;">⚠ ${dayData.stops_missing_sqft} stop${dayData.stops_missing_sqft === 1 ? '' : 's'} missing sqft — totals will be low.</p>` : ''}
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:8px;">Products</div>
+        <div id="mixLines">
+          ${lines.length === 0 ? `<p style="font-size:13px;color:var(--gray-500);font-style:italic;">No products added yet. Pick one below.</p>` : ''}
+          ${lineCalcs.map((l, i) => `
+            <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-weight:600;font-size:14px;">${this._esc(l.name)}</div>
+                <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;">
+                  <input type="number" step="0.01" min="0" value="${l.rate}" data-idx="${i}" class="mix-rate-input" style="width:68px;padding:3px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;">
+                  <span style="color:var(--gray-500);">${this._esc(l.rate_unit || 'oz/1000 sqft')}</span>
+                </div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-weight:700;font-size:15px;color:var(--green-dark, var(--green));">${fmtN(l.total_amount)} ${(l.rate_unit || 'oz/1000sqft').split('/')[0]}</div>
+                <button class="btn-icon" data-idx="${i}" style="margin-top:2px;color:var(--red);background:none;border:none;cursor:pointer;font-size:18px;padding:0;" data-action="remove-line">×</button>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px;">
+          <select id="mixProductPicker" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;">
+            <option value="">+ Add product...</option>
+            ${products.map(p => `<option value="${p.id}">${this._esc(p.name)}${p.app_rate_low ? ' (' + p.app_rate_low + ' ' + (p.app_rate_unit || '') + ')' : ''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <details style="margin-top:14px;" ${tank.capacity || tank.spray_rate ? 'open' : ''}>
+        <summary style="cursor:pointer;font-weight:600;font-size:13px;color:var(--gray-700);">Tank Setup (optional)</summary>
+        <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+          <div>
+            <label style="font-size:11px;color:var(--gray-500);">Tank capacity (gal)</label>
+            <input type="number" step="0.1" min="0" id="mixTankCap" value="${tank.capacity}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;">
+          </div>
+          <div>
+            <label style="font-size:11px;color:var(--gray-500);">Spray rate (gal mix / 1000 sqft)</label>
+            <input type="number" step="0.01" min="0" id="mixSprayRate" value="${tank.spray_rate}" style="width:100%;padding:6px 8px;border:1px solid var(--gray-300);border-radius:4px;font-size:13px;">
+          </div>
+        </div>
+        ${tankHtml}
+      </details>
+    `;
+
+    // Wire interactions
+    const picker = document.getElementById('mixProductPicker');
+    if (picker) {
+      picker.addEventListener('change', () => {
+        const productId = picker.value;
+        if (!productId) return;
+        const p = products.find(x => String(x.id) === String(productId));
+        if (!p) return;
+        this._mixState.lines.push({
+          product_id: p.id,
+          name: p.name,
+          rate: p.app_rate_low || '',
+          rate_unit: p.app_rate_unit || 'oz/1000sqft'
+        });
+        picker.value = '';
+        this._renderDayMix();
+      });
+    }
+
+    body.querySelectorAll('.mix-rate-input').forEach(el => {
+      el.addEventListener('change', () => {
+        const idx = Number(el.dataset.idx);
+        this._mixState.lines[idx].rate = el.value;
+        this._renderDayMix();
+      });
+    });
+    body.querySelectorAll('[data-action="remove-line"]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset.idx);
+        this._mixState.lines.splice(idx, 1);
+        this._renderDayMix();
+      });
+    });
+
+    const tankCap = document.getElementById('mixTankCap');
+    const tankSpray = document.getElementById('mixSprayRate');
+    if (tankCap) tankCap.addEventListener('change', () => { this._mixState.tank.capacity = tankCap.value; this._renderDayMix(); });
+    if (tankSpray) tankSpray.addEventListener('change', () => { this._mixState.tank.spray_rate = tankSpray.value; this._renderDayMix(); });
   },
 
   // Quick-complete modal for non-chemical services (Mowing, Clean-Ups,

@@ -538,6 +538,58 @@ router.delete('/:id', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
+// Day Mix Sheet — given a date, returns the sum of property sqft across all
+// chemical-application stops (excludes mowing/clean-ups via the
+// services.requires_application flag). Used by the front-end mix calculator
+// to figure out total product needed for a multi-product application day.
+router.get('/day-mix/:date', requireAuth, (req, res) => {
+  const db = getDb();
+  const date = req.params.date;
+  if (!date) return res.status(400).json({ error: 'date required' });
+
+  const allStops = db.prepare(`
+    SELECT s.id, s.service_type, s.status, s.round_number, s.total_rounds,
+           p.id as property_id, p.customer_name, p.address, p.sqft,
+           svc.requires_application
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    LEFT JOIN services svc ON LOWER(svc.name) = LOWER(s.service_type)
+    WHERE s.scheduled_date = ?
+      AND s.status != 'cancelled'
+    ORDER BY s.sort_order, s.id
+  `).all(date);
+
+  // Treatment stops: anything where the matched service requires an
+  // application record, OR has no service_type match (default safe).
+  // Mowing/clean-up explicitly opted-out via requires_application = 0.
+  const treatmentStops = allStops.filter(s =>
+    s.requires_application === null || s.requires_application === undefined || s.requires_application === 1
+  );
+  const excluded = allStops.length - treatmentStops.length;
+
+  const totalSqft = treatmentStops.reduce((sum, s) => sum + (Number(s.sqft) || 0), 0);
+  const stopsMissingSqft = treatmentStops.filter(s => !s.sqft).length;
+
+  res.json({
+    date,
+    treatment_stops: treatmentStops.map(s => ({
+      id: s.id,
+      service_type: s.service_type,
+      property_id: s.property_id,
+      customer_name: s.customer_name,
+      address: s.address,
+      sqft: s.sqft || 0,
+      round_number: s.round_number,
+      total_rounds: s.total_rounds
+    })),
+    total_sqft: totalSqft,
+    total_acres: +(totalSqft / 43560).toFixed(2),
+    treatment_stop_count: treatmentStops.length,
+    excluded_stop_count: excluded,
+    stops_missing_sqft: stopsMissingSqft
+  });
+});
+
 // Optimize route for a date using Google Distance Matrix API
 router.post('/optimize-route', requireAuth, async (req, res) => {
   const db = getDb();
