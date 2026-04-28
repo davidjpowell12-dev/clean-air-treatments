@@ -11,7 +11,10 @@ const ApplicationsPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const applications = await Api.get('/api/applications');
+      const [applications, coverage] = await Promise.all([
+        Api.get('/api/applications'),
+        Api.get('/api/applications/coverage').catch(() => null)
+      ]);
 
       const hasDraft = sessionStorage.getItem('app_draft_new');
 
@@ -33,6 +36,8 @@ const ApplicationsPage = {
             </div>
           </div>
         ` : ''}
+
+        ${this._renderCoverage(coverage)}
 
         <div class="form-row" style="margin-bottom:16px;">
           <div class="form-group" style="margin:0;">
@@ -81,6 +86,93 @@ const ApplicationsPage = {
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
+  },
+
+  // Coverage stats card — total acreage YTD with breakdowns by round and by service.
+  // Three views shown: top-line total, per-round table, per-service table.
+  _renderCoverage(c) {
+    if (!c || !c.total || c.total.visit_count === 0) return '';
+
+    const fmtSqft = n => Math.round(n).toLocaleString();
+    const fmtAcres = n => (Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const roundRows = (c.by_round || []).filter(r => r.round_number > 0).map(r => `
+      <tr>
+        <td style="padding:6px 8px;font-weight:600;">Round ${r.round_number}${r.total_rounds ? ' / ' + r.total_rounds : ''}</td>
+        <td style="padding:6px 8px;text-align:right;">${r.visit_count}</td>
+        <td style="padding:6px 8px;text-align:right;font-weight:600;">${fmtAcres(r.acres)} ac</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--gray-500);font-size:12px;">${fmtSqft(r.sqft)} sq ft</td>
+      </tr>
+    `).join('');
+
+    const noRoundRow = (c.by_round || []).find(r => r.round_number === 0);
+    const noRoundHtml = noRoundRow ? `
+      <tr>
+        <td style="padding:6px 8px;color:var(--gray-500);font-style:italic;">Ad-hoc (no round)</td>
+        <td style="padding:6px 8px;text-align:right;">${noRoundRow.visit_count}</td>
+        <td style="padding:6px 8px;text-align:right;">${fmtAcres(noRoundRow.acres)} ac</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--gray-500);font-size:12px;">${fmtSqft(noRoundRow.sqft)} sq ft</td>
+      </tr>
+    ` : '';
+
+    const serviceRows = (c.by_service || []).map(s => `
+      <tr>
+        <td style="padding:6px 8px;font-weight:600;">${this.esc(s.service_type)}</td>
+        <td style="padding:6px 8px;text-align:right;">${s.visit_count}</td>
+        <td style="padding:6px 8px;text-align:right;font-weight:600;">${fmtAcres(s.acres)} ac</td>
+        <td style="padding:6px 8px;text-align:right;color:var(--gray-500);font-size:12px;">${fmtSqft(s.sqft)} sq ft</td>
+      </tr>
+    `).join('');
+
+    return `
+      <div class="card" style="margin-bottom:12px;border-left:4px solid var(--green);">
+        <div class="card-header est-section-toggle" onclick="this.parentElement.classList.toggle('collapsed')" style="cursor:pointer;">
+          <h3 style="font-size:15px;">📊 Coverage — ${c.year}</h3>
+          <span class="est-toggle-icon">▾</span>
+        </div>
+        <div class="card-body est-section-body" style="padding:14px 16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--gray-100);">
+            <div>
+              <div style="font-size:28px;font-weight:800;color:var(--green-dark, var(--green));line-height:1;">${fmtAcres(c.total.acres)}</div>
+              <div style="font-size:12px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;margin-top:4px;">Acres treated YTD</div>
+              <div style="font-size:12px;color:var(--gray-500);margin-top:2px;">${fmtSqft(c.total.sqft)} sq ft &middot; ${c.total.visit_count} visit${c.total.visit_count === 1 ? '' : 's'}</div>
+            </div>
+          </div>
+
+          ${roundRows || noRoundHtml ? `
+            <h4 style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.8px;font-weight:700;margin:8px 0 6px;">By Round</h4>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:12px;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--gray-200);">
+                  <th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;"></th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Visits</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Acres</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Sq Ft</th>
+                </tr>
+              </thead>
+              <tbody>${roundRows}${noRoundHtml}</tbody>
+            </table>
+          ` : ''}
+
+          ${serviceRows ? `
+            <h4 style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.8px;font-weight:700;margin:8px 0 6px;">By Service Type</h4>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="border-bottom:1px solid var(--gray-200);">
+                  <th style="padding:6px 8px;text-align:left;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;"></th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Visits</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Acres</th>
+                  <th style="padding:6px 8px;text-align:right;font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Sq Ft</th>
+                </tr>
+              </thead>
+              <tbody>${serviceRows}</tbody>
+            </table>
+          ` : ''}
+
+          <p style="font-size:11px;color:var(--gray-400);margin-top:10px;">Mowing visits aren't included — they don't generate application records.</p>
+        </div>
+      </div>
+    `;
   },
 
   renderRow(a) {

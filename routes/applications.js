@@ -113,6 +113,69 @@ router.get('/stats', requireAuth, (req, res) => {
   res.json(stats);
 });
 
+// Coverage stats: total area treated YTD, broken down by round + service type.
+// Returns sums in BOTH sq ft and acres (1 acre = 43,560 sq ft).
+router.get('/coverage', requireAuth, (req, res) => {
+  const db = getDb();
+  const year = req.query.year || new Date().getFullYear();
+  const startDate = `${year}-01-01`;
+  const endDate = `${year}-12-31`;
+  const SQFT_PER_ACRE = 43560;
+
+  const total = db.prepare(`
+    SELECT
+      COALESCE(SUM(total_area_treated), 0) as sqft,
+      COUNT(*) as visit_count
+    FROM applications
+    WHERE application_date BETWEEN ? AND ?
+  `).get(startDate, endDate);
+
+  // By round_number — pulled from the linked schedule entry, since
+  // applications themselves don't carry a round number.
+  const byRound = db.prepare(`
+    SELECT
+      COALESCE(s.round_number, 0) as round_number,
+      MAX(COALESCE(s.total_rounds, 0)) as total_rounds,
+      COALESCE(SUM(a.total_area_treated), 0) as sqft,
+      COUNT(*) as visit_count
+    FROM applications a
+    LEFT JOIN schedules s ON s.id = a.schedule_id
+    WHERE a.application_date BETWEEN ? AND ?
+    GROUP BY COALESCE(s.round_number, 0)
+    ORDER BY round_number
+  `).all(startDate, endDate);
+
+  // By service type — derived from the linked schedule's service_type, falling
+  // back to the application's product_name if no schedule link exists.
+  const byService = db.prepare(`
+    SELECT
+      COALESCE(s.service_type, a.product_name, 'Unknown') as service_type,
+      COALESCE(SUM(a.total_area_treated), 0) as sqft,
+      COUNT(*) as visit_count
+    FROM applications a
+    LEFT JOIN schedules s ON s.id = a.schedule_id
+    WHERE a.application_date BETWEEN ? AND ?
+    GROUP BY COALESCE(s.service_type, a.product_name, 'Unknown')
+    ORDER BY sqft DESC
+  `).all(startDate, endDate);
+
+  const formatGroup = (rows) => rows.map(r => ({
+    ...r,
+    acres: +(r.sqft / SQFT_PER_ACRE).toFixed(2)
+  }));
+
+  res.json({
+    year: Number(year),
+    total: {
+      sqft: total.sqft || 0,
+      acres: +((total.sqft || 0) / SQFT_PER_ACRE).toFixed(2),
+      visit_count: total.visit_count || 0
+    },
+    by_round: formatGroup(byRound),
+    by_service: formatGroup(byService)
+  });
+});
+
 // Get single application
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();
