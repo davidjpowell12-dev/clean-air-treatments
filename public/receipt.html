@@ -159,9 +159,83 @@
     }
     .error h2 { color: var(--navy); font-size: 20px; margin-bottom: 8px; }
 
+    /* Payment instructions card (unpaid invoices, check method) */
+    .pay-instructions {
+      background: white;
+      margin: 0 16px 12px;
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+      border-left: 4px solid var(--green);
+    }
+    .pay-instructions h3 {
+      font-size: 11px;
+      color: var(--gray-400);
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .pay-row {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--gray-100);
+    }
+    .pay-row:last-of-type { border-bottom: none; }
+    .pay-label {
+      font-size: 11px;
+      color: var(--gray-500);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .pay-value {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--gray-900);
+    }
+    .pay-note {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--gray-50);
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--gray-700);
+      font-style: italic;
+    }
+
+    /* Print/Save PDF button */
+    .print-cta {
+      text-align: center;
+      padding: 12px 16px 0;
+    }
+    .print-btn {
+      background: var(--green);
+      color: white;
+      border: none;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 10px rgba(120,190,32,0.3);
+    }
+    .print-btn:hover { transform: translateY(-1px); }
+    .print-btn:active { transform: translateY(0); }
+
     @media print {
       body { background: white; }
-      .review-cta { display: none; }
+      .review-cta, .no-print { display: none !important; }
+      header { background: var(--green-dark) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .checkmark { background: var(--green-light) !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .receipt-wrap { max-width: 100%; }
+      .card, .details, .pay-instructions, .thank-you {
+        margin: 0 0 12px;
+        box-shadow: none;
+        border: 1px solid var(--gray-200);
+        page-break-inside: avoid;
+      }
+      footer { padding: 12px 0; }
     }
   </style>
 </head>
@@ -299,7 +373,32 @@
                 <a href="${esc(d.business.review_link)}" target="_blank" rel="noopener">Leave a Review \u2192</a>
               </div>
             ` : ''}
-          ` : ''}
+          ` : `
+            ${d.payment_instructions ? `
+              <div class="pay-instructions">
+                <h3>How to Pay</h3>
+                ${d.payment_instructions.payable_to ? `
+                  <div class="pay-row">
+                    <div class="pay-label">Make checks payable to</div>
+                    <div class="pay-value">${esc(d.payment_instructions.payable_to)}</div>
+                  </div>
+                ` : ''}
+                ${d.payment_instructions.mailing_address ? `
+                  <div class="pay-row">
+                    <div class="pay-label">Mail to</div>
+                    <div class="pay-value" style="white-space:pre-line;">${esc(d.payment_instructions.mailing_address)}</div>
+                  </div>
+                ` : ''}
+                ${d.payment_instructions.notes ? `
+                  <div class="pay-note">${esc(d.payment_instructions.notes)}</div>
+                ` : ''}
+              </div>
+            ` : ''}
+
+            <div class="print-cta no-print">
+              <button onclick="window.print()" class="print-btn">🖨 Save as PDF / Print</button>
+            </div>
+          `}
 
           <footer>
             Evolved Lawn and Garden Services LLC<br>

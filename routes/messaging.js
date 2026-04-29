@@ -164,6 +164,7 @@ router.get('/drafts/counts', requireAuth, (req, res) => {
       SUM(CASE WHEN type = 'heads_up' AND status = 'draft' THEN 1 ELSE 0 END) as heads_up_ready,
       SUM(CASE WHEN type = 'completion' AND status = 'draft' THEN 1 ELSE 0 END) as completion_ready,
       SUM(CASE WHEN type = 'receipt' AND status = 'draft' THEN 1 ELSE 0 END) as receipt_ready,
+      SUM(CASE WHEN type = 'invoice' AND status = 'draft' THEN 1 ELSE 0 END) as invoice_ready,
       SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
     FROM message_drafts
   `).get();
@@ -171,6 +172,7 @@ router.get('/drafts/counts', requireAuth, (req, res) => {
     heads_up_ready: row.heads_up_ready || 0,
     completion_ready: row.completion_ready || 0,
     receipt_ready: row.receipt_ready || 0,
+    invoice_ready: row.invoice_ready || 0,
     failed: row.failed || 0
   });
 });
@@ -373,6 +375,76 @@ router.post('/compose/receipt/:invoiceId', requireAuth, (req, res) => {
   );
 
   logAudit(db, 'invoice', inv.id, req.session.userId, 'compose_receipt_draft', {
+    invoice_number: inv.invoice_number, draft_id: result.lastInsertRowid
+  });
+
+  res.json({ draft_id: result.lastInsertRowid, already_existed: false });
+});
+
+// Compose an SMS draft sending the customer an invoice link. Mirrors the
+// receipt compose flow but for unpaid invoices — used to nudge check-paying
+// monthly clients with a "your invoice is ready" message.
+router.post('/compose/invoice/:invoiceId', requireAuth, (req, res) => {
+  const db = getDb();
+  const inv = db.prepare(`
+    SELECT i.*, e.customer_name, e.phone, e.property_id, p.phone as property_phone,
+           p.sms_opted_in
+    FROM invoices i
+    LEFT JOIN estimates e ON e.id = i.estimate_id
+    LEFT JOIN properties p ON p.id = e.property_id
+    WHERE i.id = ?
+  `).get(req.params.invoiceId);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (!inv.token) return res.status(400).json({ error: 'Invoice has no token — save and retry' });
+  if (inv.status === 'paid') return res.status(400).json({ error: 'Invoice already paid — use Send Receipt instead' });
+
+  const phone = inv.property_phone || inv.phone;
+  if (!phone || !phone.trim()) return res.status(400).json({ error: 'No phone number on file for this customer' });
+
+  if (inv.property_id) {
+    const prop = db.prepare('SELECT sms_opted_in FROM properties WHERE id = ?').get(inv.property_id);
+    if (prop && prop.sms_opted_in === 0) {
+      return res.status(400).json({ error: 'This customer has opted out of SMS' });
+    }
+  }
+
+  const settings = {};
+  for (const r of db.prepare("SELECT key, value FROM app_settings WHERE key IN ('msg_business_name', 'msg_opt_out')").all()) {
+    settings[r.key] = r.value;
+  }
+  const businessName = settings.msg_business_name || 'Clean Air Lawn Care';
+  const optOut = settings.msg_opt_out || 'Reply STOP to unsubscribe.';
+
+  const first = (inv.customer_name || 'there').split(/\s+/)[0];
+  const amount = (inv.amount_cents / 100).toFixed(2);
+  const host = req.get('host');
+  const proto = req.protocol === 'https' ? 'https' : (req.get('x-forwarded-proto') || 'https');
+  const url = `${proto}://${host}/receipt/${inv.token}`;
+
+  const dueLine = inv.due_date ? ` due ${new Date(inv.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}` : '';
+  const composed = `Hi ${first}, your ${businessName} invoice for $${amount}${dueLine} is ready. View & save: ${url}\n\n${optOut}`;
+
+  // Dedupe: re-use existing draft for this invoice if one already exists
+  const existing = db.prepare(`
+    SELECT id FROM message_drafts
+    WHERE type = 'invoice' AND service_summary = ?
+  `).get('invoice:' + inv.id);
+  if (existing) return res.json({ draft_id: existing.id, already_existed: true });
+
+  const result = db.prepare(`
+    INSERT INTO message_drafts (
+      property_id, type, service_date, service_summary,
+      composed_text, to_phone, status
+    ) VALUES (?, 'invoice', ?, ?, ?, ?, 'draft')
+  `).run(
+    inv.property_id,
+    new Date().toISOString().slice(0, 10),
+    'invoice:' + inv.id,
+    composed,
+    phone
+  );
+
+  logAudit(db, 'invoice', inv.id, req.session.userId, 'compose_invoice_draft', {
     invoice_number: inv.invoice_number, draft_id: result.lastInsertRowid
   });
 

@@ -570,14 +570,21 @@ const InvoicingPage = {
           </button>
           ${inv.token ? `
             <a href="/receipt/${inv.token}" target="_blank" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
-              👁 View Receipt (public link)
+              👁 View ${inv.status === 'paid' ? 'Receipt' : 'Invoice'} (public link)
             </a>
+            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="InvoicingPage.copyInvoiceLink('${inv.token}')">
+              🔗 Copy Link
+            </button>
             ${inv.status === 'paid' ? `
               <button class="btn btn-primary btn-full" style="margin-top:8px;" onclick="InvoicingPage.sendReceipt(${inv.id})">
                 📱 Send Receipt via SMS
               </button>
-              <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Creates a draft in Messaging you can review before sending</p>
-            ` : ''}
+            ` : `
+              <button class="btn btn-primary btn-full" style="margin-top:8px;" onclick="InvoicingPage.sendInvoice(${inv.id})">
+                📱 Send Invoice via SMS
+              </button>
+            `}
+            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Creates a draft in Messaging you can review before sending</p>
           ` : ''}
           <a href="#estimates/view/${inv.estimate_id || ''}" class="btn btn-outline btn-full" style="margin-top:8px;display:block;text-align:center;text-decoration:none;">
             View Estimate
@@ -808,6 +815,33 @@ const InvoicingPage = {
       App.navigate('messaging');
     } catch (err) {
       App.toast('Could not create receipt draft: ' + err.message, 'error');
+    }
+  },
+
+  async sendInvoice(invoiceId) {
+    try {
+      const r = await Api.post('/api/messaging/compose/invoice/' + invoiceId, {});
+      if (r.already_existed) {
+        App.toast('Invoice draft already exists — opening Messaging', 'success');
+      } else {
+        App.toast('Invoice draft created — review and send', 'success');
+      }
+      App.navigate('messaging');
+    } catch (err) {
+      App.toast('Could not create invoice draft: ' + err.message, 'error');
+    }
+  },
+
+  copyInvoiceLink(token) {
+    const url = window.location.origin + '/receipt/' + token;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(url).then(
+        () => App.toast('Link copied to clipboard', 'success'),
+        () => App.toast('Could not copy — link: ' + url, 'error')
+      );
+    } else {
+      // Fallback: show a prompt the user can manually copy
+      window.prompt('Copy this link:', url);
     }
   },
 

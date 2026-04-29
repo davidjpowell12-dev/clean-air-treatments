@@ -145,6 +145,25 @@ const SettingsPage = {
               <input type="text" id="msgOptOut" value="${this.esc(settings.msg_opt_out || 'Reply STOP to unsubscribe.')}">
             </div>
 
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+            <p style="font-size:13px;color:var(--gray-700);font-weight:600;margin-bottom:8px;">Invoice payment instructions (for check-paying clients)</p>
+            <p style="font-size:12px;color:var(--gray-500);margin-bottom:10px;">Shown on the invoice page so customers know who to make checks out to and where to mail them.</p>
+
+            <div class="form-group">
+              <label>Make checks payable to</label>
+              <input type="text" id="msgPayableTo" value="${this.esc(settings.msg_payable_to || 'Evolved Lawn and Garden Services LLC')}">
+            </div>
+
+            <div class="form-group">
+              <label>Mailing address for checks</label>
+              <textarea id="msgMailingAddress" rows="3" placeholder="2309 Elmridge Dr. NW&#10;Grand Rapids, MI 49504">${this.esc(settings.msg_mailing_address || '')}</textarea>
+            </div>
+
+            <div class="form-group">
+              <label>Payment notes (optional)</label>
+              <input type="text" id="msgPaymentNotes" value="${this.esc(settings.msg_payment_notes || 'Please include the invoice number on the memo line.')}">
+            </div>
+
             <button class="btn btn-primary btn-full" onclick="SettingsPage.saveMessagingTemplates()">Save Messaging Templates</button>
 
             <details style="margin-top:16px;">
@@ -544,7 +563,10 @@ const SettingsPage = {
       msg_review_link:       document.getElementById('msgReviewLink').value.trim(),
       msg_review_line:       document.getElementById('msgReviewLine').value.trim(),
       msg_signature:         document.getElementById('msgSignature').value.trim(),
-      msg_opt_out:           document.getElementById('msgOptOut').value.trim()
+      msg_opt_out:           document.getElementById('msgOptOut').value.trim(),
+      msg_payable_to:        document.getElementById('msgPayableTo').value.trim(),
+      msg_mailing_address:   document.getElementById('msgMailingAddress').value.trim(),
+      msg_payment_notes:     document.getElementById('msgPaymentNotes').value.trim()
     };
     try {
       await Promise.all(

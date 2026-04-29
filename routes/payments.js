@@ -119,6 +119,10 @@ router.get('/public/receipt/:token', (req, res) => {
   ).all();
   for (const r of rows) settings[r.key] = r.value;
 
+  // For unpaid invoices where the estimate prefers check, surface payment
+  // instructions so the customer knows how to mail the check.
+  const isCheck = (inv.payment_method_preference || '').toLowerCase() === 'check';
+
   res.json({
     invoice_number: inv.invoice_number,
     amount_dollars: (inv.amount_cents / 100).toFixed(2),
@@ -126,6 +130,7 @@ router.get('/public/receipt/:token', (req, res) => {
     due_date: inv.due_date,
     paid_at: inv.paid_at,
     payment_method: inv.payment_method,
+    payment_method_preference: inv.payment_method_preference,
     check_number: inv.check_number,
     payment_plan: inv.payment_plan,
     installment_number: inv.installment_number,
@@ -141,7 +146,12 @@ router.get('/public/receipt/:token', (req, res) => {
     business: {
       name: settings.msg_business_name || 'Clean Air Lawn Care',
       review_link: settings.msg_review_link || ''
-    }
+    },
+    payment_instructions: isCheck && inv.status !== 'paid' ? {
+      payable_to: settings.msg_payable_to || '',
+      mailing_address: settings.msg_mailing_address || '',
+      notes: settings.msg_payment_notes || ''
+    } : null
   });
 });
 
