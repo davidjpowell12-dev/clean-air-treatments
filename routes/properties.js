@@ -29,6 +29,64 @@ router.get('/', requireAuth, (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
+// Migration tracker: one row per property with estimate + invoice status.
+// Built so the user can power through onboarding/migration and see at a glance
+// which properties still need an estimate or an invoice.
+router.get('/migration-status', requireAuth, (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      p.id,
+      p.customer_name,
+      p.address,
+      p.city,
+      p.phone,
+      p.email,
+      (SELECT e.status FROM estimates e WHERE e.property_id = p.id
+       ORDER BY CASE e.status
+         WHEN 'accepted' THEN 1
+         WHEN 'sent' THEN 2
+         WHEN 'draft' THEN 3
+         ELSE 4 END,
+         e.id DESC LIMIT 1) as estimate_status,
+      (SELECT e.id FROM estimates e WHERE e.property_id = p.id
+       ORDER BY CASE e.status
+         WHEN 'accepted' THEN 1
+         WHEN 'sent' THEN 2
+         WHEN 'draft' THEN 3
+         ELSE 4 END,
+         e.id DESC LIMIT 1) as estimate_id,
+      (SELECT COUNT(*) FROM invoices i
+       JOIN estimates e ON e.id = i.estimate_id
+       WHERE e.property_id = p.id) as invoice_count,
+      (SELECT COUNT(*) FROM invoices i
+       JOIN estimates e ON e.id = i.estimate_id
+       WHERE e.property_id = p.id AND i.status NOT IN ('paid','void','cancelled')) as unpaid_count,
+      (SELECT COUNT(*) FROM invoices i
+       JOIN estimates e ON e.id = i.estimate_id
+       WHERE e.property_id = p.id AND i.status = 'paid') as paid_count
+    FROM properties p
+    ORDER BY p.customer_name COLLATE NOCASE, p.address COLLATE NOCASE
+  `).all();
+
+  const total = rows.length;
+  const estimateAccepted = rows.filter(r => r.estimate_status === 'accepted').length;
+  const hasInvoice = rows.filter(r => r.invoice_count > 0).length;
+  const fullySetup = rows.filter(r => r.estimate_status === 'accepted' && r.invoice_count > 0).length;
+  const noEstimate = rows.filter(r => !r.estimate_status).length;
+
+  res.json({
+    rows,
+    summary: {
+      total,
+      estimate_accepted: estimateAccepted,
+      has_invoice: hasInvoice,
+      fully_setup: fullySetup,
+      no_estimate: noEstimate
+    }
+  });
+});
+
 // Get single property with stats
 router.get('/:id', requireAuth, (req, res) => {
   const db = getDb();

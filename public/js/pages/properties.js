@@ -3,6 +3,7 @@ const PropertiesPage = {
     if (action === 'new' || action === 'edit') return this.renderForm(action === 'edit' ? id : null);
     if (action === 'view' && id) return this.renderDetail(id);
     if (action === 'import') return this.renderImport();
+    if (action === 'tracker') return this.renderTracker();
     return this.renderList();
   },
 
@@ -17,7 +18,8 @@ const PropertiesPage = {
       main.innerHTML = `
         <div class="page-header">
           <h2>Properties</h2>
-          <div style="display:flex;gap:8px;">
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${isAdmin ? '<button class="btn btn-sm btn-outline" onclick="App.navigate(\'properties\', \'tracker\')">📋 Tracker</button>' : ''}
             ${isAdmin ? '<button class="btn btn-sm btn-outline" onclick="App.navigate(\'properties\', \'import\')">Import CSV</button>' : ''}
             <button class="btn btn-primary btn-sm" onclick="App.navigate('properties', 'new')">+ Add</button>
           </div>
@@ -457,6 +459,171 @@ const PropertiesPage = {
     });
 
     return { headers, rows };
+  },
+
+  // Migration tracker — at-a-glance view of which properties still need an
+  // estimate or invoice. Useful during the migration push and as a long-term
+  // data-health view (annual renewals, new client onboarding).
+  async renderTracker() {
+    const main = document.getElementById('mainContent');
+    main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    try {
+      const data = await Api.get('/api/properties/migration-status');
+      const rows = data.rows || [];
+      const s = data.summary || {};
+
+      main.innerHTML = `
+        <span class="back-link" onclick="App.navigate('properties')">&larr; Properties</span>
+        <div class="page-header" style="margin-top:8px;">
+          <h2>📋 Migration Tracker</h2>
+        </div>
+
+        <div class="card" style="padding:16px;margin-bottom:12px;">
+          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;">
+            <div style="padding:10px;background:var(--gray-50);border-radius:8px;">
+              <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;font-weight:600;">Total Properties</div>
+              <div style="font-size:24px;font-weight:700;">${s.total || 0}</div>
+            </div>
+            <div style="padding:10px;background:#ecfdf5;border-radius:8px;">
+              <div style="font-size:11px;color:#047857;text-transform:uppercase;font-weight:600;">Fully Set Up</div>
+              <div style="font-size:24px;font-weight:700;color:#047857;">${s.fully_setup || 0}</div>
+            </div>
+            <div style="padding:10px;background:#fef3c7;border-radius:8px;">
+              <div style="font-size:11px;color:#92400e;text-transform:uppercase;font-weight:600;">Has Estimate</div>
+              <div style="font-size:24px;font-weight:700;color:#92400e;">${s.estimate_accepted || 0}</div>
+            </div>
+            <div style="padding:10px;background:#fee2e2;border-radius:8px;">
+              <div style="font-size:11px;color:#991b1b;text-transform:uppercase;font-weight:600;">No Estimate Yet</div>
+              <div style="font-size:24px;font-weight:700;color:#991b1b;">${s.no_estimate || 0}</div>
+            </div>
+          </div>
+          ${s.total > 0 ? `
+            <div style="margin-top:12px;">
+              <div style="height:8px;background:var(--gray-200);border-radius:4px;overflow:hidden;">
+                <div style="height:100%;width:${Math.round((s.fully_setup / s.total) * 100)}%;background:#10b981;transition:width 0.3s;"></div>
+              </div>
+              <div style="font-size:12px;color:var(--gray-500);margin-top:4px;text-align:center;">
+                ${Math.round((s.fully_setup / s.total) * 100)}% complete · ${s.fully_setup} of ${s.total}
+              </div>
+            </div>
+          ` : ''}
+        </div>
+
+        <div class="search-bar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="trackSearch" placeholder="Search by name or address...">
+        </div>
+
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">
+          <button class="btn btn-sm chip-btn active" data-filter="all">All (${rows.length})</button>
+          <button class="btn btn-sm chip-btn" data-filter="incomplete">⚠️ Incomplete (${rows.filter(r => !(r.estimate_status === 'accepted' && r.invoice_count > 0)).length})</button>
+          <button class="btn btn-sm chip-btn" data-filter="no-estimate">🔴 No Estimate (${rows.filter(r => !r.estimate_status).length})</button>
+          <button class="btn btn-sm chip-btn" data-filter="estimate-no-invoice">🟡 Estimate, No Invoice (${rows.filter(r => r.estimate_status === 'accepted' && r.invoice_count === 0).length})</button>
+          <button class="btn btn-sm chip-btn" data-filter="complete">✅ Complete (${rows.filter(r => r.estimate_status === 'accepted' && r.invoice_count > 0).length})</button>
+        </div>
+
+        <div class="card">
+          <div id="trackList">
+            ${rows.length === 0 ? `
+              <div class="empty-state"><h3>No properties</h3></div>
+            ` : rows.map(r => this._renderTrackerRow(r)).join('')}
+          </div>
+        </div>
+
+        <style>
+          .chip-btn { background:#fff;border:1px solid var(--gray-300);color:var(--gray-700);font-size:12px;padding:6px 10px;border-radius:14px;cursor:pointer; }
+          .chip-btn.active { background:var(--green);color:#fff;border-color:var(--green); }
+          .track-row { display:flex;align-items:center;gap:10px;padding:12px;border-bottom:1px solid var(--gray-100); }
+          .track-row:last-child { border-bottom:none; }
+          .track-main { flex:1;min-width:0; }
+          .track-main h4 { margin:0 0 2px;font-size:14px; }
+          .track-main p { margin:0;font-size:12px;color:var(--gray-500); }
+          .track-badge { display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-right:4px; }
+          .b-green { background:#d1fae5;color:#065f46; }
+          .b-yellow { background:#fef3c7;color:#92400e; }
+          .b-red { background:#fee2e2;color:#991b1b; }
+          .b-gray { background:var(--gray-100);color:var(--gray-600); }
+          .track-action { font-size:12px;font-weight:600;color:var(--green);text-decoration:none;white-space:nowrap; }
+        </style>
+      `;
+
+      const allRows = Array.from(document.querySelectorAll('#trackList .track-row'));
+      const applyFilters = () => {
+        const q = (document.getElementById('trackSearch').value || '').toLowerCase();
+        const filter = document.querySelector('.chip-btn.active')?.dataset.filter || 'all';
+        allRows.forEach(el => {
+          const matchSearch = !q || (el.dataset.search || '').includes(q);
+          let matchFilter = true;
+          const status = el.dataset.status;
+          if (filter === 'incomplete') matchFilter = status !== 'complete';
+          else if (filter === 'no-estimate') matchFilter = status === 'no-estimate';
+          else if (filter === 'estimate-no-invoice') matchFilter = status === 'estimate-no-invoice';
+          else if (filter === 'complete') matchFilter = status === 'complete';
+          el.style.display = (matchSearch && matchFilter) ? '' : 'none';
+        });
+      };
+
+      document.getElementById('trackSearch').addEventListener('input', applyFilters);
+      document.querySelectorAll('.chip-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          document.querySelectorAll('.chip-btn').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          applyFilters();
+        });
+      });
+    } catch (err) {
+      main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+    }
+  },
+
+  _renderTrackerRow(r) {
+    let status = 'complete';
+    let estBadge, invBadge, action;
+
+    if (r.estimate_status === 'accepted') {
+      estBadge = '<span class="track-badge b-green">✅ Estimate</span>';
+    } else if (r.estimate_status === 'sent') {
+      estBadge = '<span class="track-badge b-yellow">🟡 Sent</span>';
+      status = 'no-estimate';
+    } else if (r.estimate_status === 'draft') {
+      estBadge = '<span class="track-badge b-yellow">📝 Draft</span>';
+      status = 'no-estimate';
+    } else {
+      estBadge = '<span class="track-badge b-red">🔴 No Est</span>';
+      status = 'no-estimate';
+    }
+
+    if (r.invoice_count > 0) {
+      const paid = r.paid_count || 0;
+      const unpaid = r.unpaid_count || 0;
+      invBadge = `<span class="track-badge b-green">💰 ${r.invoice_count} inv${paid ? ` (${paid} paid)` : ''}</span>`;
+    } else {
+      invBadge = '<span class="track-badge b-red">🔴 No Inv</span>';
+      if (status === 'complete') status = 'estimate-no-invoice';
+    }
+
+    if (!r.estimate_status) {
+      action = `<a class="track-action" onclick="App.navigate('estimates', 'new')">+ Estimate</a>`;
+    } else if (r.estimate_status !== 'accepted') {
+      action = `<a class="track-action" onclick="App.navigate('estimates', 'view', ${r.estimate_id})">Review →</a>`;
+    } else if (r.invoice_count === 0) {
+      action = `<a class="track-action" onclick="App.navigate('estimates', 'view', ${r.estimate_id})">Generate Inv →</a>`;
+    } else {
+      action = `<a class="track-action" onclick="App.navigate('properties', 'view', ${r.id})">View →</a>`;
+    }
+
+    const search = this.esc(((r.customer_name || '') + ' ' + (r.address || '') + ' ' + (r.city || '')).toLowerCase());
+    return `
+      <div class="track-row" data-search="${search}" data-status="${status}">
+        <div class="track-main">
+          <h4>${this.esc(r.customer_name || '(no name)')}</h4>
+          <p>${this.esc(r.address || '')}${r.city ? ', ' + this.esc(r.city) : ''}</p>
+          <div style="margin-top:6px;">${estBadge}${invBadge}</div>
+        </div>
+        ${action}
+      </div>
+    `;
   },
 
   renderImport() {
