@@ -463,6 +463,11 @@ function runMigrations(db) {
   // consistent with "established business relationship" for transactional messages).
   ensureColumn(db, 'properties', 'sms_opted_in', 'INTEGER DEFAULT 1');
 
+  // Soft-archive: properties no longer serviced are flagged inactive so they
+  // disappear from default lists but stay in the DB for historical records
+  // (past applications, MDARD compliance, profitability lookback).
+  ensureColumn(db, 'properties', 'is_active', 'INTEGER DEFAULT 1');
+
   // Drafts of outbound SMS messages. Each is composed from the visit + services + templates,
   // then presented to the user for optional editing before send.
   db.exec(`

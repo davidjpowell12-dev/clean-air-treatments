@@ -12,7 +12,8 @@ const PropertiesPage = {
     main.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
 
     try {
-      const properties = await Api.get('/api/properties');
+      const showInactive = this._showInactive ? 1 : 0;
+      const properties = await Api.get('/api/properties' + (showInactive ? '?include_inactive=1' : ''));
       const isAdmin = App.user.role === 'admin';
 
       main.innerHTML = `
@@ -30,18 +31,27 @@ const PropertiesPage = {
           <input type="text" id="propSearch" placeholder="Search by name or address...">
         </div>
 
+        ${isAdmin ? `
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gray-600);margin-bottom:8px;cursor:pointer;">
+            <input type="checkbox" id="showInactiveToggle" ${showInactive ? 'checked' : ''} onchange="PropertiesPage._toggleInactive(this.checked)">
+            Show archived (inactive) properties
+          </label>
+        ` : ''}
+
         <div class="card">
           <div id="propList">
             ${properties.length === 0 ? `
               <div class="empty-state">
-                <h3>No properties yet</h3>
-                <p>Add your first property or import from CSV</p>
-                <button class="btn btn-primary" onclick="App.navigate('properties', 'new')">Add Property</button>
+                <h3>No properties${showInactive ? '' : ' yet'}</h3>
+                <p>${showInactive ? 'No properties match the filter' : 'Add your first property or import from CSV'}</p>
+                ${showInactive ? '' : `<button class="btn btn-primary" onclick="App.navigate('properties', 'new')">Add Property</button>`}
               </div>
-            ` : properties.map(p => `
-              <div class="data-row" data-search="${this.esc(p.customer_name + ' ' + p.address + ' ' + (p.city || '')).toLowerCase()}" onclick="App.navigate('properties', 'view', ${p.id})">
+            ` : properties.map(p => {
+              const inactive = p.is_active === 0;
+              return `
+              <div class="data-row" data-search="${this.esc(p.customer_name + ' ' + p.address + ' ' + (p.city || '')).toLowerCase()}" onclick="App.navigate('properties', 'view', ${p.id})" style="${inactive ? 'opacity:0.55;' : ''}">
                 <div class="data-row-main">
-                  <h4>${this.esc(p.customer_name)}</h4>
+                  <h4>${this.esc(p.customer_name)} ${inactive ? '<span class="badge badge-gray" style="font-size:10px;margin-left:6px;">archived</span>' : ''}</h4>
                   <p>${this.esc(p.address)}${p.city ? ', ' + this.esc(p.city) : ''} ${this.esc(p.state || '')} ${this.esc(p.zip || '')}</p>
                   <p style="font-size:12px;color:var(--gray-500);">${p.sqft ? p.sqft.toLocaleString() + ' sq ft' : ''}${p.soil_type ? ' · ' + this.esc(p.soil_type) : ''}</p>
                 </div>
@@ -49,7 +59,7 @@ const PropertiesPage = {
                   <svg viewBox="0 0 24 24" fill="none" stroke="var(--gray-300)" stroke-width="2" width="20" height="20"><polyline points="9 18 15 12 9 6"/></svg>
                 </div>
               </div>
-            `).join('')}
+            `;}).join('')}
           </div>
         </div>
       `;
@@ -96,11 +106,15 @@ const PropertiesPage = {
           <div class="card-header">
             <h3>${this.esc(prop.customer_name)}</h3>
             ${isAdmin ? `
-              <div style="display:flex;gap:8px;">
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
                 <button class="btn btn-sm btn-outline" onclick="App.navigate('properties', 'edit', ${prop.id})">Edit</button>
+                ${prop.is_active === 0
+                  ? `<button class="btn btn-sm btn-outline" style="color:var(--green-dark);border-color:var(--green-dark);" onclick="PropertiesPage.toggleArchive(${prop.id}, true)">↺ Restore</button>`
+                  : `<button class="btn btn-sm btn-outline" style="color:var(--gray-600);" onclick="PropertiesPage.toggleArchive(${prop.id}, false)">📦 Archive</button>`}
                 <button class="btn btn-sm btn-danger" onclick="PropertiesPage.deleteProperty(${prop.id})">Delete</button>
               </div>
             ` : ''}
+            ${prop.is_active === 0 ? `<div style="margin-top:8px;padding:8px 12px;background:var(--gray-100);border-radius:8px;font-size:12px;color:var(--gray-600);">📦 This property is archived — hidden from default lists. Click <strong>Restore</strong> to make it active again.</div>` : ''}
           </div>
           <div class="card-body">
             <div class="detail-row"><span class="detail-label">Address</span><span class="detail-value">${this.esc(prop.address)}${prop.city ? ', ' + this.esc(prop.city) : ''} ${this.esc(prop.state || '')} ${this.esc(prop.zip || '')}</span></div>
@@ -814,6 +828,26 @@ const PropertiesPage = {
       App.navigate('properties');
     } catch (err) {
       App.toast(err.message, 'error');
+    }
+  },
+
+  _toggleInactive(checked) {
+    this._showInactive = !!checked;
+    this.renderList();
+  },
+
+  // Soft archive / restore. Property stays in DB so historical applications,
+  // license records, and profitability lookback all continue to work.
+  async toggleArchive(id, restore) {
+    const willArchive = !restore;
+    const verb = willArchive ? 'Archive' : 'Restore';
+    if (!confirm(`${verb} this property?\n\n${willArchive ? 'It will be hidden from default lists but kept in the database for historical records.' : 'It will reappear in the default Properties list.'}`)) return;
+    try {
+      await Api.put(`/api/properties/${id}/active`, { is_active: restore ? 1 : 0 });
+      App.toast(willArchive ? 'Property archived' : 'Property restored', 'success');
+      this.renderDetail(id);
+    } catch (err) {
+      App.toast('Failed: ' + err.message, 'error');
     }
   },
 

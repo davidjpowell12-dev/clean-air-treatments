@@ -5,20 +5,27 @@ const { requireAuth, requireAdmin } = require('../middleware/auth');
 
 const router = express.Router();
 
-// List properties (with search)
+// List properties (with search). By default returns only active (un-archived)
+// properties; pass ?include_inactive=1 to get archived ones too.
 router.get('/', requireAuth, (req, res) => {
   const db = getDb();
-  const { search, limit } = req.query;
+  const { search, limit, include_inactive } = req.query;
 
   let sql = 'SELECT * FROM properties';
+  const where = [];
   const params = [];
 
+  if (!include_inactive || include_inactive === '0') {
+    where.push('COALESCE(is_active, 1) = 1');
+  }
+
   if (search) {
-    sql += ' WHERE customer_name LIKE ? OR address LIKE ? OR city LIKE ?';
+    where.push('(customer_name LIKE ? OR address LIKE ? OR city LIKE ?)');
     const q = `%${search}%`;
     params.push(q, q, q);
   }
 
+  if (where.length) sql += ' WHERE ' + where.join(' AND ');
   sql += ' ORDER BY customer_name';
 
   if (limit) {
@@ -27,6 +34,18 @@ router.get('/', requireAuth, (req, res) => {
   }
 
   res.json(db.prepare(sql).all(...params));
+});
+
+// Archive / restore a property. Soft-delete only — keeps all history intact.
+router.put('/:id/active', requireAuth, (req, res) => {
+  const db = getDb();
+  const { is_active } = req.body;
+  const val = is_active ? 1 : 0;
+  const result = db.prepare('UPDATE properties SET is_active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(val, req.params.id);
+  if (result.changes === 0) return res.status(404).json({ error: 'Property not found' });
+  logAudit(db, 'property', req.params.id, req.session.userId, val ? 'restored' : 'archived', {});
+  res.json({ success: true, is_active: val });
 });
 
 // Migration tracker: one row per property with estimate + invoice status.
@@ -66,6 +85,7 @@ router.get('/migration-status', requireAuth, (req, res) => {
        JOIN estimates e ON e.id = i.estimate_id
        WHERE e.property_id = p.id AND i.status = 'paid') as paid_count
     FROM properties p
+    WHERE COALESCE(p.is_active, 1) = 1
     ORDER BY p.customer_name COLLATE NOCASE, p.address COLLATE NOCASE
   `).all();
 
