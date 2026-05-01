@@ -752,6 +752,10 @@ const EstimatesPage = {
               ↻ Regenerate Unpaid Invoices
             </button>
             <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use after editing the estimate's line items, payment plan, or method</p>
+            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.resetSchedule(${est.id})">
+              📅 Reset Invoice Schedule
+            </button>
+            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Pick a new first-due date — re-dates all unpaid invoices to consecutive months</p>
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
@@ -1062,6 +1066,36 @@ const EstimatesPage = {
       this.renderDetail(estimateId);
     } catch (err) {
       App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  // Reset only the due_dates on unpaid invoices for this estimate. Doesn't
+  // change amounts, statuses, or invoice numbers — just renumbers the
+  // schedule from a new first-due date forward (one month apart, on the 1st).
+  // Use after fixing dates that landed on the wrong month.
+  async resetSchedule(estimateId) {
+    const today = new Date().toISOString().slice(0, 10);
+    const input = prompt(
+      'Reset invoice schedule.\n\n' +
+      'Enter the FIRST due date (YYYY-MM-DD).\n' +
+      'All unpaid invoices will be re-dated:\n' +
+      '  · Invoice 1 → this date\n' +
+      '  · Invoice 2 → 1st of next month\n' +
+      '  · Invoice 3 → 1st of month after, etc.\n\n' +
+      'Paid invoices are NOT touched.',
+      today
+    );
+    if (!input) return;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      App.toast('Date must be YYYY-MM-DD', 'error');
+      return;
+    }
+    try {
+      const r = await Api.post(`/api/estimates/${estimateId}/reset-schedule`, { first_due_date: input });
+      App.toast(`Updated ${r.updated} invoice${r.updated === 1 ? '' : 's'}`, 'success');
+      this.renderDetail(estimateId);
+    } catch (err) {
+      App.toast('Reset failed: ' + err.message, 'error');
     }
   },
 

@@ -929,6 +929,61 @@ router.post('/:id/regenerate-invoices', requireAuth, (req, res) => {
   });
 });
 
+// Reset the due-date schedule for an estimate's unpaid invoices.
+// Sorts the unpaid invoices by installment_number and assigns:
+//   i=0 -> first_due_date (the date the user picks)
+//   i>=1 -> 1st of each successive month after first_due_date's month
+// Paid invoices are never touched.
+router.post('/:id/reset-schedule', requireAuth, (req, res) => {
+  const db = getDb();
+  const { first_due_date } = req.body;
+  if (!first_due_date || !/^\d{4}-\d{2}-\d{2}$/.test(first_due_date)) {
+    return res.status(400).json({ error: 'first_due_date must be YYYY-MM-DD' });
+  }
+
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const unpaid = db.prepare(`
+    SELECT id, installment_number, status FROM invoices
+    WHERE estimate_id = ? AND status IN ('pending','scheduled','failed')
+    ORDER BY COALESCE(installment_number, 0), id
+  `).all(req.params.id);
+
+  if (unpaid.length === 0) {
+    return res.json({ updated: 0, message: 'No unpaid invoices to reset' });
+  }
+
+  // Parse the user-picked date as local-noon to avoid TZ shift
+  const [y, m, d] = first_due_date.split('-').map(Number);
+  const startYear = y;
+  const startMonth = m - 1; // JS months are 0-indexed
+
+  const update = db.prepare('UPDATE invoices SET due_date = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?');
+  const tx = db.transaction(() => {
+    let updated = 0;
+    unpaid.forEach((inv, i) => {
+      let newDate;
+      if (i === 0) {
+        newDate = first_due_date;
+      } else {
+        const dt = new Date(startYear, startMonth + i, 1);
+        newDate = dt.toISOString().split('T')[0];
+      }
+      update.run(newDate, inv.id);
+      updated++;
+    });
+    return updated;
+  });
+
+  const updated = tx();
+  logAudit(db, 'estimate', est.id, req.session.userId, 'reset_schedule', {
+    first_due_date, invoices_updated: updated
+  });
+
+  res.json({ success: true, updated });
+});
+
 router.put('/:id/items/:itemId/toggle', requireAuth, (req, res) => {
   const db = getDb();
   const item = db.prepare('SELECT * FROM estimate_items WHERE id = ? AND estimate_id = ?')

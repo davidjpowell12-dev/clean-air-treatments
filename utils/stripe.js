@@ -265,7 +265,10 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan, paymentMethodPre
       invoices.push(inv);
 
     } else if (paymentPlan === 'monthly') {
-      // N invoices, each for monthly_price, due on 1st of successive months
+      // N invoices, each for monthly_price.
+      // First invoice: due TODAY so the user starts billing in the current
+      // month — not the next one. Every subsequent invoice falls on the 1st
+      // of each successive month after.
       const months = est.payment_months || 8;
       const baseMonthlyCents = Math.round(est.monthly_price * 100);
       const monthlyCents = applyCardFee(baseMonthlyCents, method);
@@ -279,9 +282,15 @@ function createInvoicesForEstimate(db, estimateId, paymentPlan, paymentMethodPre
         const installmentAmount = (i === months - 1) ? remaining : monthlyCents;
         remaining -= installmentAmount;
 
-        // Due on 1st of next month, then each successive month
-        const dueDate = new Date(now.getFullYear(), now.getMonth() + 1 + i, 1);
-        const dueDateStr = dueDate.toISOString().split('T')[0];
+        let dueDateStr;
+        if (i === 0) {
+          // First installment: due today
+          dueDateStr = now.toISOString().split('T')[0];
+        } else {
+          // Subsequent installments: 1st of each successive month
+          const dueDate = new Date(now.getFullYear(), now.getMonth() + i, 1);
+          dueDateStr = dueDate.toISOString().split('T')[0];
+        }
 
         db.prepare(`
           INSERT INTO invoices (
