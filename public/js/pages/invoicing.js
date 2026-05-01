@@ -444,7 +444,9 @@ const InvoicingPage = {
     };
     const s = statusConfig[inv.status] || statusConfig.pending;
     const amount = (inv.amount_cents / 100).toFixed(2);
-    const dueStr = inv.due_date ? new Date(inv.due_date).toLocaleDateString() : '';
+    // Use 'T12:00:00' to anchor at local-noon — prevents the YYYY-MM-DD-as-UTC
+    // bug where stored "2026-06-01" renders as "5/31" in negative-UTC timezones
+    const dueStr = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString() : '';
     const paidStr = inv.paid_at ? new Date(inv.paid_at).toLocaleDateString() : '';
     const installment = inv.total_installments ? ` (${inv.installment_number}/${inv.total_installments})` : '';
 
@@ -494,7 +496,7 @@ const InvoicingPage = {
     try {
       const inv = await Api.get(`/api/payments/invoices/${id}`);
       const amount = (inv.amount_cents / 100).toFixed(2);
-      const dueStr = inv.due_date ? new Date(inv.due_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A';
+      const dueStr = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : 'N/A';
       const paidStr = inv.paid_at ? new Date(inv.paid_at).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
 
       const statusConfig = {
@@ -558,7 +560,7 @@ const InvoicingPage = {
                   </div>
                   <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;">$${(ri.amount_cents / 100).toFixed(2)}</span>
-                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.due_date ? new Date(ri.due_date).toLocaleDateString() + (ri.status === 'scheduled' ? ' (sched)' : '') : (ri.status === 'scheduled' ? 'Scheduled — no date' : 'Pending — no date')}</span>
+                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.due_date ? new Date(ri.due_date + 'T12:00:00').toLocaleDateString() + (ri.status === 'scheduled' ? ' (sched)' : '') : (ri.status === 'scheduled' ? 'Scheduled — no date' : 'Pending — no date')}</span>
                   </div>
                 </div>
               `).join('')}
