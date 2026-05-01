@@ -448,25 +448,40 @@ const InvoicingPage = {
     const paidStr = inv.paid_at ? new Date(inv.paid_at).toLocaleDateString() : '';
     const installment = inv.total_installments ? ` (${inv.installment_number}/${inv.total_installments})` : '';
 
+    // Always show the due date when we have one, regardless of status.
+    // Hiding it for "scheduled" was confusing for monthly installments where
+    // the due_date IS the billing trigger.
+    const dateLine = inv.status === 'paid'
+      ? `<span>Paid ${paidStr}</span>`
+      : dueStr
+        ? `<span>Due ${dueStr}</span>`
+        : `<span style="color:var(--red);font-style:italic;">⚠ No due date</span>`;
+
     return `
-      <div class="est-list-card inv-row" data-status="${inv.status}" data-due="${inv.due_date || ''}"
-           onclick="App.navigate('invoicing', 'view', ${inv.id})" style="cursor:pointer;">
-        <div class="est-list-card-top">
-          <div class="est-list-card-customer">
-            <h4 style="font-family:monospace;font-size:14px;letter-spacing:0.5px;">${this._esc(inv.invoice_number)}</h4>
-            <p>${this._esc(inv.customer_name)}${installment}</p>
+      <div class="est-list-card inv-row" data-status="${inv.status}" data-due="${inv.due_date || ''}" style="position:relative;">
+        <div onclick="App.navigate('invoicing', 'view', ${inv.id})" style="cursor:pointer;padding-right:36px;">
+          <div class="est-list-card-top">
+            <div class="est-list-card-customer">
+              <h4 style="font-family:monospace;font-size:14px;letter-spacing:0.5px;">${this._esc(inv.invoice_number)}</h4>
+              <p>${this._esc(inv.customer_name)}${installment}</p>
+            </div>
+            <span class="badge ${s.class}">${s.label}</span>
           </div>
-          <span class="badge ${s.class}">${s.label}</span>
+          <div class="est-list-card-bottom">
+            <div class="est-list-card-price">
+              <span class="est-monthly">$${amount}</span>
+            </div>
+            <div class="est-list-card-meta">
+              ${inv.payment_method ? `<span style="text-transform:capitalize;">${inv.payment_method}</span>` : ''}
+              ${dateLine}
+            </div>
+          </div>
         </div>
-        <div class="est-list-card-bottom">
-          <div class="est-list-card-price">
-            <span class="est-monthly">$${amount}</span>
-          </div>
-          <div class="est-list-card-meta">
-            ${inv.payment_method ? `<span style="text-transform:capitalize;">${inv.payment_method}</span>` : ''}
-            ${inv.status === 'paid' ? `<span>Paid ${paidStr}</span>` : inv.status === 'scheduled' ? `<span style="color:var(--gray-400);font-style:italic;">Activates when service begins</span>` : `<span>Due ${dueStr}</span>`}
-          </div>
-        </div>
+        <button class="inv-row-edit" onclick="event.stopPropagation();InvoicingPage.editInvoice(${inv.id})"
+                title="Quick edit"
+                style="position:absolute;top:10px;right:10px;background:none;border:1px solid var(--gray-200);border-radius:6px;padding:4px 8px;cursor:pointer;font-size:13px;color:var(--gray-500);">
+          ✎
+        </button>
       </div>
     `;
   },
@@ -502,7 +517,11 @@ const InvoicingPage = {
             <div style="font-family:monospace;font-size:18px;font-weight:700;letter-spacing:1px;color:var(--navy);margin-bottom:4px;">${this._esc(inv.invoice_number)}</div>
             <div style="font-size:36px;font-weight:800;color:var(--green-dark);margin:8px 0;">$${amount}</div>
             <div style="font-size:14px;color:var(--gray-500);">
-              ${inv.status === 'paid' ? `Paid on ${paidStr}${inv.payment_method ? ' via ' + inv.payment_method : ''}` : inv.status === 'scheduled' ? 'Activates when service begins' : `Due: ${dueStr}`}
+              ${inv.status === 'paid'
+                ? `Paid on ${paidStr}${inv.payment_method ? ' via ' + inv.payment_method : ''}`
+                : inv.due_date
+                  ? `Due: ${dueStr}${inv.status === 'scheduled' ? ' (scheduled)' : ''}`
+                  : '<span style="color:var(--red);">⚠ No due date set</span>'}
             </div>
             ${inv.check_number ? `<div style="font-size:13px;color:var(--gray-400);margin-top:4px;">Check #${this._esc(inv.check_number)}</div>` : ''}
           </div>
@@ -539,7 +558,7 @@ const InvoicingPage = {
                   </div>
                   <div style="display:flex;align-items:center;gap:12px;">
                     <span style="font-size:13px;">$${(ri.amount_cents / 100).toFixed(2)}</span>
-                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.status === 'scheduled' ? 'Scheduled' : ri.due_date ? new Date(ri.due_date).toLocaleDateString() : 'Pending'}</span>
+                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.due_date ? new Date(ri.due_date).toLocaleDateString() + (ri.status === 'scheduled' ? ' (sched)' : '') : (ri.status === 'scheduled' ? 'Scheduled — no date' : 'Pending — no date')}</span>
                   </div>
                 </div>
               `).join('')}
