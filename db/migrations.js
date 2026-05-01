@@ -450,6 +450,15 @@ function runMigrations(db) {
   }
   // Sentinel so we don't clobber admin changes on subsequent boots
   db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('migration_nonchem_backfill_done', '1')").run();
+
+  // One-time pause of auto-charge cron after the May 1 2026 double-charge incident.
+  // Sentinel ensures we only force-pause once; admin must explicitly resume via Settings UI.
+  const cronPauseSentinel = db.prepare("SELECT value FROM app_settings WHERE key = 'cron_pause_2026_05_01_applied'").get();
+  if (!cronPauseSentinel) {
+    db.prepare("INSERT OR REPLACE INTO app_settings (key, value, updated_at) VALUES ('cron_paused', 'true', CURRENT_TIMESTAMP)").run();
+    db.prepare("INSERT OR IGNORE INTO app_settings (key, value) VALUES ('cron_pause_2026_05_01_applied', '1')").run();
+    console.log('[migration] Auto-charge cron PAUSED — admin must resume via Settings');
+  }
   // Messaging: per-property opt-in flag (default 1 — existing clients grandfathered in,
   // consistent with "established business relationship" for transactional messages).
   ensureColumn(db, 'properties', 'sms_opted_in', 'INTEGER DEFAULT 1');

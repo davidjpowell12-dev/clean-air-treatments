@@ -362,6 +362,15 @@ async function processDueInvoices(options = {}) {
   }
 
   const db = getDb();
+
+  // Kill-switch: respect the cron_paused setting so admin can freeze auto-charge
+  // while reviewing/cleaning invoices without surprises at 8 AM.
+  const pausedRow = db.prepare("SELECT value FROM app_settings WHERE key = 'cron_paused'").get();
+  if (pausedRow && pausedRow.value === 'true') {
+    console.log('[cron] Auto-charge PAUSED via cron_paused setting — skipping run');
+    return { paused: true, charged: 0, failed: 0, no_method: 0, skipped: 0 };
+  }
+
   const today = new Date().toISOString().split('T')[0];
 
   // Find pending invoices that are due today or overdue, with a Stripe customer on file

@@ -15,9 +15,26 @@ const SettingsPage = {
         Api.get('/api/services').catch(() => [])
       ]);
 
+      const cronPaused = settings.cron_paused === 'true';
       main.innerHTML = `
         <div class="page-header">
           <h2>Settings</h2>
+        </div>
+
+        <div class="card" style="margin-bottom:16px;border:2px solid ${cronPaused ? '#dc2626' : '#10b981'};">
+          <div class="card-header">
+            <h3>${cronPaused ? '⏸ Auto-Charge PAUSED' : '▶️ Auto-Charge Active'}</h3>
+          </div>
+          <div class="card-body">
+            <p style="font-size:13px;color:var(--gray-600);margin:0 0 12px;">
+              ${cronPaused
+                ? 'The daily 8 AM auto-charge cron is <strong>paused</strong>. No invoices will be charged automatically. Resume only after you have reviewed all pending invoices.'
+                : 'The daily 8 AM cron is <strong>active</strong> — pending invoices with a saved card will be charged automatically.'}
+            </p>
+            <button class="btn btn-full ${cronPaused ? 'btn-primary' : 'btn-outline'}" style="${cronPaused ? '' : 'border-color:#dc2626;color:#dc2626;'}" onclick="SettingsPage.toggleCronPause(${cronPaused ? 'false' : 'true'})">
+              ${cronPaused ? '▶️ Resume Auto-Charge' : '⏸ Pause Auto-Charge'}
+            </button>
+          </div>
         </div>
 
         <div class="card">
@@ -549,6 +566,24 @@ const SettingsPage = {
       App.toast('Labor rate updated', 'success');
     } catch (err) {
       App.toast(err.message, 'error');
+    }
+  },
+
+  // ─── Auto-charge cron pause/resume ─────────────────────
+  // Sets the cron_paused setting to true/false; the daily auto-charge cron
+  // checks this flag at the start of every run and bails out if paused.
+  async toggleCronPause(pause) {
+    const willPause = pause === true || pause === 'true';
+    const verb = willPause ? 'PAUSE' : 'RESUME';
+    if (!confirm(`${verb} the daily auto-charge cron?\n\n${willPause ? 'No invoices will be auto-charged until you resume.' : 'Pending invoices with saved cards will start charging at 8 AM tomorrow.'}`)) {
+      return;
+    }
+    try {
+      await Api.put('/api/settings/cron_paused', { value: willPause ? 'true' : 'false' });
+      App.toast(willPause ? 'Auto-charge paused' : 'Auto-charge resumed', 'success');
+      this.render();
+    } catch (err) {
+      App.toast('Save failed: ' + err.message, 'error');
     }
   },
 
