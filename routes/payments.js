@@ -17,7 +17,8 @@ router.get('/invoices', requireAuth, (req, res) => {
   let sql = `
     SELECT i.*,
       e.customer_name, e.address, e.city, e.email as customer_email, e.token as estimate_token,
-      e.payment_method_preference as preferred_method
+      e.payment_method_preference as preferred_method,
+      e.stripe_customer_id
     FROM invoices i
     JOIN estimates e ON i.estimate_id = e.id
     WHERE 1=1
@@ -499,8 +500,11 @@ router.get('/dashboard', requireAuth, (req, res) => {
   const today = now.toISOString().split('T')[0];
 
   const stats = {
+    // Outstanding = everything that hasn't been paid yet, including future
+    // scheduled monthly installments. This matches the user's mental model
+    // of "what's still in the pipeline to collect."
     total_outstanding_cents: db.prepare(
-      "SELECT COALESCE(SUM(amount_cents), 0) as total FROM invoices WHERE status IN ('pending', 'failed')"
+      "SELECT COALESCE(SUM(amount_cents), 0) as total FROM invoices WHERE status IN ('pending', 'failed', 'scheduled')"
     ).get().total,
     total_collected_month_cents: db.prepare(
       "SELECT COALESCE(SUM(amount_cents), 0) as total FROM invoices WHERE status = 'paid' AND paid_at LIKE ? || '%'"

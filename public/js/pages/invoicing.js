@@ -22,7 +22,7 @@ const InvoicingPage = {
       const today = new Date().toISOString().split('T')[0];
       this._allInvoices = invoices;
       this._today = today;
-      this._currentView = this._currentView || 'attention';
+      this._currentView = this._currentView || 'first';
 
       main.innerHTML = `
         <div class="page-header">
@@ -61,6 +61,9 @@ const InvoicingPage = {
 
         <!-- View tabs -->
         <div class="est-status-tabs">
+          <button class="est-tab ${this._currentView === 'first' ? 'active' : ''}" data-view="first" title="First invoice from every estimate — the migration kickoff queue">
+            🚀 First Round <span class="est-tab-count" id="countFirst">0</span>
+          </button>
           <button class="est-tab ${this._currentView === 'attention' ? 'active' : ''}" data-view="attention">
             Needs Attention <span class="est-tab-count" id="countAttention">0</span>
           </button>
@@ -154,24 +157,35 @@ const InvoicingPage = {
     const in30Str = in30.toISOString().slice(0, 10);
 
     // Count each view (so the tab numbers are always accurate)
-    let cAttention = 0, cUpcoming = 0, cHistory = 0;
+    let cAttention = 0, cUpcoming = 0, cHistory = 0, cFirst = 0;
     for (const i of invoices) {
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
                       i.due_date && i.due_date < today;
       if (i.status === 'failed' || overdue) cAttention++;
       else if (i.status === 'scheduled' || (i.status === 'pending' && i.due_date && i.due_date <= in30Str)) cUpcoming++;
       else if (i.status === 'paid' || i.status === 'void') cHistory++;
+      // "First round": installment #1 of any monthly plan, OR a single-payment
+      // (full / per-service) invoice — and not yet paid/void. These are the
+      // actionable migration items.
+      if (this._isFirstRound(i) && i.status !== 'paid' && i.status !== 'void') cFirst++;
     }
     const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
     setCount('countAttention', cAttention);
     setCount('countUpcoming', cUpcoming);
     setCount('countHistory', cHistory);
+    setCount('countFirst', cFirst);
     setCount('countAll', invoices.length);
 
     // Filter to current view
     const view = this._currentView;
     let filtered = invoices.filter(i => {
       if (view === 'all') return true;
+      // First Round = the kickoff queue. Show ONLY unpaid first invoices —
+      // paid ones don't need attention so they belong in History.
+      if (view === 'first') {
+        return this._isFirstRound(i) &&
+               i.status !== 'paid' && i.status !== 'void';
+      }
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
                       i.due_date && i.due_date < today;
       if (view === 'attention') return i.status === 'failed' || overdue;
@@ -212,7 +226,145 @@ const InvoicingPage = {
     }
 
     const list = document.getElementById('invoicesList');
-    if (list) list.innerHTML = this._renderCustomerGroups(filtered, query);
+    if (list) {
+      list.innerHTML = view === 'first'
+        ? this._renderFirstRound(filtered, query)
+        : this._renderCustomerGroups(filtered, query);
+    }
+  },
+
+  // True for invoice #1 of a monthly plan, OR any single-installment invoice
+  // (pay-in-full, per-service one-shot). These are the "kick off the migration"
+  // items the user wants to see all in one place.
+  _isFirstRound(i) {
+    const inst = i.installment_number;
+    const total = i.total_installments;
+    if (inst === 1) return true;
+    if ((inst == null || inst === 0) && (total == null || total <= 1)) return true;
+    return false;
+  },
+
+  // Flat actionable list: one row per first-round invoice, sorted by what
+  // needs your attention first (unsent/unpaid up top, paid at the bottom).
+  // Each row has inline action buttons so you can rip through the queue
+  // without bouncing into detail pages.
+  _renderFirstRound(invoices, query) {
+    if (invoices.length === 0) {
+      return `
+        <div class="empty-state" style="padding:40px 16px;text-align:center;">
+          <div style="font-size:40px;margin-bottom:10px;">🎉</div>
+          <h3 style="margin-bottom:6px;">${query ? 'No matches' : 'Queue is clear'}</h3>
+          <p style="color:var(--gray-500);font-size:14px;">${query ? 'No unpaid first invoices match your search.' : 'Every customer\'s first invoice has been paid. Switch to All to see history.'}</p>
+        </div>
+      `;
+    }
+
+    const today = this._today;
+
+    // Bucket by action priority. Paid/void are filtered out upstream.
+    //   1. unsent  — no Stripe checkout session has been created
+    //   2. sent    — link's gone out, waiting on customer
+    //   3. failed  — charge failed
+    // Within each bucket: amount desc so the biggest moves rise.
+    const bucket = (i) => {
+      if (i.status === 'failed') return 3;
+      if (i.stripe_checkout_session_id) return 2;
+      return 1;
+    };
+    const sorted = [...invoices].sort((a, b) => {
+      const ba = bucket(a), bb = bucket(b);
+      if (ba !== bb) return ba - bb;
+      return (b.amount_cents || 0) - (a.amount_cents || 0);
+    });
+
+    // Summary strip — only unpaid buckets, since the list is unpaid-only
+    const counts = { unsent: 0, sent: 0, failed: 0 };
+    let outstandingCents = 0;
+    for (const i of invoices) {
+      const b = bucket(i);
+      if (b === 1) counts.unsent++;
+      else if (b === 2) counts.sent++;
+      else if (b === 3) counts.failed++;
+      outstandingCents += i.amount_cents || 0;
+    }
+
+    const summaryHtml = `
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;font-size:13px;">
+        <span style="background:#fff3cd;color:#856404;padding:6px 12px;border-radius:14px;font-weight:600;">${counts.unsent} unsent</span>
+        <span style="background:#cfe2ff;color:#084298;padding:6px 12px;border-radius:14px;font-weight:600;">${counts.sent} link sent</span>
+        ${counts.failed > 0 ? `<span style="background:#f8d7da;color:#842029;padding:6px 12px;border-radius:14px;font-weight:600;">${counts.failed} failed</span>` : ''}
+        <span style="margin-left:auto;color:var(--gray-700);align-self:center;font-weight:600;">$${(outstandingCents/100).toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:0})} to collect</span>
+      </div>
+    `;
+
+    const rowsHtml = sorted.map(i => this._renderFirstRoundRow(i, today)).join('');
+
+    return summaryHtml + `<div class="first-round-list">${rowsHtml}</div>`;
+  },
+
+  _renderFirstRoundRow(inv, today) {
+    const amount = (inv.amount_cents / 100).toFixed(2);
+    const dueStr = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    const method = (inv.payment_method || inv.preferred_method || '').toLowerCase();
+    const isCheck = method === 'check';
+    const isOverdue = (inv.status === 'pending' || inv.status === 'failed') && inv.due_date && inv.due_date < today;
+
+    // Action button — what's the ONE thing they should do for this row right now?
+    let actionBtn = '';
+    if (inv.status === 'paid') {
+      actionBtn = `<span style="color:var(--green-dark,#0f5132);font-weight:600;font-size:12px;">✓ Paid</span>`;
+    } else if (inv.status === 'void') {
+      actionBtn = `<span style="color:var(--gray-400);font-size:12px;">Void</span>`;
+    } else if (isCheck) {
+      // Check client → SMS the invoice link (PDF flow)
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">📱 Send</button>`;
+    } else if (inv.stripe_customer_id) {
+      // Card on file → charge directly
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.chargeInvoice(${inv.id})" style="white-space:nowrap;">💳 Charge</button>`;
+    } else {
+      // Stripe-preferred but no card yet → send checkout link
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">📱 Send Link</button>`;
+    }
+
+    // Status pill on the left
+    let statusPill;
+    if (inv.status === 'paid') {
+      statusPill = `<span class="badge badge-green">Paid</span>`;
+    } else if (inv.status === 'void') {
+      statusPill = `<span class="badge badge-gray">Void</span>`;
+    } else if (inv.status === 'failed') {
+      statusPill = `<span class="badge badge-red">Failed</span>`;
+    } else if (isOverdue) {
+      statusPill = `<span class="badge badge-red">Overdue</span>`;
+    } else if (inv.stripe_checkout_session_id) {
+      statusPill = `<span class="badge" style="background:#cfe2ff;color:#084298;">Link Sent</span>`;
+    } else {
+      statusPill = `<span class="badge" style="background:#fff3cd;color:#856404;">Unsent</span>`;
+    }
+
+    const methodLabel = isCheck ? '✉ Check' : (method === 'card' ? '💳 Card' : (method ? method.toUpperCase() : '—'));
+    const dateLabel = dueStr
+      ? `<span style="color:${isOverdue ? 'var(--red)' : 'var(--gray-500)'};">${isOverdue ? '⚠ ' : ''}${dueStr}</span>`
+      : `<span style="color:var(--red);">⚠ no date</span>`;
+
+    return `
+      <div class="first-round-row" style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 14px;border:1px solid var(--gray-200);border-radius:10px;background:white;margin-bottom:8px;">
+        <div onclick="App.navigate('invoicing', 'view', ${inv.id})" style="cursor:pointer;min-width:0;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
+            ${statusPill}
+            <strong style="font-size:14px;color:var(--navy);">${this._esc(inv.customer_name || '—')}</strong>
+            <span style="font-family:monospace;font-size:11px;color:var(--gray-400);">${this._esc(inv.invoice_number || '')}</span>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--gray-600);">
+            <span style="font-weight:700;color:var(--green-dark);font-size:14px;">$${amount}</span>
+            <span style="color:var(--gray-500);">${methodLabel}</span>
+            ${dateLabel}
+            ${inv.address ? `<span style="color:var(--gray-400);">${this._esc(inv.address)}</span>` : ''}
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;">${actionBtn}</div>
+      </div>
+    `;
   },
 
   // Group invoices by customer_name and render one collapsible card per group.
@@ -686,18 +838,19 @@ const InvoicingPage = {
 
   async chargeInvoice(id) {
     if (!confirm('Charge this invoice to the card on file?')) return;
+    // btn only exists on detail view — list/First Round view calls this too
     const btn = document.getElementById('chargeNowBtn');
-    btn.disabled = true;
-    btn.textContent = 'Charging...';
+    if (btn) { btn.disabled = true; btn.textContent = 'Charging...'; }
 
     try {
       const result = await Api.post(`/api/payments/invoices/${id}/charge`);
       App.toast('Payment successful! ' + (result.invoice_number || ''), 'success');
-      this.renderDetail(id);
+      // If we're on the detail view, refresh detail. Otherwise refresh list.
+      if (btn) this.renderDetail(id);
+      else this.renderList();
     } catch (err) {
       App.toast(err.message || 'Charge failed', 'error');
-      btn.disabled = false;
-      btn.textContent = '💳 Retry Charge';
+      if (btn) { btn.disabled = false; btn.textContent = '💳 Retry Charge'; }
     }
   },
 
