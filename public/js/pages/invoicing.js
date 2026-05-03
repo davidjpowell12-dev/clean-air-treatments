@@ -279,13 +279,14 @@ const InvoicingPage = {
     const today = this._today;
 
     // Bucket by action priority. Paid/void are filtered out upstream.
-    //   1. unsent  — no Stripe checkout session has been created
-    //   2. sent    — link's gone out, waiting on customer
+    //   1. unsent  — never had an SMS sent AND no checkout session created
+    //   2. sent    — SMS has been sent OR Stripe checkout session created
+    //                (link's gone out, waiting on the customer to act)
     //   3. failed  — charge failed
     // Within each bucket: amount desc so the biggest moves rise.
     const bucket = (i) => {
       if (i.status === 'failed') return 3;
-      if (i.stripe_checkout_session_id) return 2;
+      if (i.sms_sent_at || i.stripe_checkout_session_id) return 2;
       return 1;
     };
     const sorted = [...invoices].sort((a, b) => {
@@ -327,23 +328,33 @@ const InvoicingPage = {
     const isOverdue = (inv.status === 'pending' || inv.status === 'failed') && inv.due_date && inv.due_date < today;
 
     // Action button — what's the ONE thing they should do for this row right now?
+    // After an SMS has been sent, the button changes to "Resend" so it's
+    // visually clear (and lower-priority) without removing the option.
+    const alreadySent = !!(inv.sms_sent_at || inv.stripe_checkout_session_id);
     let actionBtn = '';
     if (inv.status === 'paid') {
       actionBtn = `<span style="color:var(--green-dark,#0f5132);font-weight:600;font-size:12px;">✓ Paid</span>`;
     } else if (inv.status === 'void') {
       actionBtn = `<span style="color:var(--gray-400);font-size:12px;">Void</span>`;
     } else if (isCheck) {
-      // Check client → SMS the invoice link (PDF flow)
-      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">📱 Send</button>`;
+      // Check client → SMS the invoice link
+      const label = alreadySent ? '↻ Resend' : '📱 Send';
+      const cls = alreadySent ? 'btn-outline' : 'btn-primary';
+      actionBtn = `<button class="btn ${cls} btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">${label}</button>`;
     } else if (inv.stripe_customer_id) {
-      // Card on file → charge directly
+      // Card on file → charge directly (no SMS needed)
       actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.chargeInvoice(${inv.id})" style="white-space:nowrap;">💳 Charge</button>`;
     } else {
       // Stripe-preferred but no card yet → send checkout link
-      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">📱 Send Link</button>`;
+      const label = alreadySent ? '↻ Resend Link' : '📱 Send Link';
+      const cls = alreadySent ? 'btn-outline' : 'btn-primary';
+      actionBtn = `<button class="btn ${cls} btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">${label}</button>`;
     }
 
-    // Status pill on the left
+    // Status pill on the left.
+    // Priority for unpaid: Failed > Overdue > Sent (SMS or checkout) > Unsent.
+    // We show Overdue ABOVE Sent so an overdue-and-sent invoice is flagged
+    // for attention even though the SMS went out.
     let statusPill;
     if (inv.status === 'paid') {
       statusPill = `<span class="badge badge-green">Paid</span>`;
@@ -353,10 +364,21 @@ const InvoicingPage = {
       statusPill = `<span class="badge badge-red">Failed</span>`;
     } else if (isOverdue) {
       statusPill = `<span class="badge badge-red">Overdue</span>`;
-    } else if (inv.stripe_checkout_session_id) {
-      statusPill = `<span class="badge" style="background:#cfe2ff;color:#084298;">Link Sent</span>`;
+    } else if (inv.sms_sent_at || inv.stripe_checkout_session_id) {
+      statusPill = `<span class="badge" style="background:#cfe2ff;color:#084298;">Sent</span>`;
     } else {
       statusPill = `<span class="badge" style="background:#fff3cd;color:#856404;">Unsent</span>`;
+    }
+
+    // "Sent X days ago" line — only shown when we have an SMS timestamp,
+    // so the user can see at a glance how long they've been waiting on a
+    // given check customer to mail their payment.
+    let sentLine = '';
+    if (inv.sms_sent_at) {
+      const sentDate = new Date(inv.sms_sent_at);
+      const daysAgo = Math.floor((Date.now() - sentDate.getTime()) / (1000 * 60 * 60 * 24));
+      const label = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `${daysAgo}d ago`;
+      sentLine = `<span style="color:#084298;">📤 Sent ${label}</span>`;
     }
 
     // Card-on-file indicator: a Stripe customer ID exists. Note this does
@@ -385,6 +407,7 @@ const InvoicingPage = {
             <span style="color:var(--gray-500);">${methodLabel}</span>
             ${cardOnFileBadge}
             ${dateLabel}
+            ${sentLine}
             ${inv.address ? `<span style="color:var(--gray-400);">${this._esc(inv.address)}</span>` : ''}
           </div>
         </div>
@@ -1067,6 +1090,18 @@ const InvoicingPage = {
         : `Hi ${firstName}, this is Dave from Clean Air Lawn Care. Your invoice for $${amount} is ready. Tap to pay online:\n\n${url}`;
 
       this._openSMS(cleanPhone, message);
+
+      // Stamp the invoice as "SMS sent" so the First Round queue can show
+      // it in the Sent bucket instead of Unsent. Fire-and-forget — if the
+      // network call fails the toast still shows success since the SMS
+      // app already opened with the message.
+      Api.post(`/api/payments/invoices/${invoiceId}/mark-sent`, {})
+        .then(() => {
+          // Refresh the list so Sandy moves into the Sent bucket
+          if (this._currentView) this.renderList();
+        })
+        .catch(() => { /* non-fatal */ });
+
       App.toast('SMS ready — review and send', 'success');
     } catch (err) {
       App.toast(err.message || 'Failed to prepare SMS', 'error');

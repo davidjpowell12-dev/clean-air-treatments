@@ -74,6 +74,26 @@ router.get('/invoices/:id', requireAuth, (req, res) => {
   res.json(invoice);
 });
 
+// Mark that we've sent the customer their invoice link via SMS. Used
+// by the Invoicing First Round queue so a row can flip from "Unsent"
+// to "Sent" once you've opened SMS for it. Idempotent — calling twice
+// just refreshes the timestamp.
+router.post('/invoices/:id/mark-sent', requireAuth, (req, res) => {
+  const db = getDb();
+  const inv = db.prepare('SELECT id, invoice_number FROM invoices WHERE id = ?').get(req.params.id);
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+
+  const now = new Date().toISOString();
+  db.prepare('UPDATE invoices SET sms_sent_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(now, req.params.id);
+
+  logAudit(db, 'invoice', inv.id, req.session.userId, 'sms_sent', {
+    invoice_number: inv.invoice_number, sent_at: now
+  });
+
+  res.json({ success: true, sms_sent_at: now });
+});
+
 // Record a check payment
 router.post('/invoices/:id/record-check', requireAuth, (req, res) => {
   const db = getDb();

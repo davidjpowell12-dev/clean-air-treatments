@@ -400,6 +400,14 @@ function runMigrations(db) {
   // Receipts: each invoice gets a unique public token so customers can view
   // a branded receipt page at /receipt/:token without authentication.
   ensureColumn(db, 'invoices', 'token', 'TEXT');
+
+  // Track when we sent the customer the invoice link via SMS, so the
+  // Invoicing page can distinguish "Unsent" from "Sent, awaiting payment".
+  // Without this, the only way to track SMS-sent state was by the customer
+  // tapping the link and creating a Stripe checkout session — leaving a
+  // gap for check customers and for cards-paying customers who haven't
+  // tapped yet.
+  ensureColumn(db, 'invoices', 'sms_sent_at', 'DATETIME');
   // Backfill tokens for any existing invoices that lack one
   const missingTokens = db.prepare("SELECT id FROM invoices WHERE token IS NULL OR token = ''").all();
   if (missingTokens.length > 0) {
