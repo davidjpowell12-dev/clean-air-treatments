@@ -554,7 +554,12 @@
       const params = new URLSearchParams(window.location.search);
       const cardStatus = params.get('card');
       const wantsCardSave = params.get('save_card') === '1';
-      const isMonthlyCard = est.payment_plan === 'monthly' && est.payment_method_preference === 'card';
+      // Card-save flow applies to any ongoing-billing plan paid by card —
+      // monthly AND per-service both need a saved card for auto-charging.
+      // Originally this was monthly-only, which left per-service customers
+      // with no save-card UI when sent the ?save_card=1 link.
+      const isMonthlyCard = (est.payment_plan === 'monthly' || est.payment_plan === 'per_service')
+                            && est.payment_method_preference === 'card';
 
       // Successfully saved card
       if (cardStatus === 'saved') {

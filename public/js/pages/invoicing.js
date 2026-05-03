@@ -915,11 +915,15 @@ const InvoicingPage = {
       const msg = err.message || 'Charge failed';
       // If the charge failed because no card is saved (common when the
       // Stripe customer ID was entered manually but the customer never
-      // completed checkout), offer to text them the card-save link.
+      // completed checkout), offer to text them the invoice link instead.
+      // Paying the invoice via Stripe Checkout will save their card
+      // automatically for future auto-charges (monthly + per-service plans
+      // both set savePaymentMethod=true), so this kills two birds with
+      // one stone — no separate save-card flow needed.
       const noCard = /no.*payment.*method|no.*card/i.test(msg);
       if (noCard) {
-        if (confirm(msg + '\n\nText the customer a card-save link instead?')) {
-          this.sendCardSaveLink(id);
+        if (confirm(msg + '\n\nText them their invoice link instead? When they pay, their card gets saved on file for future auto-charges.')) {
+          this.sendInvoice(id);
         }
       } else {
         App.toast(msg, 'error');
