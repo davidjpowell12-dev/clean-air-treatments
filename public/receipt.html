@@ -223,6 +223,71 @@
     .print-btn:hover { transform: translateY(-1px); }
     .print-btn:active { transform: translateY(0); }
 
+    /* Primary "Pay with Card" CTA — top of the unpaid invoice page */
+    .pay-now-card {
+      background: white;
+      margin: 0 16px 12px;
+      padding: 22px 24px;
+      border-radius: var(--radius);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.04);
+      text-align: center;
+    }
+    .pay-now-btn {
+      display: block;
+      width: 100%;
+      background: var(--green);
+      color: white;
+      border: none;
+      padding: 16px 22px;
+      border-radius: 12px;
+      font-weight: 800;
+      font-size: 17px;
+      cursor: pointer;
+      box-shadow: 0 4px 16px rgba(120,190,32,0.35);
+      letter-spacing: 0.02em;
+    }
+    .pay-now-btn:hover { transform: translateY(-1px); }
+    .pay-now-btn:active { transform: translateY(0); }
+    .pay-now-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none !important;
+    }
+    .pay-now-secure {
+      margin-top: 10px;
+      font-size: 11px;
+      color: var(--gray-500);
+      letter-spacing: 0.3px;
+    }
+    .pay-now-or {
+      text-align: center;
+      color: var(--gray-400);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin: 4px 16px 8px;
+      font-weight: 700;
+    }
+    .pay-now-error {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #fef2f2;
+      color: #991b1b;
+      border-radius: 8px;
+      font-size: 13px;
+      display: none;
+    }
+    .paid-success-banner {
+      background: var(--green-light);
+      color: var(--green-dark);
+      margin: 0 16px 12px;
+      padding: 14px 20px;
+      border-radius: var(--radius);
+      text-align: center;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
     @media print {
       body { background: white; }
       .review-cta, .no-print { display: none !important; }
@@ -278,11 +343,55 @@
       return map[m] || m;
     }
 
+    // Kick off a Stripe Checkout session for this invoice and redirect.
+    // Called from the "Pay with Card" button on unpaid invoices.
+    async function startCheckout() {
+      const token = window.location.pathname.split('/').pop();
+      const btn = document.getElementById('payNowBtn');
+      const errEl = document.getElementById('payNowError');
+      if (errEl) errEl.style.display = 'none';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Connecting to Stripe…';
+      }
+      try {
+        const res = await fetch('/api/payments/public/checkout/' + encodeURIComponent(token), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+        const data = await res.json();
+        if (!res.ok || !data.url) {
+          throw new Error(data.error || 'Could not start payment');
+        }
+        // Hand the customer off to Stripe
+        window.location.href = data.url;
+      } catch (err) {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '💳 Try Again';
+        }
+        if (errEl) {
+          errEl.textContent = err.message || 'Payment could not start. Please try again.';
+          errEl.style.display = 'block';
+        }
+      }
+    }
+
     function render(d) {
       const root = document.getElementById('root');
       const isPaid = d.status === 'paid';
       const dateLine = isPaid ? fmtDate(d.paid_at || new Date().toISOString()) : fmtDate(d.due_date);
       const dateLabel = isPaid ? 'Paid on' : 'Due on';
+
+      // If the page was opened via Stripe's success redirect (?paid=1), the
+      // webhook may not have fired yet — show a quick reassurance banner so
+      // the customer doesn't think their payment failed during the brief
+      // window before the status flips. The banner self-disappears once the
+      // status is "paid" (since this branch is only rendered when not paid).
+      const params = new URLSearchParams(window.location.search);
+      const justPaidBanner = params.get('paid') === '1'
+        ? '<div class="paid-success-banner">✓ Payment received — give us a moment to update this page.</div>'
+        : '';
 
       const planLabel = d.payment_plan === 'per_service' ? 'Per Service' :
                         d.payment_plan === 'monthly' ? 'Monthly Plan' :
@@ -374,9 +483,23 @@
               </div>
             ` : ''}
           ` : `
+            ${justPaidBanner}
+
+            ${d.stripe_enabled ? `
+              <div class="pay-now-card no-print">
+                <button id="payNowBtn" class="pay-now-btn" onclick="startCheckout()">
+                  💳 Pay $${esc(d.amount_dollars)} with Card
+                </button>
+                <div class="pay-now-secure">🔒 Secure payment powered by Stripe</div>
+                <div id="payNowError" class="pay-now-error"></div>
+              </div>
+
+              ${d.payment_instructions ? `<div class="pay-now-or no-print">— or mail a check —</div>` : ''}
+            ` : ''}
+
             ${d.payment_instructions ? `
               <div class="pay-instructions">
-                <h3>How to Pay</h3>
+                <h3>How to Pay${d.stripe_enabled ? ' by Check' : ''}</h3>
                 ${d.payment_instructions.payable_to ? `
                   <div class="pay-row">
                     <div class="pay-label">Make checks payable to</div>

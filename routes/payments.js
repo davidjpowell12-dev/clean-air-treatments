@@ -149,12 +149,65 @@ router.get('/public/receipt/:token', (req, res) => {
       name: settings.msg_business_name || 'Clean Air Lawn Care',
       review_link: settings.msg_review_link || ''
     },
+    // Tell the page whether to render the "Pay with Card" button. Showing
+    // it when Stripe isn't configured would just produce a confusing error.
+    stripe_enabled: stripeUtils.isEnabled(),
     payment_instructions: isCheck && inv.status !== 'paid' ? {
       payable_to: settings.msg_payable_to || '',
       mailing_address: settings.msg_mailing_address || '',
       notes: settings.msg_payment_notes || ''
     } : null
   });
+});
+
+// Public checkout endpoint — no auth, scoped to a single invoice via its
+// token. Used by the receipt page's "Pay with Card" button so customers
+// can opt to pay online regardless of the estimate's preferred method
+// (e.g. a check-preferred customer who decides to pay by card this time).
+router.post('/public/checkout/:token', async (req, res) => {
+  const db = getDb();
+  const inv = db.prepare(`
+    SELECT i.*, e.customer_name, e.email, e.stripe_customer_id, e.payment_plan, e.token as estimate_token
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.token = ?
+  `).get(req.params.token);
+
+  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
+  if (inv.status === 'paid') return res.status(400).json({ error: 'Invoice already paid' });
+  if (inv.status === 'void') return res.status(400).json({ error: 'Invoice is voided' });
+
+  if (!stripeUtils.isEnabled()) {
+    return res.status(503).json({ error: 'Card payments are not configured' });
+  }
+
+  const baseUrl = `${req.protocol}://${req.get('host')}`;
+
+  try {
+    const session = await stripeUtils.createCheckoutSession({
+      invoiceId: inv.id,
+      invoiceNumber: inv.invoice_number,
+      amountCents: inv.amount_cents,
+      customerName: inv.customer_name,
+      customerEmail: inv.email,
+      stripeCustomerId: inv.stripe_customer_id || undefined,
+      // Stay on the receipt page on either path; success will be reflected
+      // when the webhook flips the invoice status to "paid".
+      successUrl: `${baseUrl}/receipt/${inv.token}?paid=1`,
+      cancelUrl: `${baseUrl}/receipt/${inv.token}`,
+      // Save the card if the customer is on an ongoing plan, so future
+      // installments can auto-charge without making them re-enter the card.
+      savePaymentMethod: inv.payment_plan === 'monthly' || inv.payment_plan === 'per_service'
+    });
+
+    db.prepare('UPDATE invoices SET stripe_checkout_session_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(session.id, inv.id);
+
+    res.json({ url: session.url });
+  } catch (err) {
+    console.error('[payments] Public checkout failed:', err.message);
+    res.status(500).json({ error: 'Could not start payment: ' + err.message });
+  }
 });
 
 router.post('/invoices/:id/void', requireAuth, (req, res) => {
