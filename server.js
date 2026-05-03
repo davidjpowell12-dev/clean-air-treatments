@@ -205,9 +205,52 @@ app.get('/sms-terms', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'sms-terms.html'));
 });
 
-// Public branded receipt page — no auth, token-scoped
+// Public branded receipt page — no auth, token-scoped.
+//
+// We read the static template and inject the page title + description
+// based on the invoice's payment status, because iOS Messages (and other
+// SMS apps) build the rich link preview server-side from the <title>
+// and <meta description> tags. A hardcoded "Payment Receipt" title for
+// an unpaid invoice misled customers into thinking the link was just a
+// confirmation rather than something they need to pay.
 app.get('/receipt/:token', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'receipt.html'));
+  const fs = require('fs');
+  const filePath = path.join(__dirname, 'public', 'receipt.html');
+
+  try {
+    const { getDb } = require('./db/database');
+    const db = getDb();
+    const inv = db.prepare(
+      'SELECT status, amount_cents FROM invoices WHERE token = ?'
+    ).get(req.params.token);
+
+    let html = fs.readFileSync(filePath, 'utf8');
+
+    if (inv) {
+      const isPaid = inv.status === 'paid';
+      const amount = ((inv.amount_cents || 0) / 100).toFixed(2);
+      const title = isPaid
+        ? 'Payment Receipt | Clean Air Lawn Care'
+        : `Invoice for $${amount} | Clean Air Lawn Care`;
+      const desc = isPaid
+        ? 'Your payment receipt from Clean Air Lawn Care.'
+        : `Invoice for $${amount} from Clean Air Lawn Care — tap to view and pay online or by check.`;
+
+      html = html
+        .replace(/<title>[^<]*<\/title>/i, `<title>${title}</title>`)
+        .replace(
+          /<meta\s+name="description"\s+content="[^"]*"\s*\/?>/i,
+          `<meta name="description" content="${desc}">`
+        );
+    }
+
+    res.set('Content-Type', 'text/html; charset=utf-8').send(html);
+  } catch (err) {
+    // Fall back to the static file if anything goes wrong, so the page
+    // still loads even if the DB query fails.
+    console.error('[receipt route] dynamic title injection failed:', err.message);
+    res.sendFile(filePath);
+  }
 });
 
 // SPA fallback - serve app.html for authenticated routes
