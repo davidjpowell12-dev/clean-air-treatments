@@ -351,10 +351,12 @@ const InvoicingPage = {
       actionBtn = `<button class="btn ${cls} btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">${label}</button>`;
     }
 
-    // Status pill on the left.
-    // Priority for unpaid: Failed > Overdue > Sent (SMS or checkout) > Unsent.
-    // We show Overdue ABOVE Sent so an overdue-and-sent invoice is flagged
-    // for attention even though the SMS went out.
+    // Status pill — show the user's most recent ACTION, not the worst state.
+    // Sending the SMS is the freshest meaningful event, so Sent takes
+    // precedence over Overdue. Overdue gets surfaced as a secondary signal
+    // (red date label + small ⚠ marker on the pill) so the row still looks
+    // urgent if it needs to.
+    const sentish = !!(inv.sms_sent_at || inv.stripe_checkout_session_id);
     let statusPill;
     if (inv.status === 'paid') {
       statusPill = `<span class="badge badge-green">Paid</span>`;
@@ -362,10 +364,12 @@ const InvoicingPage = {
       statusPill = `<span class="badge badge-gray">Void</span>`;
     } else if (inv.status === 'failed') {
       statusPill = `<span class="badge badge-red">Failed</span>`;
+    } else if (sentish) {
+      // Sent — but flag if overdue too, so user knows to follow up
+      const overdueMarker = isOverdue ? ' ⚠' : '';
+      statusPill = `<span class="badge" style="background:#cfe2ff;color:#084298;" title="${isOverdue ? 'Sent — but past due, may need a nudge' : 'SMS sent, awaiting customer'}">Sent${overdueMarker}</span>`;
     } else if (isOverdue) {
       statusPill = `<span class="badge badge-red">Overdue</span>`;
-    } else if (inv.sms_sent_at || inv.stripe_checkout_session_id) {
-      statusPill = `<span class="badge" style="background:#cfe2ff;color:#084298;">Sent</span>`;
     } else {
       statusPill = `<span class="badge" style="background:#fff3cd;color:#856404;">Unsent</span>`;
     }
@@ -378,7 +382,7 @@ const InvoicingPage = {
       const sentDate = new Date(inv.sms_sent_at);
       const daysAgo = Math.floor((Date.now() - sentDate.getTime()) / (1000 * 60 * 60 * 24));
       const label = daysAgo === 0 ? 'today' : daysAgo === 1 ? 'yesterday' : `${daysAgo}d ago`;
-      sentLine = `<span style="color:#084298;">📤 Sent ${label}</span>`;
+      sentLine = `<span style="color:#084298;font-weight:600;">📤 Sent ${label}</span>`;
     }
 
     // Card-on-file indicator: a Stripe customer ID exists. Note this does
