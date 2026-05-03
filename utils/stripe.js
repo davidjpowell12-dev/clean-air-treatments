@@ -343,19 +343,51 @@ function constructWebhookEvent(rawBody, signature) {
 }
 
 // ─── Charge Saved Payment Method ──────────────────────────────
-// For auto-charging per-service customers with card on file
+// For auto-charging per-service customers with card on file.
+//
+// Stripe gotcha: a customer can have payment methods ATTACHED without
+// one being set as the DEFAULT (invoice_settings.default_payment_method).
+// This happens when cards are added via certain Checkout flows that
+// don't auto-promote, or when customers are imported manually in the
+// Stripe Dashboard. Without falling back to listing attached methods,
+// we'd return "no card on file" for cards visible in the Stripe UI —
+// confusing and wrong.
 async function chargeCustomer(stripeCustomerId, amountCents, invoiceNumber, description) {
   const stripe = getStripe();
   if (!stripe) throw new Error('Stripe is not configured');
 
-  // Get the customer's default payment method
-  const customer = await getStripe().customers.retrieve(stripeCustomerId);
-  const paymentMethod = customer.invoice_settings?.default_payment_method ||
+  // First try: explicit default payment method (the happy path)
+  const customer = await stripe.customers.retrieve(stripeCustomerId);
+  let paymentMethod = customer.invoice_settings?.default_payment_method ||
     customer.default_source;
 
-  if (!paymentMethod) return null; // No saved payment method
+  // Fallback: no default set, but customer might still have an attached
+  // PaymentMethod (a saved card in the Stripe Dashboard). List them and
+  // use the first one. Self-heal by promoting it to default so future
+  // charges hit the happy path.
+  if (!paymentMethod) {
+    const methods = await stripe.paymentMethods.list({
+      customer: stripeCustomerId,
+      type: 'card',
+      limit: 1
+    });
+    if (methods.data && methods.data.length > 0) {
+      paymentMethod = methods.data[0].id;
+      try {
+        await stripe.customers.update(stripeCustomerId, {
+          invoice_settings: { default_payment_method: paymentMethod }
+        });
+        console.log(`[charge] Promoted PM ${paymentMethod} to default on customer ${stripeCustomerId}`);
+      } catch (promErr) {
+        // Promotion failure is non-fatal — we can still charge the card
+        console.error('[charge] Default promotion failed:', promErr.message);
+      }
+    }
+  }
 
-  const paymentIntent = await getStripe().paymentIntents.create({
+  if (!paymentMethod) return null; // Truly no payment method on file
+
+  const paymentIntent = await stripe.paymentIntents.create({
     amount: amountCents,
     currency: 'usd',
     customer: stripeCustomerId,
