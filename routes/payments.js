@@ -16,7 +16,8 @@ router.get('/invoices', requireAuth, (req, res) => {
 
   let sql = `
     SELECT i.*,
-      e.customer_name, e.address, e.city, e.email as customer_email, e.token as estimate_token,
+      e.customer_name, e.address, e.city, e.email as customer_email, e.phone as customer_phone,
+      e.token as estimate_token,
       e.payment_method_preference as preferred_method,
       e.stripe_customer_id
     FROM invoices i

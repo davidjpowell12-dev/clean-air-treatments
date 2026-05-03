@@ -1,4 +1,21 @@
 const InvoicingPage = {
+  // ─── SMS Helper ─────────────────────────────────────────
+  // Reliably open the native SMS app on iOS and Android.
+  // iOS uses sms:NUMBER&body=  Android uses sms:NUMBER?body=
+  // Mirrors EstimatesPage._openSMS — keep them in sync.
+  _openSMS(phone, message) {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const sep = isIOS ? '&' : '?';
+    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(message)}`;
+    const a = document.createElement('a');
+    a.href = smsUrl;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 100);
+  },
+
   async render(action, id) {
     if (action === 'view' && id) return this.renderDetail(id);
     return this.renderList();
@@ -342,6 +359,14 @@ const InvoicingPage = {
       statusPill = `<span class="badge" style="background:#fff3cd;color:#856404;">Unsent</span>`;
     }
 
+    // Card-on-file indicator: a Stripe customer ID exists. Note this does
+    // NOT guarantee a payment method is saved — only that the customer
+    // record exists. The "Charge" path will surface that nuance if it fails.
+    const hasStripeCustomer = !!inv.stripe_customer_id;
+    const cardOnFileBadge = hasStripeCustomer && !isCheck
+      ? `<span title="Stripe customer linked" style="color:#0f5132;font-weight:600;">💳 linked</span>`
+      : '';
+
     const methodLabel = isCheck ? '✉ Check' : (method === 'card' ? '💳 Card' : (method ? method.toUpperCase() : '—'));
     const dateLabel = dueStr
       ? `<span style="color:${isOverdue ? 'var(--red)' : 'var(--gray-500)'};">${isOverdue ? '⚠ ' : ''}${dueStr}</span>`
@@ -355,9 +380,10 @@ const InvoicingPage = {
             <strong style="font-size:14px;color:var(--navy);">${this._esc(inv.customer_name || '—')}</strong>
             <span style="font-family:monospace;font-size:11px;color:var(--gray-400);">${this._esc(inv.invoice_number || '')}</span>
           </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--gray-600);">
+          <div style="display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--gray-600);align-items:center;">
             <span style="font-weight:700;color:var(--green-dark);font-size:14px;">$${amount}</span>
             <span style="color:var(--gray-500);">${methodLabel}</span>
+            ${cardOnFileBadge}
             ${dateLabel}
             ${inv.address ? `<span style="color:var(--gray-400);">${this._esc(inv.address)}</span>` : ''}
           </div>
@@ -849,7 +875,18 @@ const InvoicingPage = {
       if (btn) this.renderDetail(id);
       else this.renderList();
     } catch (err) {
-      App.toast(err.message || 'Charge failed', 'error');
+      const msg = err.message || 'Charge failed';
+      // If the charge failed because no card is saved (common when the
+      // Stripe customer ID was entered manually but the customer never
+      // completed checkout), offer to text them the card-save link.
+      const noCard = /no.*payment.*method|no.*card/i.test(msg);
+      if (noCard) {
+        if (confirm(msg + '\n\nText the customer a card-save link instead?')) {
+          this.sendCardSaveLink(id);
+        }
+      } else {
+        App.toast(msg, 'error');
+      }
       if (btn) { btn.disabled = false; btn.textContent = '💳 Retry Charge'; }
     }
   },
@@ -980,29 +1017,87 @@ const InvoicingPage = {
 
   async sendReceipt(invoiceId) {
     try {
-      const r = await Api.post('/api/messaging/compose/receipt/' + invoiceId, {});
-      if (r.already_existed) {
-        App.toast('Receipt draft already exists — opening Messaging', 'success');
-      } else {
-        App.toast('Receipt draft created — review and send', 'success');
+      const inv = await Api.get(`/api/payments/invoices/${invoiceId}`);
+      if (!inv.customer_phone) {
+        return App.toast('No phone number on this customer', 'error');
       }
-      App.navigate('messaging');
+      const cleanPhone = inv.customer_phone.replace(/\D/g, '');
+      if (cleanPhone.length < 10) {
+        return App.toast('Invalid phone number on file', 'error');
+      }
+      if (!inv.token) {
+        return App.toast('Invoice has no public link', 'error');
+      }
+      const firstName = (inv.customer_name || 'there').split(' ')[0];
+      const amount = (inv.amount_cents / 100).toFixed(2);
+      const url = `${window.location.origin}/receipt/${inv.token}`;
+      const message = `Hi ${firstName}, here's your receipt for $${amount} — thanks for the payment! ${url}`;
+      this._openSMS(cleanPhone, message);
+      App.toast('Receipt SMS ready — review and send', 'success');
     } catch (err) {
-      App.toast('Could not create receipt draft: ' + err.message, 'error');
+      App.toast(err.message || 'Failed to prepare receipt SMS', 'error');
     }
   },
 
+  // Open the native SMS app with a prefilled invoice text — same UX as
+  // sending an estimate. The receipt URL works for both check (shows mailing
+  // address) and Stripe (shows pay-online button) clients, so one URL covers
+  // both scenarios.
   async sendInvoice(invoiceId) {
     try {
-      const r = await Api.post('/api/messaging/compose/invoice/' + invoiceId, {});
-      if (r.already_existed) {
-        App.toast('Invoice draft already exists — opening Messaging', 'success');
-      } else {
-        App.toast('Invoice draft created — review and send', 'success');
+      const inv = await Api.get(`/api/payments/invoices/${invoiceId}`);
+      if (!inv.customer_phone) {
+        return App.toast('No phone number on this customer', 'error');
       }
-      App.navigate('messaging');
+      const cleanPhone = inv.customer_phone.replace(/\D/g, '');
+      if (cleanPhone.length < 10) {
+        return App.toast('Invalid phone number on file', 'error');
+      }
+      if (!inv.token) {
+        return App.toast('Invoice has no public link — try opening the invoice detail to regenerate', 'error');
+      }
+
+      const firstName = (inv.customer_name || 'there').split(' ')[0];
+      const amount = (inv.amount_cents / 100).toFixed(2);
+      const url = `${window.location.origin}/receipt/${inv.token}`;
+      const isCheck = (inv.payment_method_preference || '').toLowerCase() === 'check';
+
+      const message = isCheck
+        ? `Hi ${firstName}, this is Dave from Clean Air Lawn Care. Your invoice for $${amount} is ready. Tap to view it — the mailing address for checks is on the page:\n\n${url}`
+        : `Hi ${firstName}, this is Dave from Clean Air Lawn Care. Your invoice for $${amount} is ready. Tap to pay online:\n\n${url}`;
+
+      this._openSMS(cleanPhone, message);
+      App.toast('SMS ready — review and send', 'success');
     } catch (err) {
-      App.toast('Could not create invoice draft: ' + err.message, 'error');
+      App.toast(err.message || 'Failed to prepare SMS', 'error');
+    }
+  },
+
+  // Send a card-save link to a customer who has a Stripe customer record but
+  // no payment method on file yet. Used as a fallback when "Charge" fails
+  // with "no card on file" — the user (Dave) probably entered the Stripe ID
+  // manually but the customer never completed checkout to save their card.
+  async sendCardSaveLink(invoiceId) {
+    try {
+      const inv = await Api.get(`/api/payments/invoices/${invoiceId}`);
+      if (!inv.customer_phone) {
+        return App.toast('No phone number on this customer', 'error');
+      }
+      const cleanPhone = inv.customer_phone.replace(/\D/g, '');
+      if (cleanPhone.length < 10) {
+        return App.toast('Invalid phone number on file', 'error');
+      }
+
+      // Reuse the existing card-save endpoint on the estimate
+      const linkResp = await Api.post(`/api/estimates/${inv.estimate_id}/card-save-link`);
+      const url = linkResp.url;
+      const firstName = (inv.customer_name || 'there').split(' ')[0];
+      const message = `Hi ${firstName}! Quick step before billing — tap this link to securely save your card on file. No charge today, just gets you set up for hassle-free monthly payments:\n\n${url}`;
+
+      this._openSMS(cleanPhone, message);
+      App.toast('Card-save SMS ready', 'success');
+    } catch (err) {
+      App.toast(err.message || 'Failed to prepare card-save link', 'error');
     }
   },
 
