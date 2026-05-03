@@ -351,6 +351,16 @@ const InvoicingPage = {
       actionBtn = `<button class="btn ${cls} btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">${label}</button>`;
     }
 
+    // Quick "mark paid" button — for cases where the customer paid through
+    // a different channel (e.g. user's other CRM, in-person cash, etc.) and
+    // the row just needs to drop off the queue. One tap → confirm → done.
+    // Hidden on already-paid/void rows since there's nothing to do.
+    const markPaidBtn = (inv.status !== 'paid' && inv.status !== 'void')
+      ? `<button class="btn btn-sm" onclick="event.stopPropagation();InvoicingPage.quickMarkPaid(${inv.id})"
+              title="Already paid? Mark as paid"
+              style="background:#f0fdf4;color:#0f5132;border:1px solid #86efac;white-space:nowrap;padding:6px 10px;font-size:13px;">✓</button>`
+      : '';
+
     // Status pill — show the user's most recent ACTION, not the worst state.
     // Sending the SMS is the freshest meaningful event, so Sent takes
     // precedence over Overdue. Overdue gets surfaced as a secondary signal
@@ -415,7 +425,7 @@ const InvoicingPage = {
             ${inv.address ? `<span style="color:var(--gray-400);">${this._esc(inv.address)}</span>` : ''}
           </div>
         </div>
-        <div style="display:flex;align-items:center;gap:6px;">${actionBtn}</div>
+        <div style="display:flex;align-items:center;gap:6px;">${markPaidBtn}${actionBtn}</div>
       </div>
     `;
   },
@@ -1109,6 +1119,31 @@ const InvoicingPage = {
       App.toast('SMS ready — review and send', 'success');
     } catch (err) {
       App.toast(err.message || 'Failed to prepare SMS', 'error');
+    }
+  },
+
+  // Quick mark-paid for invoices the customer paid through some channel
+  // outside this app — e.g. user's other CRM, in-person cash, Venmo, etc.
+  // Just stamps status=paid + paid_at=now using the customer's preferred
+  // payment method. For more detail (check #, paid date, notes) the user
+  // can click into the detail view and use the full record-check form.
+  async quickMarkPaid(invoiceId) {
+    if (!confirm('Mark this invoice as paid?\n\nUse this when the customer paid through another channel (check, your other CRM, cash, etc.). For detailed entry with check number, use the invoice detail page instead.')) {
+      return;
+    }
+    try {
+      const inv = await Api.get(`/api/payments/invoices/${invoiceId}`);
+      const method = (inv.payment_method_preference || 'check').toLowerCase();
+      await Api.put(`/api/payments/invoices/${invoiceId}`, {
+        status: 'paid',
+        payment_method: method,
+        paid_at: new Date().toISOString(),
+        notes: (inv.notes ? inv.notes + ' · ' : '') + 'Marked paid manually'
+      });
+      App.toast('Marked as paid', 'success');
+      this.renderList();
+    } catch (err) {
+      App.toast(err.message || 'Could not mark paid', 'error');
     }
   },
 
