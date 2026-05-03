@@ -1162,17 +1162,38 @@ router.get('/config/email-status', requireAuth, (req, res) => {
 });
 
 // Delete estimate
+//
+// Several tables reference estimates(id) without ON DELETE CASCADE — if any
+// of them have rows pointing at this estimate, SQLite's FK enforcement blocks
+// the DELETE with "FOREIGN KEY constraint failed". We have to clear or null
+// those references first:
+//   - invoices.estimate_id          → DELETE (paid history vanishes too;
+//                                     prefer Void over Delete if you care)
+//   - estimate_items.estimate_id    → DELETE (cascade in schema, redundant
+//                                     here for safety on legacy DBs)
+//   - schedules.estimate_id         → SET NULL (keep scheduled visits, just
+//                                     unlink them from the estimate)
+//   - follow_ups.linked_estimate_id → SET NULL (handled by schema cascade)
 router.delete('/:id', requireAuth, (req, res) => {
   const db = getDb();
   const existing = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Estimate not found' });
 
-  // Delete related invoices and estimate items first (FK constraints)
-  db.prepare('DELETE FROM invoices WHERE estimate_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM estimate_items WHERE estimate_id = ?').run(req.params.id);
-  db.prepare('DELETE FROM estimates WHERE id = ?').run(req.params.id);
-  logAudit(db, 'estimate', req.params.id, req.session.userId, 'delete', existing);
-  res.json({ success: true });
+  try {
+    const tx = db.transaction(() => {
+      db.prepare('UPDATE schedules SET estimate_id = NULL WHERE estimate_id = ?').run(req.params.id);
+      db.prepare('UPDATE follow_ups SET linked_estimate_id = NULL WHERE linked_estimate_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM invoices WHERE estimate_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM estimate_items WHERE estimate_id = ?').run(req.params.id);
+      db.prepare('DELETE FROM estimates WHERE id = ?').run(req.params.id);
+    });
+    tx();
+    logAudit(db, 'estimate', req.params.id, req.session.userId, 'delete', existing);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[estimates] Delete failed:', err.message);
+    res.status(500).json({ error: 'Delete failed: ' + err.message });
+  }
 });
 
 // Update estimate status (send, mark viewed, accept, decline)
