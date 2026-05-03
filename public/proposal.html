@@ -581,7 +581,33 @@
         `;
       }
 
-      // Default accepted state
+      // If the customer has an unpaid invoice waiting, route them straight
+      // to it. This handles the case where someone lands on the proposal
+      // page (rather than the invoice page) but actually needs to pay —
+      // e.g. they got sent the proposal URL by mistake, or they bookmarked
+      // it from before invoices existed.
+      if (est.next_unpaid_invoice) {
+        const inv = est.next_unpaid_invoice;
+        const dueLabel = inv.due_date
+          ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+          : '';
+        return `
+          <div class="accepted-animation">
+            <div class="check-circle">\u2705</div>
+            <h3>Thank You!</h3>
+            <p style="margin-bottom:16px;">Your proposal has been accepted.</p>
+            <div style="background:#f0fdf4;border:1px solid #86efac;border-radius:12px;padding:18px 20px;margin:16px 0;text-align:left;">
+              <div style="font-size:11px;color:#166534;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Invoice Ready</div>
+              <div style="font-size:13px;color:#374151;margin-bottom:14px;">You have an invoice for <strong>$${inv.amount_dollars}</strong>${dueLabel ? ' due ' + dueLabel : ''}.</div>
+              <a href="/receipt/${inv.token}" class="accept-btn" style="display:inline-block;text-decoration:none;text-align:center;width:100%;box-sizing:border-box;">View &amp; Pay Invoice \u2192</a>
+            </div>
+            <p style="font-size:13px;color:var(--gray-500);">Questions? Call or text Dave anytime.</p>
+          </div>
+        `;
+      }
+
+      // Default accepted state — no invoices yet (e.g. per-service plan
+      // before any treatments have been logged)
       return `
         <div class="accepted-animation">
           <div class="check-circle">\u2705</div>

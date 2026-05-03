@@ -172,6 +172,34 @@ router.get('/public/:token', (req, res) => {
     'SELECT id, service_name, description, price, is_recurring, rounds, is_included FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
   ).all(est.id);
 
+  // For accepted estimates with unpaid invoices, surface the next-due
+  // invoice so the proposal page can show a "Pay Your Invoice" CTA.
+  // Without this, customers landing on the proposal page after acceptance
+  // see only "Thank You!" with no payment path — which can happen any time
+  // someone gets sent the proposal URL (vs. the receipt URL) for a client
+  // who already needs to pay.
+  let nextUnpaidInvoice = null;
+  if (est.status === 'accepted') {
+    const inv = db.prepare(`
+      SELECT token, amount_cents, due_date
+      FROM invoices
+      WHERE estimate_id = ?
+        AND status IN ('pending', 'failed', 'scheduled')
+      ORDER BY
+        CASE status WHEN 'failed' THEN 0 WHEN 'pending' THEN 1 ELSE 2 END,
+        due_date ASC,
+        installment_number ASC
+      LIMIT 1
+    `).get(est.id);
+    if (inv && inv.token) {
+      nextUnpaidInvoice = {
+        token: inv.token,
+        amount_dollars: ((inv.amount_cents || 0) / 100).toFixed(2),
+        due_date: inv.due_date
+      };
+    }
+  }
+
   // Return only client-safe fields (strip internal notes, reminder info, etc.)
   res.json({
     id: est.id,
@@ -184,10 +212,13 @@ router.get('/public/:token', (req, res) => {
     total_price: est.total_price,
     monthly_price: est.monthly_price,
     payment_months: est.payment_months,
+    payment_method_preference: est.payment_method_preference,
+    payment_plan: est.payment_plan,
     status: est.status,
     valid_until: est.valid_until,
     customer_message: est.customer_message,
     accepted_at: est.accepted_at,
+    next_unpaid_invoice: nextUnpaidInvoice,
     items
   });
 });
