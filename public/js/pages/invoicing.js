@@ -1087,13 +1087,19 @@ const InvoicingPage = {
   async sendInvoice(invoiceId) {
     try {
       const inv = await Api.get(`/api/payments/invoices/${invoiceId}`);
-      if (!inv.customer_phone) {
-        return App.toast('No phone number on this customer', 'error');
+      if (!inv.customer_phone || inv.customer_phone.replace(/\D/g, '').length < 10) {
+        // No phone on file — copy the receipt link so it can be pasted into email
+        if (!inv.token) return App.toast('Invoice has no public link', 'error');
+        const url = `${window.location.origin}/receipt/${inv.token}`;
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(url);
+          App.toast('No phone on file — receipt link copied! Paste it into an email.', 'success');
+        } else {
+          window.prompt('Copy this receipt link and paste it into an email:', url);
+        }
+        return;
       }
       const cleanPhone = inv.customer_phone.replace(/\D/g, '');
-      if (cleanPhone.length < 10) {
-        return App.toast('Invalid phone number on file', 'error');
-      }
       if (!inv.token) {
         return App.toast('Invoice has no public link — try opening the invoice detail to regenerate', 'error');
       }
