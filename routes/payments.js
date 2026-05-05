@@ -606,6 +606,45 @@ router.get('/dashboard', requireAuth, (req, res) => {
   res.json(stats);
 });
 
+// ─── Duplicate Invoice Diagnostic ────────────────────────────
+// One-time admin tool: finds estimates that have more than one installment_number=1
+// invoice, which indicates the invoice set was created more than once.
+router.get('/diag/duplicate-invoices', requireAuth, (req, res) => {
+  const db = getDb();
+
+  const dupes = db.prepare(`
+    SELECT
+      e.id          AS estimate_id,
+      e.customer_name,
+      e.payment_plan,
+      COUNT(i.id)   AS total_invoices,
+      COUNT(CASE WHEN i.installment_number = 1 THEN 1 END) AS first_installment_count,
+      COUNT(CASE WHEN i.installment_number IS NULL THEN 1 END) AS null_installment_count,
+      SUM(i.amount_cents) AS total_amount_cents,
+      SUM(CASE WHEN i.status = 'paid'  THEN i.amount_cents ELSE 0 END) AS paid_cents,
+      SUM(CASE WHEN i.status NOT IN ('paid','void') THEN i.amount_cents ELSE 0 END) AS outstanding_cents,
+      GROUP_CONCAT(i.invoice_number || ':' || i.status || ':' || COALESCE(i.installment_number,'null'), '|') AS invoice_summary
+    FROM estimates e
+    JOIN invoices i ON i.estimate_id = e.id
+    GROUP BY e.id
+    HAVING first_installment_count > 1
+    ORDER BY e.customer_name
+  `).all();
+
+  const totalInflatedCents = dupes.reduce((s, d) => s + (d.outstanding_cents || 0), 0);
+
+  res.json({
+    affected_estimates: dupes.length,
+    total_inflated_outstanding: (totalInflatedCents / 100).toFixed(2),
+    duplicates: dupes.map(d => ({
+      ...d,
+      total_dollars: (d.total_amount_cents / 100).toFixed(2),
+      paid_dollars: (d.paid_cents / 100).toFixed(2),
+      outstanding_dollars: (d.outstanding_cents / 100).toFixed(2),
+    }))
+  });
+});
+
 // ─── Public Endpoints (no auth) ──────────────────────────────
 
 // Create Stripe Checkout session for a customer paying an invoice
