@@ -612,18 +612,12 @@ router.get('/dashboard', requireAuth, (req, res) => {
 router.get('/diag/duplicate-invoices', requireAuth, (req, res) => {
   const db = getDb();
 
-  const dupes = db.prepare(`
-    SELECT
-      e.id          AS estimate_id,
-      e.customer_name,
-      e.payment_plan,
-      COUNT(i.id)   AS total_invoices,
+  // Check 1: duplicate invoice sets within the same estimate
+  const withinEstimate = db.prepare(`
+    SELECT e.id AS estimate_id, e.customer_name, e.payment_plan,
+      COUNT(i.id) AS total_invoices,
       COUNT(CASE WHEN i.installment_number = 1 THEN 1 END) AS first_installment_count,
-      COUNT(CASE WHEN i.installment_number IS NULL THEN 1 END) AS null_installment_count,
-      SUM(i.amount_cents) AS total_amount_cents,
-      SUM(CASE WHEN i.status = 'paid'  THEN i.amount_cents ELSE 0 END) AS paid_cents,
-      SUM(CASE WHEN i.status NOT IN ('paid','void') THEN i.amount_cents ELSE 0 END) AS outstanding_cents,
-      GROUP_CONCAT(i.invoice_number || ':' || i.status || ':' || COALESCE(i.installment_number,'null'), '|') AS invoice_summary
+      SUM(CASE WHEN i.status NOT IN ('paid','void') THEN i.amount_cents ELSE 0 END) AS outstanding_cents
     FROM estimates e
     JOIN invoices i ON i.estimate_id = e.id
     GROUP BY e.id
@@ -631,16 +625,43 @@ router.get('/diag/duplicate-invoices', requireAuth, (req, res) => {
     ORDER BY e.customer_name
   `).all();
 
-  const totalInflatedCents = dupes.reduce((s, d) => s + (d.outstanding_cents || 0), 0);
+  // Check 2: same customer_name with multiple estimates that each have active invoices
+  const acrossEstimates = db.prepare(`
+    SELECT
+      e.customer_name,
+      COUNT(DISTINCT e.id) AS estimate_count,
+      GROUP_CONCAT(
+        e.id || '|' || e.payment_plan || '|' || e.status || '|' ||
+        COALESCE((SELECT COUNT(*) FROM invoices WHERE estimate_id = e.id),'0') || ' invoices|' ||
+        COALESCE((SELECT COUNT(*) FROM invoices WHERE estimate_id = e.id AND status = 'paid'),'0') || ' paid|$' ||
+        COALESCE((SELECT ROUND(SUM(amount_cents)/100.0,2) FROM invoices WHERE estimate_id = e.id AND status NOT IN ('paid','void')),0) || ' outstanding',
+        '  ||  '
+      ) AS estimate_detail,
+      COALESCE((
+        SELECT SUM(amount_cents) FROM invoices i2
+        JOIN estimates e2 ON i2.estimate_id = e2.id
+        WHERE e2.customer_name = e.customer_name AND i2.status NOT IN ('paid','void')
+      ),0) AS total_outstanding_cents
+    FROM estimates e
+    WHERE e.status = 'accepted'
+    GROUP BY e.customer_name
+    HAVING estimate_count > 1
+    ORDER BY e.customer_name
+  `).all();
+
+  const inflationCents = acrossEstimates.reduce((s, d) => s + (d.total_outstanding_cents || 0), 0);
 
   res.json({
-    affected_estimates: dupes.length,
-    total_inflated_outstanding: (totalInflatedCents / 100).toFixed(2),
-    duplicates: dupes.map(d => ({
-      ...d,
-      total_dollars: (d.total_amount_cents / 100).toFixed(2),
-      paid_dollars: (d.paid_cents / 100).toFixed(2),
-      outstanding_dollars: (d.outstanding_cents / 100).toFixed(2),
+    within_estimate_dupes: withinEstimate.length,
+    across_estimate_dupes: acrossEstimates.length,
+    note: 'across_estimate_dupes = same customer name with multiple accepted estimates',
+    total_outstanding_across_dupes: (inflationCents / 100).toFixed(2),
+    within_estimate: withinEstimate,
+    across_estimates: acrossEstimates.map(d => ({
+      customer_name: d.customer_name,
+      estimate_count: d.estimate_count,
+      total_outstanding_dollars: (d.total_outstanding_cents / 100).toFixed(2),
+      estimates: d.estimate_detail
     }))
   });
 });
