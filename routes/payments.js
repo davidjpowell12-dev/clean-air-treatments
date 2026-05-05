@@ -752,6 +752,71 @@ router.get('/diag/recent-activity', requireAuth, (req, res) => {
   });
 });
 
+// ─── Day Mix sqft source diagnostic ──────────────────────────
+// Compares property.sqft vs the latest application.total_area_treated
+// for every treatment stop on a given date. Lets the user verify which
+// properties have application data before flipping the source priority.
+router.get('/diag/day-mix-sources/:date', requireAuth, (req, res) => {
+  const db = getDb();
+  const date = req.params.date;
+
+  const stops = db.prepare(`
+    SELECT s.id, s.service_type,
+           p.id as property_id, p.customer_name, p.address, p.sqft as property_sqft,
+           (SELECT a.total_area_treated FROM applications a
+            WHERE a.property_id = p.id AND a.total_area_treated > 0
+            ORDER BY a.application_date DESC LIMIT 1) as latest_app_sqft,
+           (SELECT a.application_date FROM applications a
+            WHERE a.property_id = p.id AND a.total_area_treated > 0
+            ORDER BY a.application_date DESC LIMIT 1) as latest_app_date,
+           svc.requires_application
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    LEFT JOIN services svc ON LOWER(svc.name) = LOWER(s.service_type)
+    WHERE s.scheduled_date = ?
+      AND s.status != 'cancelled'
+    ORDER BY s.sort_order, s.id
+  `).all(date);
+
+  const treatmentStops = stops.filter(s =>
+    s.requires_application === null || s.requires_application === undefined || s.requires_application === 1
+  );
+
+  const summary = {
+    has_both: 0, has_property_only: 0, has_app_only: 0, has_neither: 0,
+    differ: 0
+  };
+  for (const s of treatmentStops) {
+    const hasProp = !!s.property_sqft;
+    const hasApp = !!s.latest_app_sqft;
+    if (hasProp && hasApp) summary.has_both++;
+    else if (hasProp) summary.has_property_only++;
+    else if (hasApp) summary.has_app_only++;
+    else summary.has_neither++;
+    if (hasProp && hasApp && Math.abs(s.property_sqft - s.latest_app_sqft) > 1) summary.differ++;
+  }
+
+  res.json({
+    date,
+    treatment_stop_count: treatmentStops.length,
+    summary,
+    stops: treatmentStops.map(s => ({
+      customer: s.customer_name,
+      address: s.address,
+      service: s.service_type,
+      property_sqft: s.property_sqft,
+      latest_app_sqft: s.latest_app_sqft,
+      latest_app_date: s.latest_app_date,
+      match: (s.property_sqft && s.latest_app_sqft && Math.abs(s.property_sqft - s.latest_app_sqft) <= 1)
+        ? 'match'
+        : (!s.property_sqft && !s.latest_app_sqft) ? 'NEITHER'
+        : (!s.latest_app_sqft) ? 'no app'
+        : (!s.property_sqft) ? 'no property sqft'
+        : 'differ'
+    }))
+  });
+});
+
 // ─── Public Endpoints (no auth) ──────────────────────────────
 
 // Create Stripe Checkout session for a customer paying an invoice
