@@ -403,7 +403,14 @@ const InvoicingPage = {
       ? `<span title="Stripe customer linked" style="color:#0f5132;font-weight:600;">💳 linked</span>`
       : '';
 
-    const methodLabel = isCheck ? '✉ Check' : (method === 'card' ? '💳 Card' : (method ? method.toUpperCase() : '—'));
+    const methodLabelText = isCheck ? '✉ Check' : (method === 'card' ? '💳 Card' : (method ? method.toUpperCase() : '—'));
+    const newMethod = isCheck ? 'card' : 'check';
+    const newMethodLabel = isCheck ? 'Card' : 'Check';
+    const methodLabel = inv.estimate_id
+      ? `<span onclick="event.stopPropagation();InvoicingPage.togglePaymentMethod(${inv.estimate_id},'${newMethod}','${this._esc(inv.customer_name || '')}',${inv.id})"
+              title="Tap to switch to ${newMethodLabel}"
+              style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:2px;color:var(--gray-500);">${methodLabelText}</span>`
+      : `<span style="color:var(--gray-500);">${methodLabelText}</span>`;
     const dateLabel = dueStr
       ? `<span style="color:${isOverdue ? 'var(--red)' : 'var(--gray-500)'};">${isOverdue ? '⚠ ' : ''}${dueStr}</span>`
       : `<span style="color:var(--red);">⚠ no date</span>`;
@@ -1195,6 +1202,25 @@ const InvoicingPage = {
     } else {
       // Fallback: show a prompt the user can manually copy
       window.prompt('Copy this link:', url);
+    }
+  },
+
+  // Switch a client between card and check payment preference.
+  // Only updates estimates.payment_method_preference — nothing else is touched.
+  // Fully reversible: tap again to switch back.
+  async togglePaymentMethod(estimateId, newMethod, customerName, invoiceId) {
+    const label = newMethod === 'check' ? 'Check' : 'Card';
+    const msg = `Switch ${customerName || 'this client'} to pay by ${label}?\n\nThis only changes how their invoice row is displayed (Send vs Charge). It does not affect invoice amounts, Stripe data, or existing payments.`;
+    if (!confirm(msg)) return;
+    try {
+      await Api.request(`/api/estimates/${estimateId}/payment-method-preference`, {
+        method: 'PATCH',
+        body: { payment_method_preference: newMethod }
+      });
+      App.toast(`Switched to ${label}`, 'success');
+      this.renderList();
+    } catch (err) {
+      App.toast('Failed to update: ' + (err.message || 'unknown error'), 'error');
     }
   },
 

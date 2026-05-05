@@ -857,6 +857,27 @@ router.put('/:id', requireAuth, (req, res) => {
   res.json(est);
 });
 
+// ─── Patch payment method preference only ─────────────────────────────────
+// Used by the invoicing First Round queue to flip a client between card/check
+// without touching any other estimate fields, invoices, or Stripe data.
+router.patch('/:id/payment-method-preference', requireAuth, (req, res) => {
+  const { payment_method_preference } = req.body;
+  if (!['card', 'check'].includes(payment_method_preference)) {
+    return res.status(400).json({ error: 'Invalid value — must be card or check' });
+  }
+  const est = db.prepare('SELECT id FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  db.prepare(
+    'UPDATE estimates SET payment_method_preference = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
+  ).run(payment_method_preference, req.params.id);
+
+  logAudit(db, 'estimate', req.params.id, req.session.userId, 'update',
+    { payment_method_preference });
+
+  res.json({ ok: true, payment_method_preference });
+});
+
 // Toggle a single item's included status
 // Regenerate unpaid invoices for an accepted estimate.
 // Voids every 'scheduled' or 'pending' invoice, then creates fresh invoices
