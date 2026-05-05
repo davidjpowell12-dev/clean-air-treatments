@@ -666,6 +666,41 @@ router.get('/diag/duplicate-invoices', requireAuth, (req, res) => {
   });
 });
 
+// ─── One-time fix: void ghost estimate invoices ───────────────
+// Voids all non-paid invoices on a specific estimate. Used to clean up
+// duplicate estimate records. Does NOT touch paid invoices or the estimate itself.
+router.post('/diag/void-estimate-invoices/:estimateId', requireAuth, (req, res) => {
+  const db = getDb();
+  const estimateId = parseInt(req.params.estimateId);
+
+  const invoices = db.prepare(
+    `SELECT * FROM invoices WHERE estimate_id = ? AND status NOT IN ('paid', 'void')`
+  ).all(estimateId);
+
+  if (invoices.length === 0) {
+    return res.json({ ok: true, voided: 0, message: 'No active invoices to void' });
+  }
+
+  const now = new Date().toISOString();
+  const voidAll = db.transaction(() => {
+    for (const inv of invoices) {
+      db.prepare(`UPDATE invoices SET status = 'void', updated_at = ? WHERE id = ?`)
+        .run(now, inv.id);
+    }
+  });
+  voidAll();
+
+  console.log(`[diag] Voided ${invoices.length} invoices on estimate ${estimateId}`);
+  logAudit(db, 'estimate', estimateId, req.session.userId, 'void-invoices',
+    { count: invoices.length, invoice_ids: invoices.map(i => i.id) });
+
+  res.json({
+    ok: true,
+    voided: invoices.length,
+    invoice_numbers: invoices.map(i => i.invoice_number)
+  });
+});
+
 // ─── Public Endpoints (no auth) ──────────────────────────────
 
 // Create Stripe Checkout session for a customer paying an invoice
