@@ -575,6 +575,25 @@ function runMigrations(db) {
     }
     console.log(`[schema-repair] Backfilled ${orphanEstimates.length} orphan estimate(s)`);
   }
+
+  // ─── One-time fix: void ghost estimate 43 (Carol Rich duplicate) ──────────
+  // Carol had two accepted estimates (43 and 71) each with 8 monthly invoices.
+  // Estimate 71 is the real one (1 payment already made). Estimate 43 is a ghost
+  // with 0 payments — voiding its invoices removes the $2,028.54 inflation.
+  // Guard: only runs if estimate 43 still has non-paid invoices, so it's a no-op
+  // on every subsequent boot after the first.
+  const ghostInvoices = db.prepare(
+    `SELECT id, invoice_number FROM invoices WHERE estimate_id = 43 AND status NOT IN ('paid','void')`
+  ).all();
+  if (ghostInvoices.length > 0) {
+    const now = new Date().toISOString();
+    db.transaction(() => {
+      for (const inv of ghostInvoices) {
+        db.prepare(`UPDATE invoices SET status = 'void', updated_at = ? WHERE id = ?`).run(now, inv.id);
+      }
+    })();
+    console.log(`[schema-repair] Voided ${ghostInvoices.length} ghost invoice(s) on estimate 43 (Carol Rich duplicate): ${ghostInvoices.map(i => i.invoice_number).join(', ')}`);
+  }
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.
