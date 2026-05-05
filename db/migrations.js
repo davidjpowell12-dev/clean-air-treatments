@@ -594,6 +594,12 @@ function runMigrations(db) {
     })();
     console.log(`[schema-repair] Voided ${ghostInvoices.length} ghost invoice(s) on estimate 43 (Carol Rich duplicate): ${ghostInvoices.map(i => i.invoice_number).join(', ')}`);
   }
+  // Also cancel the ghost estimate itself so it no longer shows as "accepted"
+  const ghostEst = db.prepare(`SELECT id FROM estimates WHERE id = 43 AND status = 'accepted'`).get();
+  if (ghostEst) {
+    db.prepare(`UPDATE estimates SET status = 'cancelled', updated_at = ? WHERE id = 43`).run(new Date().toISOString());
+    console.log(`[schema-repair] Cancelled ghost estimate 43 (Carol Rich duplicate)`);
+  }
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.

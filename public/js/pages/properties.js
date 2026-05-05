@@ -1478,7 +1478,11 @@ const PropertiesPage = {
     }
     const today = new Date().toISOString().slice(0, 10);
 
-    const groupHtml = Array.from(groups.values()).map(g => {
+    const groupHtml = Array.from(groups.values()).filter(g => {
+      // Hide groups where every invoice is void — these are ghost/duplicate
+      // estimate sets that have been cleaned up. No point showing them.
+      return g.items.some(i => i.status !== 'void');
+    }).map(g => {
       const paid = g.items.filter(i => i.status === 'paid').length;
       const total = g.items.length;
       const outstandingCents = g.items.reduce((s, i) =>
