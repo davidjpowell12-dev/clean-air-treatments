@@ -701,6 +701,57 @@ router.post('/diag/void-estimate-invoices/:estimateId', requireAuth, (req, res) 
   });
 });
 
+// ─── Recent payments diagnostic ──────────────────────────────
+// Shows all invoices marked paid in the last N days, plus voided invoices,
+// so the user can reconcile unexpected drops in the outstanding balance.
+router.get('/diag/recent-activity', requireAuth, (req, res) => {
+  const db = getDb();
+  const days = parseInt(req.query.days) || 3;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const paid = db.prepare(`
+    SELECT i.invoice_number, i.amount_cents, i.paid_at, i.payment_method,
+           i.status, e.customer_name
+    FROM invoices i
+    JOIN estimates e ON i.estimate_id = e.id
+    WHERE i.status = 'paid' AND i.paid_at >= ?
+    ORDER BY i.paid_at DESC
+  `).all(since);
+
+  const voided = db.prepare(`
+    SELECT i.invoice_number, i.amount_cents, i.updated_at, e.customer_name
+    FROM invoices i
+    JOIN estimates e ON i.estimate_id = e.id
+    WHERE i.status = 'void' AND i.updated_at >= ?
+    ORDER BY i.updated_at DESC
+  `).all(since);
+
+  const paidTotal = paid.reduce((s, i) => s + (i.amount_cents || 0), 0);
+  const voidedTotal = voided.reduce((s, i) => s + (i.amount_cents || 0), 0);
+
+  res.json({
+    since,
+    paid_count: paid.length,
+    paid_total: (paidTotal / 100).toFixed(2),
+    voided_count: voided.length,
+    voided_total: (voidedTotal / 100).toFixed(2),
+    balance_reduction: ((paidTotal + voidedTotal) / 100).toFixed(2),
+    paid_invoices: paid.map(i => ({
+      invoice: i.invoice_number,
+      customer: i.customer_name,
+      amount: (i.amount_cents / 100).toFixed(2),
+      method: i.payment_method,
+      paid_at: i.paid_at
+    })),
+    voided_invoices: voided.map(i => ({
+      invoice: i.invoice_number,
+      customer: i.customer_name,
+      amount: (i.amount_cents / 100).toFixed(2),
+      voided_at: i.updated_at
+    }))
+  });
+});
+
 // ─── Public Endpoints (no auth) ──────────────────────────────
 
 // Create Stripe Checkout session for a customer paying an invoice
