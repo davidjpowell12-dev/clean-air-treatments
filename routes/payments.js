@@ -817,6 +817,69 @@ router.get('/diag/day-mix-sources/:date', requireAuth, (req, res) => {
   });
 });
 
+// ─── Estimate-vs-invoices reconciliation diagnostic ──────────
+// For a given customer name (or estimate id), shows the estimate total,
+// monthly_price, payment_method_preference, and lists every invoice with
+// its amount, status, and the implied per-installment math.
+router.get('/diag/estimate-invoices', requireAuth, (req, res) => {
+  const db = getDb();
+  const { customer, estimate_id } = req.query;
+
+  let estimates;
+  if (estimate_id) {
+    estimates = db.prepare(`SELECT * FROM estimates WHERE id = ?`).all(estimate_id);
+  } else if (customer) {
+    estimates = db.prepare(`SELECT * FROM estimates WHERE customer_name LIKE ? ORDER BY id`).all('%' + customer + '%');
+  } else {
+    return res.status(400).json({ error: 'Provide ?customer=Name or ?estimate_id=N' });
+  }
+
+  const result = estimates.map(est => {
+    const invoices = db.prepare(
+      `SELECT id, invoice_number, amount_cents, status, payment_plan, installment_number, total_installments, due_date, paid_at
+       FROM invoices WHERE estimate_id = ? ORDER BY installment_number, id`
+    ).all(est.id);
+
+    const totalCents = Math.round(est.total_price * 100);
+    const monthlyCents = Math.round(est.monthly_price * 100);
+    const cardFeeMultiplier = 1.035;
+    const totalWithCardFee = Math.round(totalCents * cardFeeMultiplier);
+    const monthlyWithCardFee = Math.round(monthlyCents * cardFeeMultiplier);
+
+    const sumInvoiceCents = invoices.reduce((s, i) => s + (i.amount_cents || 0), 0);
+    const sumNonVoidCents = invoices.filter(i => i.status !== 'void').reduce((s, i) => s + (i.amount_cents || 0), 0);
+
+    return {
+      estimate_id: est.id,
+      customer_name: est.customer_name,
+      status: est.status,
+      payment_plan: est.payment_plan,
+      payment_method_preference: est.payment_method_preference,
+      payment_months: est.payment_months,
+      total_price_dollars: est.total_price,
+      monthly_price_dollars: est.monthly_price,
+      monthly_price_calc_check: (est.total_price / (est.payment_months || 8)).toFixed(2),
+      with_card_fee_3_5_pct: {
+        total: (totalWithCardFee / 100).toFixed(2),
+        monthly: (monthlyWithCardFee / 100).toFixed(2)
+      },
+      invoices_count: invoices.length,
+      sum_all_invoices: (sumInvoiceCents / 100).toFixed(2),
+      sum_non_void_invoices: (sumNonVoidCents / 100).toFixed(2),
+      invoices: invoices.map(i => ({
+        invoice: i.invoice_number,
+        installment: i.installment_number ? `${i.installment_number}/${i.total_installments}` : '-',
+        amount: (i.amount_cents / 100).toFixed(2),
+        status: i.status,
+        due_date: i.due_date,
+        paid_at: i.paid_at
+      }))
+    };
+  });
+
+  res.json({ found: estimates.length, estimates: result });
+});
+
 // ─── Public Endpoints (no auth) ──────────────────────────────
 
 // Create Stripe Checkout session for a customer paying an invoice
