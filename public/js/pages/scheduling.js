@@ -4,7 +4,7 @@ const SchedulingPage = {
   _selectedDate: null,
   _calYear: null,
   _calMonth: null,
-  _routeResult: null,
+  _routeResults: {}, // keyed by service_type (or 'all')
 
   async render(action, id) {
     if (action === 'add') return this.renderAddProperties();
@@ -140,7 +140,26 @@ const SchedulingPage = {
         <button id="calendarBtn" class="btn btn-outline btn-sm">Calendar</button>
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
-        ${total >= 2 ? `<button id="optimizeRouteBtn" class="btn btn-outline btn-sm">&#128205; Optimize Route</button>` : ''}
+        ${(() => {
+          // Build per-service-type optimize buttons
+          const typeCounts = {};
+          entries.forEach(e => {
+            const key = e.service_type || '';
+            typeCounts[key] = (typeCounts[key] || 0) + 1;
+          });
+          const distinctTypes = Object.keys(typeCounts).filter(k => typeCounts[k] >= 2);
+          if (distinctTypes.length === 0 && total < 2) return '';
+          if (distinctTypes.length <= 1) {
+            // Single type or all same — one button
+            return `<button id="optimizeRouteBtn" class="btn btn-outline btn-sm" data-svctype="${distinctTypes[0] || ''}">&#128205; Optimize Route</button>`;
+          }
+          // Multiple service types — one button per type
+          return distinctTypes.map(t => {
+            const label = t || 'All';
+            const short = label.length > 20 ? label.substring(0, 18) + '…' : label;
+            return `<button class="btn btn-outline btn-sm optimize-route-btn" data-svctype="${t}">&#128205; ${short}</button>`;
+          }).join('');
+        })()}
         ${total >= 1 ? `<button id="dayMixBtn" class="btn btn-outline btn-sm">&#128203; Day Mix Sheet</button>` : ''}
         <div style="display: flex; align-items: center; gap: 6px;">
           <select id="bulkTech" class="form-select-sm">
@@ -151,12 +170,12 @@ const SchedulingPage = {
         </div>
       </div>
 
-      ${this._routeResult && this._routeResult.date === date ? `
-        <div style="background:var(--green-50,#f0faf0);border:1px solid var(--green-200,#a3d9a5);border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <span style="font-size:14px;color:var(--green-800,#276749);">&#128694; Route optimized &mdash; ~${this._routeResult.total_minutes} min driving &bull; ${this._routeResult.stop_count} stops</span>
-          <a href="${this._routeResult.maps_url}" target="_blank" rel="noopener" class="btn btn-sm btn-outline" style="white-space:nowrap;">Open in Maps</a>
+      ${Object.entries(this._routeResults).filter(([, r]) => r.date === date).map(([svcType, r]) => `
+        <div style="background:var(--green-50,#f0faf0);border:1px solid var(--green-200,#a3d9a5);border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <span style="font-size:14px;color:var(--green-800,#276749);">&#128694; ${svcType && svcType !== 'all' ? `<strong>${svcType}</strong> route` : 'Route'} optimized &mdash; ~${r.total_minutes} min driving &bull; ${r.stop_count} stops</span>
+          <a href="${r.maps_url}" target="_blank" rel="noopener" class="btn btn-sm btn-outline" style="white-space:nowrap;">Open in Maps</a>
         </div>
-      ` : ''}
+      `).join('')}
 
       <div class="card">
         <div class="card-header"><h3>${this._formatDate(date)}</h3></div>
@@ -227,23 +246,35 @@ const SchedulingPage = {
     const addEmpty = document.getElementById('addPropsEmpty');
     if (addEmpty) addEmpty.addEventListener('click', () => App.navigate('scheduling', 'add'));
 
+    // Optimize route buttons — one per service type (or single combined)
+    const _doOptimize = async (btn, svcType) => {
+      const origHtml = btn.innerHTML;
+      btn.disabled = true;
+      btn.textContent = 'Optimizing…';
+      try {
+        const body = { date };
+        if (svcType) body.service_type = svcType;
+        const result = await Api.post('/api/schedules/optimize-route', body);
+        const key = svcType || 'all';
+        this._routeResults[key] = { ...result, date };
+        const label = svcType ? `${svcType} route` : 'Route';
+        App.toast(`${label} optimized! ~${result.total_minutes} min drive time`, 'success');
+        this.renderDaily();
+      } catch (err) {
+        App.toast(err.message || 'Optimization failed', 'error');
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+      }
+    };
+    // Single button (id="optimizeRouteBtn")
     const optimizeBtn = document.getElementById('optimizeRouteBtn');
     if (optimizeBtn) {
-      optimizeBtn.addEventListener('click', async () => {
-        optimizeBtn.disabled = true;
-        optimizeBtn.textContent = 'Optimizing...';
-        try {
-          const result = await Api.post('/api/schedules/optimize-route', { date });
-          this._routeResult = { ...result, date };
-          App.toast(`Route optimized! ~${result.total_minutes} min drive time`, 'success');
-          this.renderDaily();
-        } catch (err) {
-          App.toast(err.message || 'Optimization failed', 'error');
-          optimizeBtn.disabled = false;
-          optimizeBtn.innerHTML = '&#128205; Optimize Route';
-        }
-      });
+      optimizeBtn.addEventListener('click', () => _doOptimize(optimizeBtn, optimizeBtn.dataset.svctype || ''));
     }
+    // Multiple buttons (.optimize-route-btn)
+    document.querySelectorAll('.optimize-route-btn').forEach(btn => {
+      btn.addEventListener('click', () => _doOptimize(btn, btn.dataset.svctype));
+    });
 
     const dayMixBtn = document.getElementById('dayMixBtn');
     if (dayMixBtn) {

@@ -603,7 +603,7 @@ router.get('/day-mix/:date', requireAuth, (req, res) => {
 // Optimize route for a date using Google Distance Matrix API
 router.post('/optimize-route', requireAuth, async (req, res) => {
   const db = getDb();
-  const { date } = req.body;
+  const { date, service_type } = req.body;
   if (!date) return res.status(400).json({ error: 'date required' });
 
   const apiKey = process.env.GOOGLE_MAPS_API_KEY;
@@ -615,13 +615,24 @@ router.post('/optimize-route', requireAuth, async (req, res) => {
   }
   const homeAddress = homeSetting.value;
 
-  const entries = db.prepare(`
-    SELECT s.id, s.sort_order, p.id as property_id, p.address, p.city, p.state, p.lat, p.lng
-    FROM schedules s
-    JOIN properties p ON p.id = s.property_id
-    WHERE s.scheduled_date = ?
-    ORDER BY s.sort_order, s.id
-  `).all(date);
+  let entries;
+  if (service_type) {
+    entries = db.prepare(`
+      SELECT s.id, s.sort_order, p.id as property_id, p.address, p.city, p.state, p.lat, p.lng
+      FROM schedules s
+      JOIN properties p ON p.id = s.property_id
+      WHERE s.scheduled_date = ? AND s.service_type = ?
+      ORDER BY s.sort_order, s.id
+    `).all(date, service_type);
+  } else {
+    entries = db.prepare(`
+      SELECT s.id, s.sort_order, p.id as property_id, p.address, p.city, p.state, p.lat, p.lng
+      FROM schedules s
+      JOIN properties p ON p.id = s.property_id
+      WHERE s.scheduled_date = ?
+      ORDER BY s.sort_order, s.id
+    `).all(date);
+  }
 
   if (entries.length < 2) {
     return res.status(400).json({ error: 'Need at least 2 stops to optimize' });
@@ -737,9 +748,9 @@ router.post('/optimize-route', requireAuth, async (req, res) => {
   const waypointStr = stopAddrs.slice(0, -1).map(a => encodeURIComponent(a)).join('|');
   const mapsUrl = `https://www.google.com/maps/dir/?api=1&origin=${origin}&destination=${destination}${waypointStr ? '&waypoints=' + waypointStr : ''}`;
 
-  logAudit(db, 'schedule', 0, req.session.userId, 'optimize_route', { date, stops: entries.length, total_minutes: totalMinutes });
+  logAudit(db, 'schedule', 0, req.session.userId, 'optimize_route', { date, service_type: service_type || null, stops: entries.length, total_minutes: totalMinutes });
 
-  res.json({ optimized: true, total_minutes: totalMinutes, stop_count: entries.length, order: optimized.map(e => e.id), maps_url: mapsUrl });
+  res.json({ optimized: true, total_minutes: totalMinutes, stop_count: entries.length, order: optimized.map(e => e.id), maps_url: mapsUrl, service_type: service_type || null });
 });
 
 // Assign tech to all entries for a date
