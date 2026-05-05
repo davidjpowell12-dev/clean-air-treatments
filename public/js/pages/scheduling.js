@@ -662,21 +662,30 @@ const SchedulingPage = {
         <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:700;margin-bottom:8px;">Products</div>
         <div id="mixLines">
           ${lines.length === 0 ? `<p style="font-size:13px;color:var(--gray-500);font-style:italic;">No products added yet. Pick one below.</p>` : ''}
-          ${lineCalcs.map((l, i) => `
+          ${lineCalcs.map((l, i) => {
+            // Show "Save as default" only when current rate differs from the
+            // product's stored default. Reads from the cached products list.
+            const product = products.find(p => p.id === l.product_id);
+            const productDefault = product ? parseFloat(product.app_rate_low) : null;
+            const currentRate = parseFloat(l.rate) || 0;
+            const rateChanged = product && productDefault !== null && !isNaN(productDefault) && Math.abs(currentRate - productDefault) > 0.0001;
+            return `
             <div style="background:var(--gray-50);border-radius:8px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
               <div style="flex:1;min-width:0;">
                 <div style="font-weight:600;font-size:14px;">${this._esc(l.name)}</div>
-                <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;">
+                <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:12px;flex-wrap:wrap;">
                   <input type="number" step="0.01" min="0" value="${l.rate}" data-idx="${i}" class="mix-rate-input" style="width:68px;padding:3px 6px;border:1px solid var(--gray-300);border-radius:4px;font-size:12px;">
                   <span style="color:var(--gray-500);">${this._esc(l.rate_unit || 'oz/1000 sqft')}</span>
+                  ${rateChanged ? `<button data-idx="${i}" data-action="save-rate-default" title="Save ${currentRate} as the default for ${this._esc(l.name)}" style="background:#fef9c3;color:#854d0e;border:1px solid #fde047;border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;">💾 Save as default</button>` : ''}
                 </div>
+                ${rateChanged && productDefault !== null ? `<div style="font-size:11px;color:var(--gray-500);margin-top:3px;">Default: ${productDefault} ${this._esc(l.rate_unit || 'oz/1000sqft')}</div>` : ''}
               </div>
               <div style="text-align:right;">
                 <div style="font-weight:700;font-size:15px;color:var(--green-dark, var(--green));">${fmtN(l.total_amount)} ${(l.rate_unit || 'oz/1000sqft').split('/')[0]}</div>
                 <button class="btn-icon" data-idx="${i}" style="margin-top:2px;color:var(--red);background:none;border:none;cursor:pointer;font-size:18px;padding:0;" data-action="remove-line">×</button>
               </div>
             </div>
-          `).join('')}
+          `;}).join('')}
         </div>
         <div style="display:flex;gap:6px;margin-top:8px;">
           <select id="mixProductPicker" style="flex:1;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-size:13px;">
@@ -735,11 +744,47 @@ const SchedulingPage = {
         this._renderDayMix();
       });
     });
+    body.querySelectorAll('[data-action="save-rate-default"]').forEach(btn => {
+      btn.addEventListener('click', () => this._saveRateAsDefault(Number(btn.dataset.idx)));
+    });
 
     const tankCap = document.getElementById('mixTankCap');
     const tankSpray = document.getElementById('mixSprayRate');
     if (tankCap) tankCap.addEventListener('change', () => { this._mixState.tank.capacity = tankCap.value; this._renderDayMix(); });
     if (tankSpray) tankSpray.addEventListener('change', () => { this._mixState.tank.spray_rate = tankSpray.value; this._renderDayMix(); });
+  },
+
+  // Save the current rate on a mix line as the product's permanent default.
+  // Updates the product record (app_rate_low) so future Day Mix Sheets pick it up.
+  // Refreshes the cached products list so the "Save as default" button disappears.
+  async _saveRateAsDefault(idx) {
+    const line = this._mixState.lines[idx];
+    if (!line || !line.product_id) return;
+    const newRate = parseFloat(line.rate);
+    if (isNaN(newRate) || newRate <= 0) {
+      App.toast('Enter a valid rate first', 'error');
+      return;
+    }
+    const product = this._mixState.products.find(p => p.id === line.product_id);
+    if (!product) return;
+    if (!confirm(`Save ${newRate} ${line.rate_unit || 'oz/1000sqft'} as the default for ${product.name}?\n\nFuture Day Mix Sheets will use this rate. The current value (${product.app_rate_low || 'none'}) will be overwritten.`)) {
+      return;
+    }
+    try {
+      // CRITICAL: PUT /api/products/:id nulls out any field not sent in the body.
+      // Spread the entire existing product first, then override app_rate_low —
+      // anything we don't currently have cached stays untouched on the server.
+      await Api.put('/api/products/' + product.id, {
+        ...product,
+        app_rate_low: newRate
+      });
+      // Update local cache so the button disappears without a full reload
+      product.app_rate_low = newRate;
+      App.toast(`Default rate updated for ${product.name}`, 'success');
+      this._renderDayMix();
+    } catch (err) {
+      App.toast('Failed to save: ' + (err.message || 'unknown error'), 'error');
+    }
   },
 
   // Quick-complete modal for non-chemical services (Mowing, Clean-Ups,
