@@ -27,6 +27,7 @@ const ProductsPage = {
         <div class="filter-pills">
           <span class="pill active" data-filter="all">All</span>
           <span class="pill" data-filter="herbicide">Herbicide</span>
+          <span class="pill" data-filter="insecticide">Insecticide</span>
           <span class="pill" data-filter="pesticide">Pesticide</span>
           <span class="pill" data-filter="fertilizer">Fertilizer</span>
           <span class="pill" data-filter="adjuvant">Adjuvant</span>
@@ -66,7 +67,7 @@ const ProductsPage = {
   },
 
   renderRow(p) {
-    const typeColors = { herbicide: 'badge-green', pesticide: 'badge-red', fertilizer: 'badge-blue', adjuvant: 'badge-gray' };
+    const typeColors = { herbicide: 'badge-green', insecticide: 'badge-orange', pesticide: 'badge-red', fertilizer: 'badge-blue', adjuvant: 'badge-gray' };
     return `
       <div class="data-row" data-type="${p.product_type}" data-name="${this.esc(p.name).toLowerCase()}" onclick="App.navigate('products', 'view', ${p.id})">
         <div class="data-row-main">
@@ -174,6 +175,7 @@ const ProductsPage = {
                 <select name="product_type" required>
                   <option value="">Select...</option>
                   <option value="herbicide" ${product.product_type === 'herbicide' ? 'selected' : ''}>Herbicide</option>
+                  <option value="insecticide" ${product.product_type === 'insecticide' ? 'selected' : ''}>Insecticide</option>
                   <option value="pesticide" ${product.product_type === 'pesticide' ? 'selected' : ''}>Pesticide</option>
                   <option value="fertilizer" ${product.product_type === 'fertilizer' ? 'selected' : ''}>Fertilizer</option>
                   <option value="adjuvant" ${product.product_type === 'adjuvant' ? 'selected' : ''}>Adjuvant</option>
