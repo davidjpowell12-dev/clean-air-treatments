@@ -765,6 +765,12 @@ router.get('/diag/day-mix-sources/:date', requireAuth, (req, res) => {
            p.id as property_id, p.customer_name, p.address, p.sqft as property_sqft,
            (SELECT a.total_area_treated FROM applications a
             WHERE a.property_id = p.id AND a.total_area_treated > 0
+            ORDER BY a.application_date ASC, a.id ASC LIMIT 1) as first_app_sqft,
+           (SELECT a.application_date FROM applications a
+            WHERE a.property_id = p.id AND a.total_area_treated > 0
+            ORDER BY a.application_date ASC, a.id ASC LIMIT 1) as first_app_date,
+           (SELECT a.total_area_treated FROM applications a
+            WHERE a.property_id = p.id AND a.total_area_treated > 0
             ORDER BY a.application_date DESC LIMIT 1) as latest_app_sqft,
            (SELECT a.application_date FROM applications a
             WHERE a.property_id = p.id AND a.total_area_treated > 0
@@ -800,20 +806,28 @@ router.get('/diag/day-mix-sources/:date', requireAuth, (req, res) => {
     date,
     treatment_stop_count: treatmentStops.length,
     summary,
-    stops: treatmentStops.map(s => ({
-      customer: s.customer_name,
-      address: s.address,
-      service: s.service_type,
-      property_sqft: s.property_sqft,
-      latest_app_sqft: s.latest_app_sqft,
-      latest_app_date: s.latest_app_date,
-      match: (s.property_sqft && s.latest_app_sqft && Math.abs(s.property_sqft - s.latest_app_sqft) <= 1)
-        ? 'match'
-        : (!s.property_sqft && !s.latest_app_sqft) ? 'NEITHER'
-        : (!s.latest_app_sqft) ? 'no app'
-        : (!s.property_sqft) ? 'no property sqft'
-        : 'differ'
-    }))
+    stops: treatmentStops.map(s => {
+      const used = s.first_app_sqft || s.property_sqft || 0;
+      const source = s.first_app_sqft ? 'first_app' : (s.property_sqft ? 'property' : 'none');
+      return {
+        customer: s.customer_name,
+        address: s.address,
+        service: s.service_type,
+        property_sqft: s.property_sqft,
+        first_app_sqft: s.first_app_sqft,
+        first_app_date: s.first_app_date,
+        latest_app_sqft: s.latest_app_sqft,
+        latest_app_date: s.latest_app_date,
+        used_sqft: used,
+        source,
+        match: (s.property_sqft && s.first_app_sqft && Math.abs(s.property_sqft - s.first_app_sqft) <= 1)
+          ? 'match'
+          : (!s.property_sqft && !s.first_app_sqft) ? 'NEITHER'
+          : (!s.first_app_sqft) ? 'no app (using property)'
+          : (!s.property_sqft) ? 'no property sqft'
+          : 'differ'
+      };
+    })
   });
 });
 
