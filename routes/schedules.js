@@ -11,8 +11,17 @@ router.get('/daily', requireAuth, (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Date parameter required' });
 
+  // sqft preference: first application's total_area_treated (Round 1
+  // measured) → fallback to properties.sqft. Same logic as /day-mix so
+  // the schedule list and Day Mix Sheet show consistent numbers.
   const entries = db.prepare(`
-    SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.sqft, p.phone,
+    SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.phone,
+           COALESCE(
+             (SELECT a.total_area_treated FROM applications a
+              WHERE a.property_id = p.id AND a.total_area_treated > 0
+              ORDER BY a.application_date ASC, a.id ASC LIMIT 1),
+             NULLIF(p.sqft, 0)
+           ) as sqft,
            u.full_name as assigned_to_name
     FROM schedules s
     JOIN properties p ON p.id = s.property_id
