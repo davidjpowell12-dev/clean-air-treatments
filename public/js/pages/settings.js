@@ -258,6 +258,15 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Merge Duplicate Service Names</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              If two slightly different service names refer to the same service (e.g. "Fert &amp; Weed Control" vs "Fertilization and Weed Control"), use this to merge them. Updates the services list, every schedule entry, and every estimate line item in one transaction. <strong>Click "Scan" first</strong> to see exactly what's in the database before merging.
+            </p>
+            <button class="btn btn-secondary btn-full" id="scanSvcVariantsBtn" onclick="SettingsPage.scanServiceTypeVariants()">Scan Service Type Variants</button>
+            <div id="svcVariantsResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Invoice vs Estimate Audit</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Read-only diagnostic. Finds accepted estimates where the displayed season total (plus card fee) doesn't match the sum of invoices on file. Shows you the scope of any mismatches. <strong>Does not fix anything</strong> — just reports.
@@ -966,6 +975,64 @@ const SettingsPage = {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${err.message}</p>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Relabel all NULL schedules \u2192 Fert & Weed Control'; }
+    }
+  },
+
+  async scanServiceTypeVariants() {
+    const btn = document.getElementById('scanSvcVariantsBtn');
+    const box = document.getElementById('svcVariantsResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/diag/service-type-variants');
+      const masterRows = r.services_table.map(s =>
+        `<tr><td>${s.id}</td><td>${this.esc(s.name)}</td><td>${s.is_active ? '✓' : '—'}</td><td>${s.rounds || 1}</td></tr>`
+      ).join('');
+      const schedRows = r.schedule_service_types.map(v =>
+        `<tr><td>${this.esc(v.service_type)}</td><td style="text-align:right;">${v.count}</td><td><button class="btn btn-sm btn-outline" onclick="SettingsPage.promptMergeServiceType('${this.esc(v.service_type).replace(/'/g, '\\\'')}')">Merge…</button></td></tr>`
+      ).join('');
+      const itemRows = r.estimate_item_service_names.map(v =>
+        `<tr><td>${this.esc(v.service_name)}</td><td style="text-align:right;">${v.count}</td></tr>`
+      ).join('');
+      box.innerHTML = `
+        <div style="font-size:13px;color:var(--gray-700);margin-top:8px;">
+          <p style="font-weight:600;margin:8px 0 4px;">Master <code>services</code> table</p>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Name</th><th style="padding:4px;">Active</th><th style="padding:4px;">Rounds</th></tr></thead>
+            <tbody>${masterRows || '<tr><td colspan="4" style="padding:6px;font-style:italic;">(empty)</td></tr>'}</tbody>
+          </table>
+          <p style="font-weight:600;margin:14px 0 4px;">Schedule entries by <code>service_type</code></p>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">Service Type</th><th style="padding:4px;">Count</th><th style="padding:4px;">Action</th></tr></thead>
+            <tbody>${schedRows}</tbody>
+          </table>
+          <p style="font-weight:600;margin:14px 0 4px;">Estimate line items by <code>service_name</code></p>
+          <table style="width:100%;border-collapse:collapse;font-size:12px;">
+            <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">Service Name</th><th style="padding:4px;">Count</th></tr></thead>
+            <tbody>${itemRows}</tbody>
+          </table>
+        </div>
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Scan Service Type Variants'; }
+    }
+  },
+
+  promptMergeServiceType(fromValue) {
+    const to = prompt(`Merge "${fromValue}" INTO which canonical service name?\n\nThis will update every schedule entry, every estimate line item, and the master services list. This cannot be undone — but you can always run another merge in the opposite direction.`, 'Fert & Weed Control');
+    if (!to || to === fromValue || to.trim() === '') return;
+    if (!confirm(`Merge "${fromValue}" → "${to}"?\n\nAll records with the old name will be updated atomically.`)) return;
+    this._doMergeServiceType(fromValue, to.trim());
+  },
+
+  async _doMergeServiceType(from, to) {
+    try {
+      const r = await Api.post('/api/admin/fix/merge-service-type', { from, to });
+      App.toast(`Merged: ${r.schedules_updated} schedules, ${r.estimate_items_updated} line items, services: ${r.services_action}`, 'success');
+      this.scanServiceTypeVariants();
+    } catch (err) {
+      App.toast('Merge failed: ' + err.message, 'error');
     }
   },
 

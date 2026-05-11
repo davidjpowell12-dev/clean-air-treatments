@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { getDb } = require('../db/database');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
+const { logAudit } = require('../db/audit');
 
 const router = express.Router();
 
@@ -974,6 +975,104 @@ router.post('/fix/relabel-null-service-types', requireAdmin, (req, res) => {
     entries_before: before.n,
     entries_updated: result.changes
   });
+});
+
+// ─── Diagnostic: list every service-type variant across all tables ─────
+// Read-only. Shows the master `services` rows, every distinct
+// `schedules.service_type` with a count, and every distinct
+// `estimate_items.service_name` with a count. Use this before running
+// /fix/merge-service-type to confirm exactly what variants exist.
+router.get('/diag/service-type-variants', requireAdmin, (req, res) => {
+  const db = getDb();
+
+  const masterServices = db.prepare(
+    `SELECT id, name, is_active, is_recurring, rounds FROM services ORDER BY name`
+  ).all();
+
+  const scheduleVariants = db.prepare(`
+    SELECT
+      COALESCE(service_type, '(null)') as service_type,
+      COUNT(*) as count
+    FROM schedules
+    GROUP BY service_type
+    ORDER BY count DESC
+  `).all();
+
+  const estimateItemVariants = db.prepare(`
+    SELECT
+      COALESCE(service_name, '(null)') as service_name,
+      COUNT(*) as count
+    FROM estimate_items
+    GROUP BY service_name
+    ORDER BY count DESC
+  `).all();
+
+  res.json({
+    services_table: masterServices,
+    schedule_service_types: scheduleVariants,
+    estimate_item_service_names: estimateItemVariants
+  });
+});
+
+// ─── Merge two service-type strings into one canonical value. ──────────
+// Body: { from: "Fertilizer and Weed Control", to: "Fert & Weed Control" }
+//
+// Updates atomically in a single transaction:
+//   1. schedules.service_type = `to` where service_type = `from`
+//   2. estimate_items.service_name = `to` where service_name = `from`
+//   3. If a row exists in `services` with name = `from`:
+//        - if a row with name = `to` also exists → delete the `from` row
+//          (any FK references would have been cleaned up above)
+//        - else → rename the `from` row to `to`
+//
+// Idempotent: running again with no remaining `from` rows is a no-op.
+router.post('/fix/merge-service-type', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { from, to } = req.body || {};
+  if (!from || !to) return res.status(400).json({ error: 'from and to required' });
+  if (from === to) return res.status(400).json({ error: 'from and to must differ' });
+
+  const result = db.transaction(() => {
+    const schedBefore = db.prepare(
+      `SELECT COUNT(*) as n FROM schedules WHERE service_type = ?`
+    ).get(from).n;
+    const itemBefore = db.prepare(
+      `SELECT COUNT(*) as n FROM estimate_items WHERE service_name = ?`
+    ).get(from).n;
+
+    db.prepare(
+      `UPDATE schedules SET service_type = ?, updated_at = CURRENT_TIMESTAMP WHERE service_type = ?`
+    ).run(to, from);
+
+    db.prepare(
+      `UPDATE estimate_items SET service_name = ? WHERE service_name = ?`
+    ).run(to, from);
+
+    // Handle the master services table
+    const fromSvc = db.prepare(`SELECT id FROM services WHERE name = ?`).get(from);
+    const toSvc = db.prepare(`SELECT id FROM services WHERE name = ?`).get(to);
+    let serviceAction = 'none';
+    if (fromSvc && toSvc) {
+      // Both exist — delete the `from` master (refs already migrated).
+      // pricing_tiers cascade-deletes via FK.
+      db.prepare(`DELETE FROM services WHERE id = ?`).run(fromSvc.id);
+      serviceAction = 'deleted_duplicate';
+    } else if (fromSvc && !toSvc) {
+      // Only `from` exists — rename it
+      db.prepare(`UPDATE services SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(to, fromSvc.id);
+      serviceAction = 'renamed';
+    }
+
+    return {
+      schedules_updated: schedBefore,
+      estimate_items_updated: itemBefore,
+      services_action: serviceAction
+    };
+  })();
+
+  logAudit(db, 'service', 0, req.session.userId, 'merge_service_type', { from, to, ...result });
+
+  res.json({ from, to, ...result });
 });
 
 module.exports = router;
