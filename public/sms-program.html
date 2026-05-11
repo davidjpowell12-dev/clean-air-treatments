@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMS Messaging Program | Evolved Lawn and Garden Services</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <meta name="description" content="How customers opt in to receive SMS service notifications from Clean Air Lawn Care, operated by Evolved Lawn and Garden Services LLC.">
+  <style>
+    :root {
+      --green: #78be20;
+      --green-dark: #5a9616;
+      --green-light: #e8f5d8;
+      --navy: #1a2744;
+      --gray-50: #f9fafb;
+      --gray-200: #e5e7eb;
+      --gray-300: #d1d5db;
+      --gray-400: #9ca3af;
+      --gray-500: #6b7280;
+      --gray-700: #374151;
+      --gray-900: #111827;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-900);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    header {
+      background: linear-gradient(135deg, var(--green) 0%, var(--green-dark) 100%);
+      color: white;
+      padding: 32px 20px;
+      text-align: center;
+    }
+    header img { height: 44px; margin-bottom: 8px; }
+    header h1 { font-size: 24px; font-weight: 700; }
+    header p { font-size: 13px; opacity: 0.85; margin-top: 4px; }
+    main {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    main h2 {
+      font-size: 20px;
+      color: var(--navy);
+      margin: 32px 0 12px;
+      padding-bottom: 6px;
+      border-bottom: 2px solid var(--green);
+    }
+    main h2:first-child { margin-top: 0; }
+    main h3 { font-size: 16px; margin: 20px 0 8px; color: var(--gray-900); }
+    main p { margin-bottom: 12px; color: var(--gray-700); }
+    main ul { margin: 8px 0 16px 20px; color: var(--gray-700); }
+    main li { margin-bottom: 6px; }
+    main a { color: var(--green-dark); text-decoration: underline; }
+    main code {
+      background: var(--green-light);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-family: 'SF Mono', Menlo, monospace;
+      font-size: 14px;
+      color: var(--green-dark);
+      font-weight: 700;
+    }
+    .meta {
+      font-size: 13px;
+      color: var(--gray-500);
+      padding: 12px 16px;
+      background: white;
+      border-radius: 8px;
+      border-left: 3px solid var(--green);
+      margin-bottom: 24px;
+    }
+    /* Faithful reproduction of the consent block as it appears on the proposal page */
+    .cta-preview {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      padding: 24px 20px;
+      margin: 16px 0 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+    }
+    .cta-preview .disclosure {
+      font-size: 11px;
+      color: var(--gray-500);
+      line-height: 1.5;
+      margin-bottom: 12px;
+      padding: 0 4px;
+      text-align: center;
+    }
+    .cta-preview .disclosure strong { color: var(--gray-700); }
+    .cta-preview .disclosure a {
+      color: var(--green-dark);
+      text-decoration: underline;
+    }
+    .cta-preview .accept-btn {
+      display: block;
+      width: 100%;
+      background: var(--green);
+      color: white;
+      border: none;
+      padding: 16px 24px;
+      border-radius: 12px;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(120,190,32,0.25);
+    }
+    .cta-preview .caption {
+      text-align: center;
+      font-size: 12px;
+      color: var(--gray-400);
+      margin-top: 14px;
+      font-style: italic;
+    }
+    .path-card {
+      background: white;
+      border: 1px solid var(--gray-200);
+      border-radius: 12px;
+      padding: 18px 20px;
+      margin: 12px 0;
+    }
+    .path-card h3 { margin-top: 0; color: var(--navy); }
+    .keyword-box {
+      background: var(--green-light);
+      border-left: 4px solid var(--green);
+      padding: 16px 20px;
+      border-radius: 8px;
+      margin: 16px 0;
+    }
+    .keyword-box p { margin-bottom: 6px; color: var(--gray-900); }
+    .keyword-box p:last-child { margin-bottom: 0; }
+    .contact-box {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      margin-top: 24px;
+      border: 1px solid var(--gray-200);
+    }
+    .contact-box strong { color: var(--navy); }
+    footer {
+      text-align: center;
+      font-size: 12px;
+      color: var(--gray-500);
+      padding: 24px 20px 48px;
+      border-top: 1px solid var(--gray-200);
+      margin-top: 32px;
+    }
+    footer a { color: var(--gray-700); text-decoration: none; margin: 0 8px; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/logo.png" alt="Clean Air Lawn Care">
+    <h1>SMS Messaging Program</h1>
+    <p>How customers consent to receive service notifications</p>
+  </header>
+
+  <main>
+    <div class="meta">
+      <strong>Program operator:</strong> Evolved Lawn and Garden Services LLC, dba Clean Air Lawn Care &middot; Grand Rapids, MI
+    </div>
+
+    <h2>Overview</h2>
+    <p>
+      Evolved Lawn and Garden Services LLC operates a single transactional SMS program used to notify
+      lawn care customers about upcoming service visits, completed visits, and related account
+      activity. The program does not send promotional or marketing content. Every customer enrolled in
+      the program has actively consented to receive these messages through one of the opt-in paths
+      described below.
+    </p>
+
+    <h2>How customers opt in</h2>
+
+    <div class="path-card">
+      <h3>Path 1 &mdash; New customers accepting a digital service proposal</h3>
+      <p>
+        Prospective customers receive a digital service proposal at a unique URL
+        (<code>evolvedlawnandgarden.com/proposal/&lt;token&gt;</code>). Immediately above the
+        <strong>&ldquo;Accept Proposal&rdquo;</strong> button, the page displays the disclosure shown below.
+        Clicking <strong>Accept Proposal</strong> is the consent action &mdash; it confirms agreement to the
+        services <em>and</em> to the SMS program. A customer who does not click that button is never
+        enrolled in SMS messaging.
+      </p>
+
+      <div class="cta-preview" role="figure" aria-label="Reproduction of the consent disclosure and Accept Proposal button as displayed on the live proposal page.">
+        <p class="disclosure">
+          By accepting this proposal, you consent to receive transactional SMS messages from
+          Evolved Lawn and Garden Services LLC (dba Clean Air Lawn Care) regarding service
+          scheduling, completion, and related notifications. Message and data rates may apply.
+          Message frequency varies. Reply <strong>STOP</strong> to unsubscribe or <strong>HELP</strong>
+          for help. See our
+          <a href="/sms-terms" target="_blank">SMS Terms</a>
+          and
+          <a href="/privacy" target="_blank">Privacy Policy</a>.
+        </p>
+        <button type="button" class="accept-btn" disabled style="opacity:0.95;cursor:default;">
+          Accept Proposal
+        </button>
+        <p class="caption">
+          &uarr; Reproduction of the live consent block. To see it in context on a real proposal page,
+          visit <a href="/proposal/sample">/proposal/sample</a>.
+        </p>
+      </div>
+    </div>
+
+    <div class="path-card">
+      <h3>Path 2 &mdash; Existing customers under a renewed service agreement</h3>
+      <p>
+        Customers with an active service agreement that was signed (or renewed) after the SMS program
+        launched have consented to transactional SMS notifications as part of that agreement. These
+        customers received a written notification of the program with the same disclosure language
+        shown above and the opportunity to opt out before the first message was sent.
+      </p>
+      <p>
+        Any customer enrolled through this path may reply <strong>STOP</strong> to any message at any
+        time and is immediately removed from the messaging list by our automated webhook.
+      </p>
+    </div>
+
+    <h2>What messages are sent</h2>
+    <p>Enrolled customers receive only the following message types:</p>
+    <ul>
+      <li><strong>Day-before service heads-up</strong> &mdash; reminder of an upcoming visit, address, and service description</li>
+      <li><strong>Same-day completion confirmation</strong> &mdash; brief notice that the scheduled service was completed</li>
+      <li><strong>Account notifications</strong> &mdash; payment receipts, invoice links, scheduling changes</li>
+      <li><strong>Replies</strong> &mdash; responses to customer-initiated inquiries via SMS</li>
+    </ul>
+    <p>
+      Message frequency is tied to the customer's service schedule and typically averages 4&ndash;10
+      messages per month during the active lawn care season (April&ndash;October) and 0&ndash;2 per month
+      off-season. No promotional, marketing, or third-party messages are sent through this program.
+    </p>
+
+    <h2>Opting out</h2>
+    <div class="keyword-box">
+      <p>Reply <code>STOP</code> to any message to immediately unsubscribe from all SMS messaging.</p>
+      <p>Reply <code>HELP</code> to receive contact information and program details.</p>
+    </div>
+    <p>
+      <code>STOP</code> replies are processed automatically and the sender is removed from the
+      messaging list within seconds. A customer who has opted out may opt back in at any time by
+      contacting us directly &mdash; we do not auto-resubscribe.
+    </p>
+
+    <h2>Message and data rates</h2>
+    <p>
+      Message and data rates may apply depending on the customer's wireless plan. Evolved Lawn and
+      Garden Services LLC does not charge customers for SMS messages; any charges that apply come
+      from the customer's wireless carrier.
+    </p>
+
+    <h2>Privacy</h2>
+    <p>
+      Phone numbers and message content are used solely to operate the notification program described
+      above. We do not sell, rent, or share customer phone numbers with third parties for marketing
+      purposes. See our full <a href="/privacy">Privacy Policy</a> for details.
+    </p>
+
+    <div class="contact-box">
+      <p><strong>Questions about the SMS program?</strong></p>
+      <p>Evolved Lawn and Garden Services LLC<br>
+      Grand Rapids, MI<br>
+      <a href="mailto:david@evolvedlawnandgarden.com">david@evolvedlawnandgarden.com</a></p>
+    </div>
+  </main>
+
+  <footer>
+    <a href="/sms-terms">SMS Terms</a>
+    &middot;
+    <a href="/privacy">Privacy Policy</a>
+    &middot;
+    <a href="/proposal/sample">Sample Proposal</a>
+  </footer>
+</body>
+</html>

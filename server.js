@@ -204,6 +204,9 @@ app.get('/privacy', (req, res) => {
 app.get('/sms-terms', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'sms-terms.html'));
 });
+app.get('/sms-program', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'sms-program.html'));
+});
 
 // Public branded receipt page — no auth, token-scoped.
 //

@@ -154,6 +154,36 @@ router.get('/', requireAuth, (req, res) => {
 
 // Public: Get proposal by token (customer-facing)
 router.get('/public/:token', (req, res) => {
+  // Public sample proposal — used by /proposal/sample and linked from the
+  // /sms-program page so A2P 10DLC reviewers can see the SMS consent flow
+  // live without needing a real customer token. Returns canned data and
+  // never touches the database.
+  if (req.params.token === 'sample') {
+    return res.json({
+      id: 0,
+      customer_name: 'Sample Customer',
+      address: '123 Sample Street',
+      city: 'Grand Rapids',
+      state: 'MI',
+      zip: '49506',
+      property_sqft: 6000,
+      total_price: 850.00,
+      monthly_price: 106.25,
+      payment_months: 8,
+      payment_method_preference: 'card',
+      payment_plan: 'monthly',
+      status: 'sent',
+      valid_until: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      customer_message: 'This is a sample proposal published for SMS campaign compliance review. The Accept Proposal button below shows the live SMS consent disclosure as it appears to real customers.',
+      accepted_at: null,
+      next_unpaid_invoice: null,
+      items: [
+        { id: 1, service_name: 'Fert & Weed Control', description: '6-round seasonal program', price: 600.00, is_recurring: 1, rounds: 6, is_included: 1 },
+        { id: 2, service_name: 'Aeration & Overseeding', description: 'Fall service', price: 250.00, is_recurring: 0, rounds: 1, is_included: 1 }
+      ]
+    });
+  }
+
   const db = getDb();
   const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
   if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
@@ -225,6 +255,12 @@ router.get('/public/:token', (req, res) => {
 
 // Public: Accept proposal by token (with payment plan selection)
 router.post('/public/:token/accept', async (req, res) => {
+  // Sample proposal — short-circuit so reviewers don't pollute the DB.
+  if (req.params.token === 'sample') {
+    return res.status(400).json({
+      error: 'This is a sample proposal published for SMS compliance review. Real customers receive a unique proposal link with a private token.'
+    });
+  }
   const db = getDb();
   const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
   if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
