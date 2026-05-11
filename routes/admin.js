@@ -977,6 +977,77 @@ router.post('/fix/relabel-null-service-types', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Diagnostic: find clients where actual schedule count < expected
+// rounds on the accepted estimate. Catches missing visits whether caused
+// by the reschedule bug, accidental Cancel Season + regenerate with
+// wrong count, or any other deletion path.
+router.get('/diag/schedule-vs-estimate-counts', requireAdmin, (req, res) => {
+  const db = getDb();
+
+  // For every accepted estimate, pull each recurring line item with its
+  // expected rounds. Then count the schedule entries on that estimate
+  // matching that service. Report mismatches.
+  const items = db.prepare(`
+    SELECT ei.id as item_id, ei.estimate_id, ei.service_name,
+           ei.rounds, ei.is_recurring,
+           e.customer_name, e.property_id, e.status as estimate_status
+    FROM estimate_items ei
+    JOIN estimates e ON e.id = ei.estimate_id
+    WHERE e.status = 'accepted'
+      AND ei.is_included = 1
+      AND ei.is_recurring = 1
+      AND ei.rounds > 0
+    ORDER BY e.customer_name, ei.service_name
+  `).all();
+
+  // SQLite doesn't have flexible fuzzy-matching functions, so fetch all
+  // schedule entries for the estimate and do the service-name match in JS.
+  const fetchSchedules = db.prepare(`
+    SELECT id, service_type, scheduled_date, status FROM schedules
+    WHERE estimate_id = ?
+      AND status != 'cancelled'
+  `);
+
+  const fuzzyMatch = (scheduleType, expectedName) => {
+    if (!scheduleType || !expectedName) return false;
+    const a = scheduleType.toLowerCase().trim();
+    const b = expectedName.toLowerCase().trim();
+    if (a === b) return true;
+    // Tolerate "Fert & Weed Control" vs "Fertilization and Weed Control" etc.
+    if (a.includes(b) || b.includes(a)) return true;
+    return false;
+  };
+
+  const mismatches = [];
+  for (const it of items) {
+    const all = fetchSchedules.all(it.estimate_id);
+    const matching = all.filter(s => fuzzyMatch(s.service_type, it.service_name));
+    const actual = matching.length;
+    if (actual !== it.rounds) {
+      mismatches.push({
+        customer_name: it.customer_name,
+        estimate_id: it.estimate_id,
+        property_id: it.property_id,
+        service_name: it.service_name,
+        expected_rounds: it.rounds,
+        actual_visits: actual,
+        diff: actual - it.rounds,
+        first_visit: matching.length > 0 ? matching.map(m => m.scheduled_date).sort()[0] : null,
+        last_visit: matching.length > 0 ? matching.map(m => m.scheduled_date).sort().slice(-1)[0] : null
+      });
+    }
+  }
+
+  // Sort by severity (biggest gap first)
+  mismatches.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
+
+  res.json({
+    total_recurring_items_checked: items.length,
+    mismatch_count: mismatches.length,
+    mismatches
+  });
+});
+
 // ─── Diagnostic: list every service-type variant across all tables ─────
 // Read-only. Shows the master `services` rows, every distinct
 // `schedules.service_type` with a count, and every distinct

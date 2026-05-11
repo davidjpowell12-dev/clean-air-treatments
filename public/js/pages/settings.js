@@ -276,6 +276,15 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Missing Schedule Visits Audit</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              <strong>Most important diagnostic.</strong> For every accepted estimate, compares the expected rounds count (from the estimate's line items) against the actual number of schedule entries. Surfaces clients with missing or extra visits across <em>any</em> service. Read-only.
+            </p>
+            <button class="btn btn-secondary btn-full" id="scanMissingVisitsBtn" onclick="SettingsPage.scanMissingVisits()">Find Missing/Extra Visits</button>
+            <div id="missingVisitsResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Series Reschedule History</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Shows the last 500 reschedule actions that used "apply to all future visits in the series". Use this to identify when the reshuffle bug actually fired and on which clients.
@@ -1100,6 +1109,56 @@ const SettingsPage = {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Find Multi-Service Programs'; }
+    }
+  },
+
+  async scanMissingVisits() {
+    const btn = document.getElementById('scanMissingVisitsBtn');
+    const box = document.getElementById('missingVisitsResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/diag/schedule-vs-estimate-counts');
+      if (r.mismatch_count === 0) {
+        box.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">No mismatches across ${r.total_recurring_items_checked} recurring service line items checked. Schedule matches estimate everywhere.</p>`;
+        return;
+      }
+      const rows = r.mismatches.map(m => {
+        const diffColor = m.diff < 0 ? 'var(--red)' : 'var(--orange)';
+        const diffLabel = m.diff < 0 ? `${Math.abs(m.diff)} MISSING` : `${m.diff} extra`;
+        return `
+          <tr>
+            <td style="padding:6px;">${this.esc(m.customer_name)}</td>
+            <td style="padding:6px;font-size:12px;">${this.esc(m.service_name)}</td>
+            <td style="padding:6px;text-align:center;">${m.expected_rounds}</td>
+            <td style="padding:6px;text-align:center;">${m.actual_visits}</td>
+            <td style="padding:6px;text-align:center;font-weight:700;color:${diffColor};">${diffLabel}</td>
+            <td style="padding:6px;font-size:11px;color:var(--gray-500);">${m.first_visit || '—'} &rarr; ${m.last_visit || '—'}</td>
+          </tr>
+        `;
+      }).join('');
+      box.innerHTML = `
+        <p style="font-size:13px;color:var(--red);font-weight:600;margin-bottom:8px;">
+          ${r.mismatch_count} mismatch${r.mismatch_count === 1 ? '' : 'es'} found across ${r.total_recurring_items_checked} recurring service line items.
+        </p>
+        <p style="font-size:12px;color:var(--gray-600);margin-bottom:12px;font-style:italic;">
+          Sorted by severity. <strong style="color:var(--red);">MISSING</strong> = the schedule has fewer visits than the estimate promises (lost work). <strong style="color:var(--orange);">extra</strong> = the schedule has more visits than expected (over-scheduled).
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:var(--gray-100);">
+            <th style="text-align:left;padding:6px;">Customer</th>
+            <th style="text-align:left;padding:6px;">Service</th>
+            <th style="padding:6px;">Expected</th>
+            <th style="padding:6px;">Actual</th>
+            <th style="padding:6px;">Diff</th>
+            <th style="text-align:left;padding:6px;">Date Range</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Find Missing/Extra Visits'; }
     }
   },
 
