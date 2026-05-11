@@ -274,15 +274,35 @@ router.put('/:id/reschedule', requireAuth, (req, res) => {
   if (apply_to_series && existing.program_id) {
     const targetDow = new Date(new_date + 'T12:00:00').getDay(); // 0=Sun..6=Sat
 
-    // Find future non-completed entries in the same program, excluding the one we already moved
-    const futureEntries = db.prepare(`
-      SELECT id, scheduled_date FROM schedules
-      WHERE program_id = ?
-        AND id != ?
-        AND status != 'completed'
-        AND status != 'cancelled'
-        AND scheduled_date > ?
-    `).all(existing.program_id, req.params.id, existing.scheduled_date);
+    // Find future non-completed entries in the same program AND of the same
+    // service type, excluding the one we already moved. The service_type
+    // filter is critical: program_id is per-estimate, so a multi-service
+    // client (Fert & Weed + Mosquito/Tick) has BOTH series sharing the same
+    // program_id. Without this filter, moving one Mosquito/Tick visit
+    // would also shift all the Fert & Weed visits.
+    let futureEntries;
+    if (existing.service_type) {
+      futureEntries = db.prepare(`
+        SELECT id, scheduled_date FROM schedules
+        WHERE program_id = ?
+          AND id != ?
+          AND status != 'completed'
+          AND status != 'cancelled'
+          AND scheduled_date > ?
+          AND service_type = ?
+      `).all(existing.program_id, req.params.id, existing.scheduled_date, existing.service_type);
+    } else {
+      // Legacy entries with NULL service_type — only match other NULLs.
+      futureEntries = db.prepare(`
+        SELECT id, scheduled_date FROM schedules
+        WHERE program_id = ?
+          AND id != ?
+          AND status != 'completed'
+          AND status != 'cancelled'
+          AND scheduled_date > ?
+          AND (service_type IS NULL OR service_type = '')
+      `).all(existing.program_id, req.params.id, existing.scheduled_date);
+    }
 
     const updateStmt = db.prepare(
       'UPDATE schedules SET scheduled_date = ?, sort_order = 0, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
