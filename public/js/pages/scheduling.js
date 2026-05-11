@@ -10,6 +10,7 @@ const SchedulingPage = {
     if (action === 'add') return this.renderAddProperties();
     if (action === 'season') return this.renderGenerateSeason();
     if (action === 'overview') return this.renderSeasonOverview();
+    if (action === 'round-status') return this.renderRoundStatus();
     if (action === 'calendar') return this.renderCalendar();
     return this.renderDaily();
   },
@@ -140,6 +141,7 @@ const SchedulingPage = {
         <button id="calendarBtn" class="btn btn-outline btn-sm">Calendar</button>
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
+        <button id="roundStatusBtn" class="btn btn-outline btn-sm">&#9745; Round Status</button>
         ${(() => {
           // Build per-service-type optimize buttons
           const typeCounts = {};
@@ -243,6 +245,7 @@ const SchedulingPage = {
     document.getElementById('calendarBtn').addEventListener('click', () => App.navigate('scheduling', 'calendar'));
     document.getElementById('genSeasonBtn').addEventListener('click', () => App.navigate('scheduling', 'season'));
     document.getElementById('seasonOverviewBtn').addEventListener('click', () => App.navigate('scheduling', 'overview'));
+    document.getElementById('roundStatusBtn').addEventListener('click', () => App.navigate('scheduling', 'round-status'));
     const addEmpty = document.getElementById('addPropsEmpty');
     if (addEmpty) addEmpty.addEventListener('click', () => App.navigate('scheduling', 'add'));
 
@@ -1967,5 +1970,116 @@ const SchedulingPage = {
     } else if (badge) {
       badge.remove();
     }
+  },
+
+  // ==================== ROUND STATUS REPORT ====================
+  // Holistic view: for a chosen service type + round number, list every
+  // property's visit with status and date. Answers "who's had their
+  // Round 2 of Fert & Weed Control done, and who still needs it?"
+  async renderRoundStatus() {
+    const main = document.getElementById('mainContent');
+    const year = this._today().slice(0, 4);
+
+    // Fetch list of service types in use this year
+    let services;
+    try {
+      services = await Api.get(`/api/schedules/round-status/services?year=${year}`);
+    } catch (e) { services = []; }
+
+    // Defaults: pick the first service and round 1, unless URL hash has params
+    const defaultService = services[0] ? services[0].service_type : '';
+    const defaultRound = 1;
+
+    main.innerHTML = `
+      <a href="#scheduling" class="back-link">&larr; Back to Schedule</a>
+      <div class="page-header">
+        <h2>Round Status &mdash; ${year}</h2>
+      </div>
+
+      <div class="card" style="margin-bottom:12px;">
+        <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+          <div style="flex:1;min-width:200px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--gray-600);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Service</label>
+            <select id="rsService" class="form-select" style="width:100%;">
+              ${services.map(s => `<option value="${s.service_type.replace(/"/g, '&quot;')}" data-max="${s.max_rounds || 1}">${s.service_type} (${s.visit_count} visits)</option>`).join('')}
+            </select>
+          </div>
+          <div style="width:120px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--gray-600);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.5px;">Round</label>
+            <select id="rsRound" class="form-select" style="width:100%;">
+              ${[1,2,3,4,5,6,7,8,9,10].map(n => `<option value="${n}"${n === defaultRound ? ' selected' : ''}>R${n}</option>`).join('')}
+            </select>
+          </div>
+          <button id="rsLoad" class="btn btn-primary">Load</button>
+        </div>
+      </div>
+
+      <div id="rsResults">
+        <p style="font-size:13px;color:var(--gray-500);text-align:center;padding:20px;">Pick a service and round, then click Load.</p>
+      </div>
+    `;
+
+    const loadReport = async () => {
+      const svc = document.getElementById('rsService').value;
+      const rnd = document.getElementById('rsRound').value;
+      if (!svc || !rnd) return;
+      const box = document.getElementById('rsResults');
+      box.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+      try {
+        const r = await Api.get(`/api/schedules/round-status?year=${year}&service_type=${encodeURIComponent(svc)}&round=${rnd}`);
+        if (r.summary.total === 0) {
+          box.innerHTML = `<div class="card"><div class="card-body"><p style="font-size:13px;color:var(--gray-500);">No Round ${rnd} visits found for "${this._esc(svc)}" in ${year}.</p></div></div>`;
+          return;
+        }
+        const today = this._today();
+        const rows = r.entries.map(e => {
+          const isBehind = e.status === 'scheduled' && e.scheduled_date < today;
+          const statusBadge = e.status === 'completed'
+            ? '<span class="badge badge-green">&#10003; Done</span>'
+            : e.status === 'skipped'
+            ? '<span class="badge badge-gray">Skipped</span>'
+            : e.status === 'cancelled'
+            ? '<span class="badge badge-gray">Cancelled</span>'
+            : isBehind
+            ? '<span class="badge badge-orange">&#9888; Behind</span>'
+            : '<span class="badge badge-blue">Scheduled</span>';
+          return `
+            <tr>
+              <td style="padding:8px;"><a href="#properties/${e.property_id}" style="color:var(--navy);font-weight:600;text-decoration:none;">${this._esc(e.customer_name)}</a></td>
+              <td style="padding:8px;font-size:12px;color:var(--gray-600);">${this._esc(e.address || '')}</td>
+              <td style="padding:8px;font-size:12px;">${e.scheduled_date}</td>
+              <td style="padding:8px;text-align:center;">${statusBadge}</td>
+            </tr>
+          `;
+        }).join('');
+        box.innerHTML = `
+          <div class="stat-grid" style="margin-bottom:12px;">
+            <div class="stat-card"><div class="stat-value">${r.summary.total}</div><div class="stat-label">Total</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--green);">${r.summary.completed}</div><div class="stat-label">Done</div></div>
+            <div class="stat-card"><div class="stat-value" style="color:var(--blue,#3b82f6);">${r.summary.scheduled}</div><div class="stat-label">Open</div></div>
+          </div>
+          <div class="card">
+            <div class="card-body" style="padding:0;overflow-x:auto;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr style="background:var(--gray-100);">
+                  <th style="text-align:left;padding:8px;">Customer</th>
+                  <th style="text-align:left;padding:8px;">Address</th>
+                  <th style="text-align:left;padding:8px;">Date</th>
+                  <th style="padding:8px;">Status</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+              </table>
+            </div>
+          </div>
+        `;
+      } catch (err) {
+        box.innerHTML = `<p style="color:var(--red);padding:12px;">Error: ${this._esc(err.message)}</p>`;
+      }
+    };
+
+    document.getElementById('rsLoad').addEventListener('click', loadReport);
+
+    // Auto-load on first arrival
+    if (services.length > 0) loadReport();
   }
 };

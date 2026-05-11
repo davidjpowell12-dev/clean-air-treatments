@@ -200,6 +200,63 @@ router.get('/unscheduled-programs', requireAuth, (req, res) => {
   res.json(db.prepare(sql).all(...params));
 });
 
+// Round status report — for a given service type + round number,
+// returns every property's visit with status and date. Lets the user
+// answer "who has had their Round 2 of Fert & Weed Control, and who
+// still needs it?" Service-type match is fuzzy (lowercased substring)
+// so "Fert & Weed Control" and "Fertilization and Weed Control" both
+// match a query of "fert".
+router.get('/round-status', requireAuth, (req, res) => {
+  const db = getDb();
+  const { year, service_type, round } = req.query;
+  if (!year) return res.status(400).json({ error: 'Year required' });
+  if (!service_type) return res.status(400).json({ error: 'service_type required' });
+  if (!round) return res.status(400).json({ error: 'round required' });
+
+  const rows = db.prepare(`
+    SELECT s.id, s.scheduled_date, s.status, s.service_type,
+           s.round_number, s.total_rounds, s.notes,
+           p.id as property_id, p.customer_name, p.address, p.city, p.phone
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    WHERE s.scheduled_date LIKE ?
+      AND s.round_number = ?
+      AND s.service_type IS NOT NULL
+      AND LOWER(s.service_type) LIKE ?
+    ORDER BY p.customer_name, s.scheduled_date
+  `).all(`${year}%`, Number(round), `%${String(service_type).toLowerCase()}%`);
+
+  // Bucket by status for quick summary
+  const summary = {
+    total: rows.length,
+    completed: rows.filter(r => r.status === 'completed').length,
+    scheduled: rows.filter(r => r.status === 'scheduled').length,
+    skipped: rows.filter(r => r.status === 'skipped').length,
+    cancelled: rows.filter(r => r.status === 'cancelled').length
+  };
+
+  res.json({ summary, entries: rows });
+});
+
+// Distinct service types currently used in schedules for a given year —
+// used to populate the service-type filter dropdown for round-status.
+router.get('/round-status/services', requireAuth, (req, res) => {
+  const db = getDb();
+  const { year } = req.query;
+  if (!year) return res.status(400).json({ error: 'Year required' });
+
+  const rows = db.prepare(`
+    SELECT DISTINCT service_type, MAX(total_rounds) as max_rounds, COUNT(*) as visit_count
+    FROM schedules
+    WHERE scheduled_date LIKE ?
+      AND service_type IS NOT NULL AND service_type != ''
+    GROUP BY service_type
+    ORDER BY service_type
+  `).all(`${year}%`);
+
+  res.json(rows);
+});
+
 // Season overview — all program entries grouped by property
 router.get('/season-overview', requireAuth, (req, res) => {
   const db = getDb();
