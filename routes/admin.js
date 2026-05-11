@@ -1014,6 +1014,104 @@ router.get('/diag/service-type-variants', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Diagnostic: find multi-service programs where the reschedule bug
+// could have shifted visits across service types. A "multi-service
+// program" is a program_id that has more than one distinct service_type.
+// For each, returns the full breakdown of visits per service so the user
+// can audit dates.
+router.get('/diag/multi-service-programs', requireAdmin, (req, res) => {
+  const db = getDb();
+
+  // Step 1: find program_ids with >1 distinct service_type
+  const multiPrograms = db.prepare(`
+    SELECT s.program_id, p.id as property_id, p.customer_name, p.address,
+           COUNT(DISTINCT s.service_type) as service_count,
+           COUNT(*) as total_visits
+    FROM schedules s
+    JOIN properties p ON p.id = s.property_id
+    WHERE s.program_id IS NOT NULL
+    GROUP BY s.program_id
+    HAVING COUNT(DISTINCT s.service_type) > 1
+    ORDER BY p.customer_name
+  `).all();
+
+  // Step 2: for each, fetch all visits grouped by service_type
+  const byService = db.prepare(`
+    SELECT id, scheduled_date, service_type, round_number, total_rounds, status
+    FROM schedules
+    WHERE program_id = ?
+    ORDER BY service_type, scheduled_date, round_number
+  `);
+
+  const result = multiPrograms.map(prog => {
+    const visits = byService.all(prog.program_id);
+    const services = {};
+    for (const v of visits) {
+      const key = v.service_type || '(null)';
+      if (!services[key]) services[key] = [];
+      services[key].push(v);
+    }
+    return {
+      program_id: prog.program_id,
+      property_id: prog.property_id,
+      customer_name: prog.customer_name,
+      address: prog.address,
+      service_count: prog.service_count,
+      total_visits: prog.total_visits,
+      services
+    };
+  });
+
+  res.json({
+    affected_programs: result.length,
+    affected_customers: [...new Set(result.map(r => r.customer_name))].length,
+    programs: result
+  });
+});
+
+// ─── Diagnostic: audit log of reschedule actions where series_shifted > 0.
+// Helps identify reshuffle events where the buggy series-shift might
+// have moved visits across service types.
+router.get('/diag/series-shift-history', requireAdmin, (req, res) => {
+  const db = getDb();
+
+  // Pull audit rows for 'reschedule' actions with series_shifted > 0
+  const rows = db.prepare(`
+    SELECT a.id, a.created_at, a.user_id, u.full_name as user_name,
+           a.record_id as schedule_id, a.changes_json
+    FROM audit_log a
+    LEFT JOIN users u ON u.id = a.user_id
+    WHERE a.record_type = 'schedule' AND a.action = 'reschedule'
+    ORDER BY a.created_at DESC
+    LIMIT 500
+  `).all();
+
+  const parsed = [];
+  for (const r of rows) {
+    let details = {};
+    try { details = JSON.parse(r.changes_json || '{}'); } catch (e) {}
+    if (!details.apply_to_series || !details.series_shifted) continue;
+    // Try to enrich with customer info
+    const sched = db.prepare(`
+      SELECT s.service_type, p.customer_name FROM schedules s
+      JOIN properties p ON p.id = s.property_id
+      WHERE s.id = ?
+    `).get(r.schedule_id);
+    parsed.push({
+      timestamp: r.created_at,
+      user: r.user_name || '(unknown)',
+      schedule_id: r.schedule_id,
+      customer_name: sched ? sched.customer_name : '(deleted)',
+      service_type_of_moved_visit: sched ? sched.service_type : '(unknown)',
+      old_date: details.old_date,
+      new_date: details.new_date,
+      series_shifted: details.series_shifted
+    });
+  }
+
+  res.json({ count: parsed.length, actions: parsed });
+});
+
 // ─── Merge two service-type strings into one canonical value. ──────────
 // Body: { from: "Fertilizer and Weed Control", to: "Fert & Weed Control" }
 //

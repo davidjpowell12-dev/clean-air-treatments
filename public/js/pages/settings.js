@@ -267,6 +267,24 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Multi-Service Programs (reschedule-bug audit)</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Identifies clients whose accepted estimate created multiple services (e.g. Fert &amp; Weed + Mowing + Mosquito/Tick) under a single shared <code>program_id</code>. These are the clients potentially affected by the historical reschedule bug where "apply to all future visits in the series" would shift visits across service types. Read-only — shows each program's visits grouped by service so you can audit dates.
+            </p>
+            <button class="btn btn-secondary btn-full" id="scanMultiSvcBtn" onclick="SettingsPage.scanMultiServicePrograms()">Find Multi-Service Programs</button>
+            <div id="multiSvcResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Series Reschedule History</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Shows the last 500 reschedule actions that used "apply to all future visits in the series". Use this to identify when the reshuffle bug actually fired and on which clients.
+            </p>
+            <button class="btn btn-secondary btn-full" id="scanReshuffleBtn" onclick="SettingsPage.scanReshuffleHistory()">Show Series Reshuffle History</button>
+            <div id="reshuffleResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Invoice vs Estimate Audit</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Read-only diagnostic. Finds accepted estimates where the displayed season total (plus card fee) doesn't match the sum of invoices on file. Shows you the scope of any mismatches. <strong>Does not fix anything</strong> — just reports.
@@ -1033,6 +1051,96 @@ const SettingsPage = {
       this.scanServiceTypeVariants();
     } catch (err) {
       App.toast('Merge failed: ' + err.message, 'error');
+    }
+  },
+
+  async scanMultiServicePrograms() {
+    const btn = document.getElementById('scanMultiSvcBtn');
+    const box = document.getElementById('multiSvcResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/diag/multi-service-programs');
+      if (r.affected_programs === 0) {
+        box.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">No multi-service programs found. Nothing was affected by the reschedule bug.</p>`;
+        return;
+      }
+      const programCards = r.programs.map(p => {
+        const serviceBlocks = Object.entries(p.services).map(([svc, visits]) => {
+          const visitRows = visits.map(v =>
+            `<tr><td>${v.scheduled_date}</td><td>${v.round_number}/${v.total_rounds}</td><td><span class="badge badge-${v.status === 'completed' ? 'green' : v.status === 'cancelled' ? 'gray' : 'blue'}">${v.status}</span></td></tr>`
+          ).join('');
+          return `
+            <div style="margin:10px 0;padding:10px;background:var(--gray-50);border-radius:6px;">
+              <p style="font-weight:600;font-size:13px;color:var(--navy);margin-bottom:6px;">${this.esc(svc)} <span style="color:var(--gray-500);font-weight:400;">(${visits.length} visits)</span></p>
+              <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">Date</th><th style="text-align:left;padding:4px;">Round</th><th style="text-align:left;padding:4px;">Status</th></tr></thead>
+                <tbody>${visitRows}</tbody>
+              </table>
+            </div>
+          `;
+        }).join('');
+        return `
+          <div style="margin:14px 0;padding:14px;background:white;border:1px solid var(--gray-200);border-radius:8px;">
+            <p style="font-weight:700;font-size:15px;color:var(--navy);margin-bottom:4px;">${this.esc(p.customer_name)}</p>
+            <p style="font-size:12px;color:var(--gray-500);margin-bottom:8px;">${this.esc(p.address)} &middot; ${p.service_count} services &middot; ${p.total_visits} total visits</p>
+            ${serviceBlocks}
+          </div>
+        `;
+      }).join('');
+      box.innerHTML = `
+        <p style="font-size:13px;color:var(--orange);font-weight:600;margin-bottom:8px;">
+          ${r.affected_programs} multi-service program${r.affected_programs === 1 ? '' : 's'} across ${r.affected_customers} customer${r.affected_customers === 1 ? '' : 's'}.
+        </p>
+        <p style="font-size:12px;color:var(--gray-600);margin-bottom:12px;font-style:italic;">
+          These clients are potentially affected by the historical reschedule bug. Look for service-type rounds with dates that don't fit the expected cadence (e.g. a fert/weed round on the same day as a mosquito/tick round, or rounds spaced &lt;3 weeks apart).
+        </p>
+        ${programCards}
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Find Multi-Service Programs'; }
+    }
+  },
+
+  async scanReshuffleHistory() {
+    const btn = document.getElementById('scanReshuffleBtn');
+    const box = document.getElementById('reshuffleResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/diag/series-shift-history');
+      if (r.count === 0) {
+        box.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">No series-reshuffle actions in the audit log.</p>`;
+        return;
+      }
+      const rows = r.actions.map(a => `
+        <tr>
+          <td style="padding:4px;font-size:11px;color:var(--gray-500);">${new Date(a.timestamp).toLocaleString()}</td>
+          <td style="padding:4px;">${this.esc(a.customer_name)}</td>
+          <td style="padding:4px;font-size:12px;">${this.esc(a.service_type_of_moved_visit || '(none)')}</td>
+          <td style="padding:4px;font-size:12px;">${a.old_date} → ${a.new_date}</td>
+          <td style="padding:4px;text-align:right;font-weight:700;color:${a.series_shifted > 8 ? 'var(--red)' : a.series_shifted > 4 ? 'var(--orange)' : 'var(--gray-700)'};">${a.series_shifted}</td>
+        </tr>
+      `).join('');
+      box.innerHTML = `
+        <p style="font-size:13px;color:var(--gray-700);margin-bottom:8px;">
+          ${r.count} series-reshuffle action${r.count === 1 ? '' : 's'} in audit log. Counts in red/orange are the largest reshuffle events — most likely to have moved visits across service types.
+        </p>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <thead><tr style="background:var(--gray-100);">
+            <th style="text-align:left;padding:4px;">When</th>
+            <th style="text-align:left;padding:4px;">Customer</th>
+            <th style="text-align:left;padding:4px;">Service Moved</th>
+            <th style="text-align:left;padding:4px;">Date Change</th>
+            <th style="text-align:right;padding:4px;">Others Shifted</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Show Series Reshuffle History'; }
     }
   },
 
