@@ -986,7 +986,7 @@ router.get('/diag/service-type-variants', requireAdmin, (req, res) => {
   const db = getDb();
 
   const masterServices = db.prepare(
-    `SELECT id, name, is_active, is_recurring, rounds FROM services ORDER BY name`
+    `SELECT id, name, is_active, is_recurring, rounds, requires_application FROM services ORDER BY name`
   ).all();
 
   const scheduleVariants = db.prepare(`

@@ -985,7 +985,7 @@ const SettingsPage = {
     try {
       const r = await Api.get('/api/admin/diag/service-type-variants');
       const masterRows = r.services_table.map(s =>
-        `<tr><td>${s.id}</td><td>${this.esc(s.name)}</td><td>${s.is_active ? '✓' : '—'}</td><td>${s.rounds || 1}</td></tr>`
+        `<tr><td>${s.id}</td><td>${this.esc(s.name)}</td><td>${s.is_active ? '✓' : '—'}</td><td>${s.rounds || 1}</td><td style="color:${s.requires_application === 0 ? 'var(--red)' : 'var(--green)'};font-weight:600;">${s.requires_application === 0 ? 'No' : 'Yes'}</td></tr>`
       ).join('');
       const schedRows = r.schedule_service_types.map(v =>
         `<tr><td>${this.esc(v.service_type)}</td><td style="text-align:right;">${v.count}</td><td><button class="btn btn-sm btn-outline" onclick="SettingsPage.promptMergeServiceType('${this.esc(v.service_type).replace(/'/g, '\\\'')}')">Merge…</button></td></tr>`
@@ -997,8 +997,8 @@ const SettingsPage = {
         <div style="font-size:13px;color:var(--gray-700);margin-top:8px;">
           <p style="font-weight:600;margin:8px 0 4px;">Master <code>services</code> table</p>
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
-            <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Name</th><th style="padding:4px;">Active</th><th style="padding:4px;">Rounds</th></tr></thead>
-            <tbody>${masterRows || '<tr><td colspan="4" style="padding:6px;font-style:italic;">(empty)</td></tr>'}</tbody>
+            <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Name</th><th style="padding:4px;">Active</th><th style="padding:4px;">Rounds</th><th style="padding:4px;">Chemical Application?</th></tr></thead>
+            <tbody>${masterRows || '<tr><td colspan="5" style="padding:6px;font-style:italic;">(empty)</td></tr>'}</tbody>
           </table>
           <p style="font-weight:600;margin:14px 0 4px;">Schedule entries by <code>service_type</code></p>
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
