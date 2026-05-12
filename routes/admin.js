@@ -977,6 +977,100 @@ router.post('/fix/relabel-null-service-types', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Customer Forensics: show everything we know about a customer by
+// name search. Returns matching properties, every estimate ever
+// created for those properties (any status), every schedule entry
+// currently in the DB, and every audit-log action targeting those
+// entities. Used to investigate "where did this customer's rounds go?"
+router.get('/diag/customer-forensics', requireAdmin, (req, res) => {
+  const db = getDb();
+  const q = (req.query.q || '').trim();
+  if (!q) return res.status(400).json({ error: 'q (name search) required' });
+
+  const properties = db.prepare(`
+    SELECT id, customer_name, address, city, state, phone, email, created_at, updated_at
+    FROM properties
+    WHERE customer_name LIKE ?
+    ORDER BY customer_name, id
+  `).all(`%${q}%`);
+
+  const result = properties.map(prop => {
+    const estimates = db.prepare(`
+      SELECT id, customer_name, address, status, total_price, accepted_at,
+             cancelled_at, created_at, updated_at, property_id
+      FROM estimates
+      WHERE property_id = ? OR customer_name LIKE ?
+      ORDER BY created_at DESC
+    `).all(prop.id, `%${q}%`);
+
+    const schedules = db.prepare(`
+      SELECT id, scheduled_date, service_type, round_number, total_rounds,
+             status, program_id, estimate_id, created_at, updated_at
+      FROM schedules
+      WHERE property_id = ?
+      ORDER BY scheduled_date, id
+    `).all(prop.id);
+
+    // Group schedules by service for easier reading
+    const schedBySvc = {};
+    for (const s of schedules) {
+      const key = s.service_type || '(no service)';
+      if (!schedBySvc[key]) schedBySvc[key] = [];
+      schedBySvc[key].push(s);
+    }
+
+    // Audit log entries for this property, its estimates, its schedules
+    const estIds = estimates.map(e => e.id);
+    const schedIds = schedules.map(s => s.id);
+    const placeholders = (arr) => arr.length > 0 ? arr.map(() => '?').join(',') : 'NULL';
+
+    let auditEntries = [];
+    if (estIds.length > 0 || schedIds.length > 0) {
+      const query = `
+        SELECT a.id, a.created_at, a.user_id, u.full_name as user_name,
+               a.record_type, a.record_id, a.action, a.changes_json
+        FROM audit_log a
+        LEFT JOIN users u ON u.id = a.user_id
+        WHERE (a.record_type = 'estimate' AND a.record_id IN (${placeholders(estIds)}))
+           OR (a.record_type = 'schedule' AND a.record_id IN (${placeholders(schedIds)}))
+           OR (a.record_type = 'property' AND a.record_id = ?)
+        ORDER BY a.created_at DESC
+        LIMIT 200
+      `;
+      auditEntries = db.prepare(query).all(...estIds, ...schedIds, prop.id);
+    }
+
+    // Also pull any cancel_season audit entries (record_id = 0) that mention this property in changes_json
+    const cancelEvents = db.prepare(`
+      SELECT id, created_at, user_id, action, changes_json
+      FROM audit_log
+      WHERE record_type = 'schedule'
+        AND (action = 'cancel_season' OR action = 'delete')
+        AND created_at >= date('now', '-1 year')
+      ORDER BY created_at DESC
+    `).all();
+    const possiblyRelated = cancelEvents.filter(e => {
+      try {
+        const d = JSON.parse(e.changes_json || '{}');
+        // Heuristic — if cancel_season mentions a program_id that matches any of this property's schedules
+        if (!d.program_id) return false;
+        return schedules.some(s => s.program_id === d.program_id);
+      } catch (err) { return false; }
+    });
+
+    return {
+      property: prop,
+      estimates,
+      schedules_by_service: schedBySvc,
+      schedule_total: schedules.length,
+      audit_entries: auditEntries,
+      possibly_related_cancel_events: possiblyRelated
+    };
+  });
+
+  res.json({ query: q, properties_found: result.length, results: result });
+});
+
 // ─── Diagnostic: find clients where actual schedule count < expected
 // rounds on the accepted estimate. Catches missing visits whether caused
 // by the reschedule bug, accidental Cancel Season + regenerate with

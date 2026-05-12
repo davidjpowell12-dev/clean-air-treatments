@@ -285,6 +285,18 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Customer Forensics</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Look up a single customer by name and see everything: property record, every estimate (any status), every schedule entry, and every audit-log action against them. Use this when a customer's rounds appear to have vanished.
+            </p>
+            <div style="display:flex;gap:8px;margin-bottom:12px;">
+              <input type="text" id="forensicsQ" class="form-input" style="flex:1;" placeholder="Customer name (partial match OK, e.g. 'Dalley')">
+              <button class="btn btn-secondary" id="forensicsBtn" onclick="SettingsPage.runCustomerForensics()">Look Up</button>
+            </div>
+            <div id="forensicsResults"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Series Reschedule History</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Shows the last 500 reschedule actions that used "apply to all future visits in the series". Use this to identify when the reshuffle bug actually fired and on which clients.
@@ -1159,6 +1171,92 @@ const SettingsPage = {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Find Missing/Extra Visits'; }
+    }
+  },
+
+  async runCustomerForensics() {
+    const q = (document.getElementById('forensicsQ').value || '').trim();
+    if (!q) { App.toast('Enter a customer name first', 'error'); return; }
+    const btn = document.getElementById('forensicsBtn');
+    const box = document.getElementById('forensicsResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Looking up...'; }
+    box.innerHTML = '<p style="font-size:13px;color:var(--gray-500);">Searching...</p>';
+    try {
+      const r = await Api.get('/api/admin/diag/customer-forensics?q=' + encodeURIComponent(q));
+      if (r.properties_found === 0) {
+        box.innerHTML = `<p style="font-size:13px;color:var(--red);">No properties found matching "${this.esc(q)}". Try a shorter or different search.</p>`;
+        return;
+      }
+      const cards = r.results.map(rec => {
+        const estRows = rec.estimates.map(e => `
+          <tr>
+            <td style="padding:4px;">#${e.id}</td>
+            <td style="padding:4px;font-size:12px;">${this.esc(e.address || '')}</td>
+            <td style="padding:4px;"><span class="badge badge-${e.status === 'accepted' ? 'green' : e.status === 'cancelled' ? 'red' : 'gray'}">${e.status}</span></td>
+            <td style="padding:4px;font-size:11px;color:var(--gray-500);">${e.created_at ? e.created_at.slice(0,10) : ''}</td>
+            <td style="padding:4px;font-size:11px;color:var(--gray-500);">$${e.total_price || 0}</td>
+          </tr>
+        `).join('');
+        const svcBlocks = Object.entries(rec.schedules_by_service).map(([svc, visits]) => {
+          const visitChips = visits.map(v => {
+            const color = v.status === 'completed' ? 'badge-green' : v.status === 'cancelled' ? 'badge-gray' : v.status === 'skipped' ? 'badge-gray' : 'badge-blue';
+            return `<span class="${color}" style="padding:2px 6px;border-radius:4px;font-size:11px;margin:1px;display:inline-block;">R${v.round_number || '?'}/${v.total_rounds || '?'} ${v.scheduled_date} (${v.status})</span>`;
+          }).join(' ');
+          return `<div style="margin:6px 0;"><strong style="font-size:13px;color:var(--navy);">${this.esc(svc)} (${visits.length} visits)</strong><div style="margin-top:4px;">${visitChips}</div></div>`;
+        }).join('');
+        const auditRows = rec.audit_entries.map(a => `
+          <tr>
+            <td style="padding:3px;font-size:11px;color:var(--gray-500);">${a.created_at ? a.created_at.slice(0,16) : ''}</td>
+            <td style="padding:3px;font-size:11px;">${this.esc(a.user_name || '—')}</td>
+            <td style="padding:3px;font-size:11px;">${a.record_type}#${a.record_id}</td>
+            <td style="padding:3px;font-size:11px;font-weight:600;color:${a.action.includes('delete') || a.action.includes('cancel') ? 'var(--red)' : 'var(--gray-700)'};">${a.action}</td>
+          </tr>
+        `).join('');
+        const cancelRows = rec.possibly_related_cancel_events.map(e => `
+          <tr style="background:#fef2f2;">
+            <td style="padding:3px;font-size:11px;color:var(--gray-500);">${e.created_at ? e.created_at.slice(0,16) : ''}</td>
+            <td style="padding:3px;font-size:11px;font-weight:700;color:var(--red);">${e.action}</td>
+            <td style="padding:3px;font-size:10px;font-family:monospace;color:var(--gray-700);">${this.esc(e.changes_json || '')}</td>
+          </tr>
+        `).join('');
+        return `
+          <div style="margin:14px 0;padding:14px;background:white;border:1px solid var(--gray-200);border-radius:8px;">
+            <p style="font-weight:700;font-size:15px;color:var(--navy);">${this.esc(rec.property.customer_name)} <span style="color:var(--gray-500);font-size:12px;font-weight:400;">(property #${rec.property.id})</span></p>
+            <p style="font-size:12px;color:var(--gray-500);margin-bottom:10px;">${this.esc(rec.property.address || '')} · created ${rec.property.created_at ? rec.property.created_at.slice(0,10) : '?'}</p>
+
+            <p style="font-size:12px;font-weight:600;margin-top:10px;color:var(--gray-700);">Estimates (${rec.estimates.length})</p>
+            ${rec.estimates.length === 0 ? '<p style="font-size:12px;color:var(--gray-500);font-style:italic;">None</p>' : `
+              <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Address</th><th style="padding:4px;">Status</th><th style="padding:4px;">Created</th><th style="padding:4px;">Total</th></tr></thead>
+                <tbody>${estRows}</tbody>
+              </table>
+            `}
+
+            <p style="font-size:12px;font-weight:600;margin-top:14px;color:var(--gray-700);">Schedule entries (${rec.schedule_total} total)</p>
+            ${rec.schedule_total === 0 ? '<p style="font-size:12px;color:var(--red);font-style:italic;">No schedule entries currently in the database for this property.</p>' : svcBlocks}
+
+            <p style="font-size:12px;font-weight:600;margin-top:14px;color:var(--gray-700);">Audit log (${rec.audit_entries.length})</p>
+            ${rec.audit_entries.length === 0 ? '<p style="font-size:12px;color:var(--gray-500);font-style:italic;">None</p>' : `
+              <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:3px;">When</th><th style="text-align:left;padding:3px;">By</th><th style="text-align:left;padding:3px;">Target</th><th style="text-align:left;padding:3px;">Action</th></tr></thead>
+                <tbody>${auditRows}</tbody>
+              </table>
+            `}
+
+            ${rec.possibly_related_cancel_events.length > 0 ? `
+              <p style="font-size:12px;font-weight:700;margin-top:14px;color:var(--red);">⚠ Possible cancel events (program_id match)</p>
+              <table style="width:100%;border-collapse:collapse;font-size:11px;">
+                <tbody>${cancelRows}</tbody>
+              </table>
+            ` : ''}
+          </div>
+        `;
+      }).join('');
+      box.innerHTML = `<p style="font-size:13px;color:var(--gray-700);margin-bottom:8px;"><strong>${r.properties_found}</strong> propert${r.properties_found === 1 ? 'y' : 'ies'} found matching "${this.esc(q)}"</p>${cards}`;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Look Up'; }
     }
   },
 
