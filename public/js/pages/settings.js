@@ -285,6 +285,19 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Attach Orphan Stripe Payment Method</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              When a card was saved on a proposal that had no email, Stripe stored it as an orphan PM with no Customer. Paste the <code>pm_…</code> ID and the estimate ID to create a Customer, attach the card, set it as default, and link it to every accepted estimate on that property.
+            </p>
+            <div style="display:grid;grid-template-columns:1fr 130px 100px;gap:8px;margin-bottom:12px;">
+              <input type="text" id="orphanPmId" class="form-input" placeholder="pm_1TToOa...">
+              <input type="number" id="orphanPmEstId" class="form-input" placeholder="Estimate ID">
+              <button class="btn btn-secondary" onclick="SettingsPage.attachOrphanPm()">Attach</button>
+            </div>
+            <div id="orphanPmResults"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Accepted Estimates Missing Invoices</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Lists accepted estimates that have zero invoices in the system. Each can be fixed in place by setting a payment plan + method.
@@ -1180,6 +1193,28 @@ const SettingsPage = {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Find Missing/Extra Visits'; }
+    }
+  },
+
+  async attachOrphanPm() {
+    const pm = (document.getElementById('orphanPmId').value || '').trim();
+    const estId = (document.getElementById('orphanPmEstId').value || '').trim();
+    const box = document.getElementById('orphanPmResults');
+    if (!pm.startsWith('pm_')) { App.toast('Payment method ID must start with pm_', 'error'); return; }
+    if (!estId) { App.toast('Estimate ID required', 'error'); return; }
+    if (!confirm(`Attach payment method ${pm} to estimate #${estId} (and its siblings)?\n\nThis will create or update a Stripe Customer and set this card as default.`)) return;
+    box.innerHTML = '<p style="font-size:13px;color:var(--gray-500);">Working...</p>';
+    try {
+      const r = await Api.post(`/api/admin/fix/attach-orphan-pm/${estId}`, { payment_method_id: pm });
+      box.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;padding:10px;border-radius:6px;font-size:13px;">
+          ✓ Attached. Stripe customer: <code>${this.esc(r.stripe_customer_id)}</code><br>
+          Linked to estimates: ${r.estimates_updated.map(id => '#' + id).join(', ')}
+        </div>
+      `;
+      App.toast('Card attached — refresh Invoicing to see Charge button', 'success');
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     }
   },
 

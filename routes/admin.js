@@ -992,6 +992,99 @@ router.get('/diag/accepted-no-invoices', requireAdmin, (req, res) => {
   res.json({ count: rows.length, estimates: rows });
 });
 
+// ─── Recover an orphan Stripe payment method.
+// When a customer ran the setup flow without an email on file, Stripe
+// saved the card as a "naked" payment method with no Customer attached.
+// This endpoint takes the orphan pm_xxx, creates (or finds) a Stripe
+// Customer from the estimate's name + phone + email, attaches the PM,
+// sets it as the default, and saves the customer_id on the target
+// estimate (and every accepted sibling estimate on the same property
+// so all of the customer's invoices can charge it).
+router.post('/fix/attach-orphan-pm/:estimateId', requireAdmin, async (req, res) => {
+  const db = getDb();
+  const { payment_method_id } = req.body || {};
+  if (!payment_method_id || !payment_method_id.startsWith('pm_')) {
+    return res.status(400).json({ error: 'payment_method_id required (must start with pm_)' });
+  }
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const stripeUtils = require('../utils/stripe');
+  if (!stripeUtils.isEnabled()) return res.status(503).json({ error: 'Stripe not configured' });
+
+  // Get the raw Stripe SDK so we can attach + set default
+  let stripe;
+  try { stripe = require('stripe')(process.env.STRIPE_SECRET_KEY); }
+  catch (e) { return res.status(500).json({ error: 'Stripe SDK init failed' }); }
+
+  try {
+    // 1. Find or create the Stripe Customer
+    let customerId = est.stripe_customer_id;
+    if (!customerId) {
+      customerId = await stripeUtils.findOrCreateStripeCustomer(
+        est.email || null, est.customer_name,
+        { estimate_id: String(est.id), recovered_orphan_pm: payment_method_id }
+      );
+    }
+
+    // 2. Update customer with phone (if not present) — useful for receipts/disputes
+    if (est.phone) {
+      try { await stripe.customers.update(customerId, { phone: est.phone }); }
+      catch (e) { console.warn('[attach-orphan-pm] phone update failed (non-fatal):', e.message); }
+    }
+
+    // 3. Attach the payment method to this customer (idempotent — Stripe
+    //    throws if already attached, in which case we ignore).
+    try {
+      await stripe.paymentMethods.attach(payment_method_id, { customer: customerId });
+    } catch (attachErr) {
+      // "already attached" is fine, anything else is fatal
+      if (!attachErr.message || !attachErr.message.includes('already been attached')) {
+        throw attachErr;
+      }
+    }
+
+    // 4. Set as the customer's default payment method (so off-session
+    //    charges via auto-charge cron will find it)
+    await stripe.customers.update(customerId, {
+      invoice_settings: { default_payment_method: payment_method_id }
+    });
+
+    // 5. Save customer_id on this estimate and every accepted sibling on
+    //    the same property — so all their invoices can charge it.
+    const updated = [];
+    db.prepare('UPDATE estimates SET stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+      .run(customerId, est.id);
+    updated.push(est.id);
+    if (est.property_id) {
+      const siblings = db.prepare(`
+        SELECT id FROM estimates
+        WHERE property_id = ? AND id != ? AND status = 'accepted'
+          AND (stripe_customer_id IS NULL OR stripe_customer_id = '')
+      `).all(est.property_id, est.id);
+      for (const s of siblings) {
+        db.prepare('UPDATE estimates SET stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+          .run(customerId, s.id);
+        updated.push(s.id);
+      }
+    }
+
+    logAudit(db, 'estimate', est.id, req.session.userId, 'attach_orphan_pm', {
+      payment_method_id, stripe_customer_id: customerId, estimates_updated: updated
+    });
+
+    res.json({
+      ok: true,
+      stripe_customer_id: customerId,
+      payment_method_id,
+      estimates_updated: updated
+    });
+  } catch (err) {
+    console.error('[attach-orphan-pm] failed:', err);
+    res.status(500).json({ error: err.message || 'Stripe operation failed' });
+  }
+});
+
 // ─── Copy stripe_customer_id from a sibling estimate (same property,
 // accepted, has a stripe_customer_id). Used when a customer saved a
 // card on one estimate but another estimate for the same property

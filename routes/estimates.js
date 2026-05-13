@@ -483,11 +483,14 @@ router.post('/public/:token/setup-card', async (req, res) => {
   }
 
   try {
-    // Reuse existing Stripe customer from estimate, or look up / create one
+    // Reuse existing Stripe customer from estimate, or look up / create one.
+    // ALWAYS create a customer — even without an email — so the SetupIntent
+    // gets attached to a customer record (otherwise the saved card ends up
+    // orphaned and can't be charged later).
     let stripeCustomerId = est.stripe_customer_id;
-    if (!stripeCustomerId && est.email) {
+    if (!stripeCustomerId) {
       stripeCustomerId = await stripeUtils.findOrCreateStripeCustomer(
-        est.email, est.customer_name, { estimate_id: String(est.id) }
+        est.email || null, est.customer_name, { estimate_id: String(est.id) }
       );
       db.prepare('UPDATE estimates SET stripe_customer_id = ? WHERE id = ?')
         .run(stripeCustomerId, est.id);
