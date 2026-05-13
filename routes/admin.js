@@ -1076,6 +1076,7 @@ router.get('/diag/customer-forensics', requireAdmin, (req, res) => {
     const estimates = db.prepare(`
       SELECT id, customer_name, address, status, total_price, accepted_at,
              declined_at, payment_plan, payment_method_preference,
+             stripe_customer_id,
              created_at, updated_at, property_id
       FROM estimates
       WHERE property_id = ? OR customer_name LIKE ?
