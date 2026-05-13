@@ -997,7 +997,8 @@ router.get('/diag/customer-forensics', requireAdmin, (req, res) => {
   const result = properties.map(prop => {
     const estimates = db.prepare(`
       SELECT id, customer_name, address, status, total_price, accepted_at,
-             cancelled_at, created_at, updated_at, property_id
+             declined_at, payment_plan, payment_method_preference,
+             created_at, updated_at, property_id
       FROM estimates
       WHERE property_id = ? OR customer_name LIKE ?
       ORDER BY created_at DESC
