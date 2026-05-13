@@ -1258,17 +1258,25 @@ const SettingsPage = {
         return;
       }
       const cards = r.results.map(rec => {
-        const estRows = rec.estimates.map(e => `
-          <tr>
-            <td style="padding:4px;">#${e.id}</td>
-            <td style="padding:4px;font-size:12px;">${this.esc(e.address || '')}</td>
-            <td style="padding:4px;"><span class="badge badge-${e.status === 'accepted' ? 'green' : e.status === 'declined' ? 'red' : 'gray'}">${e.status}</span></td>
-            <td style="padding:4px;font-size:11px;font-weight:700;color:${e.payment_plan === 'per_service' ? 'var(--orange)' : e.payment_plan === 'monthly' ? 'var(--green-dark)' : 'var(--gray-700)'};">${this.esc(e.payment_plan || '—')}</td>
-            <td style="padding:4px;font-size:11px;">${this.esc(e.payment_method_preference || '—')}</td>
-            <td style="padding:4px;font-size:11px;color:var(--gray-500);">${e.created_at ? e.created_at.slice(0,10) : ''}</td>
-            <td style="padding:4px;font-size:11px;color:var(--gray-500);">$${e.total_price || 0}</td>
-          </tr>
-        `).join('');
+        const estRows = rec.estimates.map(e => {
+          const propIdMismatch = e.property_id && e.property_id !== rec.property.id;
+          const propIdMissing = !e.property_id;
+          const propLabel = propIdMissing ? '<span style="color:var(--red);font-weight:700;">NULL</span>' :
+                            propIdMismatch ? `<span style="color:var(--orange);font-weight:700;">#${e.property_id}</span>` :
+                            `#${e.property_id}`;
+          return `
+            <tr${propIdMismatch || propIdMissing ? ' style="background:#fef3c7;"' : ''}>
+              <td style="padding:4px;">#${e.id}</td>
+              <td style="padding:4px;font-size:12px;">${this.esc(e.address || '')}</td>
+              <td style="padding:4px;font-size:11px;">${propLabel}</td>
+              <td style="padding:4px;"><span class="badge badge-${e.status === 'accepted' ? 'green' : e.status === 'declined' ? 'red' : 'gray'}">${e.status}</span></td>
+              <td style="padding:4px;font-size:11px;font-weight:700;color:${e.payment_plan === 'per_service' ? 'var(--orange)' : e.payment_plan === 'monthly' ? 'var(--green-dark)' : 'var(--gray-700)'};">${this.esc(e.payment_plan || '—')}</td>
+              <td style="padding:4px;font-size:11px;">${this.esc(e.payment_method_preference || '—')}</td>
+              <td style="padding:4px;font-size:11px;color:var(--gray-500);">${e.created_at ? e.created_at.slice(0,10) : ''}</td>
+              <td style="padding:4px;font-size:11px;color:var(--gray-500);">$${e.total_price || 0}</td>
+            </tr>
+          `;
+        }).join('');
         const svcBlocks = Object.entries(rec.schedules_by_service).map(([svc, visits]) => {
           const visitChips = visits.map(v => {
             const color = v.status === 'completed' ? 'badge-green' : v.status === 'cancelled' ? 'badge-gray' : v.status === 'skipped' ? 'badge-gray' : 'badge-blue';
@@ -1299,7 +1307,7 @@ const SettingsPage = {
             <p style="font-size:12px;font-weight:600;margin-top:10px;color:var(--gray-700);">Estimates (${rec.estimates.length})</p>
             ${rec.estimates.length === 0 ? '<p style="font-size:12px;color:var(--gray-500);font-style:italic;">None</p>' : `
               <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Address</th><th style="padding:4px;">Status</th><th style="padding:4px;">Plan</th><th style="padding:4px;">Method</th><th style="padding:4px;">Created</th><th style="padding:4px;">Total</th></tr></thead>
+                <thead><tr style="background:var(--gray-100);"><th style="text-align:left;padding:4px;">ID</th><th style="text-align:left;padding:4px;">Address</th><th style="padding:4px;">property_id</th><th style="padding:4px;">Status</th><th style="padding:4px;">Plan</th><th style="padding:4px;">Method</th><th style="padding:4px;">Created</th><th style="padding:4px;">Total</th></tr></thead>
                 <tbody>${estRows}</tbody>
               </table>
             `}

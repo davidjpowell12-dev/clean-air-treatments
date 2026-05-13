@@ -992,6 +992,35 @@ router.get('/diag/accepted-no-invoices', requireAdmin, (req, res) => {
   res.json({ count: rows.length, estimates: rows });
 });
 
+// ─── Copy stripe_customer_id from a sibling estimate (same property,
+// accepted, has a stripe_customer_id). Used when a customer saved a
+// card on one estimate but another estimate for the same property
+// landed with no Stripe customer attached.
+router.post('/fix/copy-card-from-sibling/:estimateId', requireAdmin, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.stripe_customer_id) return res.status(400).json({ error: 'Estimate already has a stripe_customer_id' });
+  if (!est.property_id) return res.status(400).json({ error: 'Estimate has no property_id — cannot find siblings' });
+
+  const sibling = db.prepare(`
+    SELECT id, stripe_customer_id FROM estimates
+    WHERE property_id = ? AND id != ? AND status = 'accepted'
+      AND stripe_customer_id IS NOT NULL AND stripe_customer_id != ''
+    ORDER BY accepted_at DESC LIMIT 1
+  `).get(est.property_id, est.id);
+
+  if (!sibling) return res.status(404).json({ error: 'No sibling estimate with a stripe_customer_id found on this property' });
+
+  db.prepare('UPDATE estimates SET stripe_customer_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(sibling.stripe_customer_id, est.id);
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'copy_card_from_sibling', {
+    from_estimate_id: sibling.id, stripe_customer_id: sibling.stripe_customer_id
+  });
+  res.json({ ok: true, copied_from_estimate_id: sibling.id, stripe_customer_id: sibling.stripe_customer_id });
+});
+
 // ─── Set payment plan + regenerate invoices for an estimate.
 // Used to fix accepted estimates that landed with NULL payment_plan
 // (because admin status-change skipped the customer-side plan picker).

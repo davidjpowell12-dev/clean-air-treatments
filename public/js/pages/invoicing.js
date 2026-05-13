@@ -344,6 +344,12 @@ const InvoicingPage = {
     } else if (inv.stripe_customer_id) {
       // Card on file → charge directly (no SMS needed)
       actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.chargeInvoice(${inv.id})" style="white-space:nowrap;">💳 Charge</button>`;
+    } else if (inv.sibling_card_available) {
+      // No card on THIS estimate, but a sibling estimate (same property)
+      // has one. Offer the one-tap copy. Shown alongside Send Link.
+      const sendLabel = alreadySent ? '↻ Resend' : '📱 Send Link';
+      const sendCls = alreadySent ? 'btn-outline' : 'btn-outline';
+      actionBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();InvoicingPage.copyCardFromSibling(${inv.estimate_id}, ${inv.id})" style="white-space:nowrap;" title="Copy card from another estimate at this property">🔗 Use sibling card</button> <button class="btn ${sendCls} btn-sm" onclick="event.stopPropagation();InvoicingPage.sendInvoice(${inv.id})" style="white-space:nowrap;">${sendLabel}</button>`;
     } else {
       // Stripe-preferred but no card yet → send checkout link
       const label = alreadySent ? '↻ Resend Link' : '📱 Send Link';
@@ -904,6 +910,18 @@ const InvoicingPage = {
     }
     btn.disabled = false;
     btn.textContent = 'Send Payment Link';
+  },
+
+  async copyCardFromSibling(estimateId, invoiceId) {
+    if (!confirm('Copy the card on file from this customer\'s other estimate? After copying, you can charge this invoice directly.')) return;
+    try {
+      await Api.post(`/api/admin/fix/copy-card-from-sibling/${estimateId}`);
+      App.toast('Card copied from sibling estimate — refresh and charge', 'success');
+      // Reload the invoicing page so the button changes to Charge
+      if (typeof this.render === 'function') this.render();
+    } catch (err) {
+      App.toast('Copy failed: ' + (err.message || 'unknown error'), 'error');
+    }
   },
 
   async chargeInvoice(id) {

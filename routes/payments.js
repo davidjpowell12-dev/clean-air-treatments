@@ -19,7 +19,19 @@ router.get('/invoices', requireAuth, (req, res) => {
       e.customer_name, e.address, e.city, e.email as customer_email, e.phone as customer_phone,
       e.token as estimate_token,
       e.payment_method_preference as preferred_method,
-      e.stripe_customer_id
+      e.stripe_customer_id,
+      e.property_id,
+      -- Sibling card available? Set when this estimate has no card but
+      -- another accepted estimate on the same property does.
+      (
+        SELECT 1 FROM estimates es
+        WHERE es.property_id = e.property_id
+          AND es.id != e.id
+          AND es.status = 'accepted'
+          AND es.stripe_customer_id IS NOT NULL
+          AND es.stripe_customer_id != ''
+        LIMIT 1
+      ) as sibling_card_available
     FROM invoices i
     JOIN estimates e ON i.estimate_id = e.id
     WHERE 1=1
