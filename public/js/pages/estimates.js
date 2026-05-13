@@ -1113,10 +1113,40 @@ const EstimatesPage = {
   },
 
   async markAccepted(id) {
-    const ok = confirm('Mark as accepted? This will generate invoices based on the Admin Billing Details (payment plan, method, etc.). Make sure those are set correctly first.');
-    if (!ok) return;
+    // Check if estimate already has a payment plan set — if so, just accept.
+    // Otherwise we MUST collect plan + method here so invoices generate
+    // correctly (the Joe Uhl bug came from accepting with NULL payment_plan).
+    let est;
+    try { est = await Api.get(`/api/estimates/${id}`); } catch (e) { est = null; }
+
+    if (est && est.payment_plan) {
+      if (!confirm(`Mark accepted? Plan: ${est.payment_plan}, Method: ${est.payment_method_preference || 'card'}. Invoices will be generated.`)) return;
+      try {
+        await Api.put(`/api/estimates/${id}/status`, { status: 'accepted' });
+        App.toast('Estimate accepted — invoices generated 🎉', 'success');
+        this.renderDetail(id);
+      } catch (err) { App.toast(err.message, 'error'); }
+      return;
+    }
+
+    // No plan set yet — prompt for both
+    const plan = prompt('Payment plan?\n\n  monthly  — 8 monthly invoices\n  full     — one invoice for full amount\n  per_service — invoice generated when each visit is completed\n\nEnter: monthly, full, or per_service', 'monthly');
+    if (!plan || !['monthly', 'full', 'per_service'].includes(plan.trim())) {
+      App.toast('Cancelled — valid plan required', 'error');
+      return;
+    }
+    const method = prompt('Payment method? (card or check)', 'card');
+    if (!method || !['card', 'check'].includes(method.trim())) {
+      App.toast('Cancelled — card or check required', 'error');
+      return;
+    }
+    if (!confirm(`Accepting with plan=${plan}, method=${method}. Invoices will be generated. Continue?`)) return;
     try {
-      await Api.put(`/api/estimates/${id}/status`, { status: 'accepted' });
+      await Api.put(`/api/estimates/${id}/status`, {
+        status: 'accepted',
+        payment_plan: plan.trim(),
+        payment_method_preference: method.trim()
+      });
       App.toast('Estimate accepted — invoices generated 🎉', 'success');
       this.renderDetail(id);
     } catch (err) { App.toast(err.message, 'error'); }

@@ -977,6 +977,55 @@ router.post('/fix/relabel-null-service-types', requireAdmin, (req, res) => {
   });
 });
 
+// ─── Accepted estimates with no invoices — finds the silent failures.
+router.get('/diag/accepted-no-invoices', requireAdmin, (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT e.id, e.customer_name, e.address, e.total_price, e.monthly_price,
+           e.payment_plan, e.payment_method_preference, e.payment_months,
+           e.accepted_at, e.property_id
+    FROM estimates e
+    WHERE e.status = 'accepted'
+      AND NOT EXISTS (SELECT 1 FROM invoices i WHERE i.estimate_id = e.id)
+    ORDER BY e.accepted_at DESC
+  `).all();
+  res.json({ count: rows.length, estimates: rows });
+});
+
+// ─── Set payment plan + regenerate invoices for an estimate.
+// Used to fix accepted estimates that landed with NULL payment_plan
+// (because admin status-change skipped the customer-side plan picker).
+router.post('/fix/set-plan-and-regen/:estimateId', requireAdmin, (req, res) => {
+  const db = getDb();
+  const { payment_plan, payment_method_preference } = req.body || {};
+  if (!['monthly', 'full', 'per_service'].includes(payment_plan)) {
+    return res.status(400).json({ error: 'payment_plan must be monthly, full, or per_service' });
+  }
+  if (!['card', 'check'].includes(payment_method_preference)) {
+    return res.status(400).json({ error: 'payment_method_preference must be card or check' });
+  }
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.status !== 'accepted') return res.status(400).json({ error: 'Estimate is not accepted' });
+
+  const existing = db.prepare('SELECT COUNT(*) as n FROM invoices WHERE estimate_id = ?').get(est.id).n;
+  if (existing > 0) return res.status(400).json({ error: `Estimate already has ${existing} invoices — use the regenerate flow instead` });
+
+  // Persist the plan to the estimate so future completion handlers work
+  db.prepare(`
+    UPDATE estimates SET payment_plan = ?, payment_method_preference = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(payment_plan, payment_method_preference, est.id);
+
+  const stripeUtils = require('../utils/stripe');
+  const invoices = stripeUtils.createInvoicesForEstimate(db, est.id, payment_plan, payment_method_preference);
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'fix_set_plan_and_regen', {
+    payment_plan, payment_method_preference, invoices_created: invoices.length
+  });
+  res.json({ ok: true, payment_plan, payment_method_preference, invoices_created: invoices.length });
+});
+
 // ─── Customer Forensics: show everything we know about a customer by
 // name search. Returns matching properties, every estimate ever
 // created for those properties (any status), every schedule entry

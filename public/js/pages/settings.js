@@ -285,6 +285,15 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Accepted Estimates Missing Invoices</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Lists accepted estimates that have zero invoices in the system. Each can be fixed in place by setting a payment plan + method.
+            </p>
+            <button class="btn btn-secondary btn-full" id="scanMissingInvoicesBtn" onclick="SettingsPage.scanAcceptedNoInvoices()">Find Accepted Estimates Missing Invoices</button>
+            <div id="missingInvoicesResults" style="margin-top:12px;"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Customer Forensics</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Look up a single customer by name and see everything: property record, every estimate (any status), every schedule entry, and every audit-log action against them. Use this when a customer's rounds appear to have vanished.
@@ -1171,6 +1180,67 @@ const SettingsPage = {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = 'Find Missing/Extra Visits'; }
+    }
+  },
+
+  async scanAcceptedNoInvoices() {
+    const btn = document.getElementById('scanMissingInvoicesBtn');
+    const box = document.getElementById('missingInvoicesResults');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning...'; }
+    try {
+      const r = await Api.get('/api/admin/diag/accepted-no-invoices');
+      if (r.count === 0) {
+        box.innerHTML = `<p style="font-size:13px;color:var(--green);font-weight:600;">No accepted estimates missing invoices.</p>`;
+        return;
+      }
+      const rows = r.estimates.map(e => `
+        <tr>
+          <td style="padding:6px;">#${e.id}</td>
+          <td style="padding:6px;">${this.esc(e.customer_name)}</td>
+          <td style="padding:6px;font-size:11px;">${this.esc(e.address || '')}</td>
+          <td style="padding:6px;text-align:right;">$${e.total_price || 0}</td>
+          <td style="padding:6px;text-align:right;">$${e.monthly_price || 0}/mo</td>
+          <td style="padding:6px;font-size:11px;color:${e.payment_plan ? 'var(--gray-700)' : 'var(--red)'};">${e.payment_plan || 'NULL'}</td>
+          <td style="padding:6px;"><button class="btn btn-sm btn-primary" onclick="SettingsPage.fixEstimateMissingInvoices(${e.id}, '${this.esc(e.customer_name).replace(/'/g, '\\\'')}', ${e.monthly_price || 0})">Fix</button></td>
+        </tr>
+      `).join('');
+      box.innerHTML = `
+        <p style="font-size:13px;color:var(--orange);font-weight:600;margin-bottom:8px;">${r.count} accepted estimate${r.count === 1 ? '' : 's'} with no invoices.</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead><tr style="background:var(--gray-100);">
+            <th style="padding:6px;text-align:left;">ID</th>
+            <th style="padding:6px;text-align:left;">Customer</th>
+            <th style="padding:6px;text-align:left;">Address</th>
+            <th style="padding:6px;">Total</th>
+            <th style="padding:6px;">Monthly</th>
+            <th style="padding:6px;">Plan</th>
+            <th style="padding:6px;"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = 'Find Accepted Estimates Missing Invoices'; }
+    }
+  },
+
+  async fixEstimateMissingInvoices(estimateId, customerName, monthlyPrice) {
+    const plan = prompt(`Fix invoices for ${customerName}.\n\nPayment plan: monthly, full, or per_service`, 'monthly');
+    if (!plan || !['monthly', 'full', 'per_service'].includes(plan.trim())) return;
+    const method = prompt('Payment method: card or check', 'card');
+    if (!method || !['card', 'check'].includes(method.trim())) return;
+    if (!confirm(`Set plan=${plan}, method=${method} and generate invoices for ${customerName}?`)) return;
+    try {
+      const r = await Api.post(`/api/admin/fix/set-plan-and-regen/${estimateId}`, {
+        payment_plan: plan.trim(),
+        payment_method_preference: method.trim()
+      });
+      App.toast(`Fixed — ${r.invoices_created} invoice${r.invoices_created === 1 ? '' : 's'} generated`, 'success');
+      this.scanAcceptedNoInvoices();
+    } catch (err) {
+      App.toast('Fix failed: ' + err.message, 'error');
     }
   },
 

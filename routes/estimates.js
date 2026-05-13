@@ -1290,9 +1290,31 @@ router.put('/:id/status', requireAuth, (req, res) => {
   const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
   if (!est) return res.status(404).json({ error: 'Estimate not found' });
 
-  const { status } = req.body;
+  const { status, payment_plan, payment_method_preference } = req.body;
   const validStatuses = ['draft', 'sent', 'viewed', 'accepted', 'declined', 'expired'];
   if (!validStatuses.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  // Admin "Mark Accepted" must include a payment plan, otherwise the
+  // estimate lands with payment_plan = NULL and silently skips invoice
+  // generation (the Joe Uhl bug). Customer-side acceptance already
+  // collects this so it's only enforced on admin transitions to accepted.
+  if (status === 'accepted' && est.status !== 'accepted' && !est.payment_plan) {
+    if (!['monthly', 'full', 'per_service'].includes(payment_plan)) {
+      return res.status(400).json({
+        error: 'payment_plan required when marking accepted',
+        required_fields: ['payment_plan (monthly|full|per_service)', 'payment_method_preference (card|check)']
+      });
+    }
+    if (!['card', 'check'].includes(payment_method_preference)) {
+      return res.status(400).json({ error: 'payment_method_preference required (card or check)' });
+    }
+    db.prepare(`
+      UPDATE estimates SET payment_plan = ?, payment_method_preference = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(payment_plan, payment_method_preference, est.id);
+    // Reload so the downstream invoice generator sees the new values
+    Object.assign(est, db.prepare('SELECT * FROM estimates WHERE id = ?').get(est.id));
+  }
 
   // Ensure token exists when marking as sent (safety net for pre-migration estimates)
   if (status === 'sent' && !est.token) {
