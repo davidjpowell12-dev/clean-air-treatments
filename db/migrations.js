@@ -395,6 +395,13 @@ const migrations = [
     try { db.exec('ALTER TABLE invoices ADD COLUMN qbo_sync_error TEXT'); } catch (e) { /* exists */ }
     // Card fee gets its own pseudo-service so we can store its qbo_item_id in app_settings.
     // We use app_settings keys: qbo_card_fee_item_id, qbo_generic_service_item_id
+  },
+  // Migration: explicit SMS consent on estimate acceptance (A2P 10DLC compliance).
+  // sms_opt_in_at is NULL when the customer didn't check the box; populated with
+  // the acceptance timestamp when they did. Consent must NEVER be required as a
+  // condition of accepting the proposal.
+  function addSmsConsentToEstimates(db) {
+    try { db.exec('ALTER TABLE estimates ADD COLUMN sms_opt_in_at DATETIME'); } catch (e) { /* exists */ }
   }
 ];
 

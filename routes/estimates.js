@@ -294,6 +294,9 @@ router.post('/public/:token/accept', async (req, res) => {
   const paymentPlan = req.body.payment_plan || 'monthly';
   const paymentMethodPref = req.body.payment_method_preference || 'card';
   const excludedItems = Array.isArray(req.body.excluded_items) ? req.body.excluded_items : [];
+  // SMS opt-in is an OPTIONAL, unchecked-by-default checkbox on the proposal page.
+  // A2P 10DLC compliance: this must NEVER be required to accept the proposal.
+  const smsOptIn = req.body.sms_opt_in === true;
   const validPlans = ['full', 'monthly', 'per_service'];
   if (!validPlans.includes(paymentPlan)) {
     return res.status(400).json({ error: 'Invalid payment plan' });
@@ -413,6 +416,29 @@ router.post('/public/:token/accept', async (req, res) => {
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
       `).run(acceptedAt, paymentPlan, stripeCustomerId, propertyId, est.id);
+    }
+
+    // SMS opt-in: stamp the estimate AND propagate to the property's sms_opted_in
+    // flag so downstream messaging respects the customer's choice. We never set
+    // this to 0 here — only "yes, I want SMS" is recorded; unchecked = no change.
+    if (smsOptIn) {
+      try {
+        db.prepare('UPDATE estimates SET sms_opt_in_at = ? WHERE id = ?').run(acceptedAt, est.id);
+        if (propertyId) {
+          db.prepare('UPDATE properties SET sms_opted_in = 1 WHERE id = ?').run(propertyId);
+        }
+      } catch (smsErr) {
+        console.error('[accept] sms opt-in stamp failed (non-fatal):', smsErr.message);
+      }
+    } else if (propertyId) {
+      // Customer did NOT check the box. Make sure the property's sms_opted_in
+      // flag is OFF so we don't send them texts on the basis of some prior
+      // default value. This is the conservative read of A2P 10DLC.
+      try {
+        db.prepare('UPDATE properties SET sms_opted_in = 0 WHERE id = ?').run(propertyId);
+      } catch (smsErr) {
+        console.error('[accept] sms opt-out stamp failed (non-fatal):', smsErr.message);
+      }
     }
 
     // Step 4: Generate invoices

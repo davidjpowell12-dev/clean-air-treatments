@@ -187,6 +187,7 @@
     let proposalData = null;
     let selectedPlan = 'monthly';
     let excludedItems = new Set();
+    let smsOptIn = false; // captured from the optional consent checkbox before the CTA is replaced
 
     const pathParts = window.location.pathname.split('/');
     const token = pathParts[pathParts.length - 1];
@@ -303,16 +304,18 @@
 
             ${canAccept ? `
               <div class="proposal-cta" id="ctaSection">
-                <p style="font-size:11px;color:var(--gray-500);line-height:1.5;margin-bottom:12px;padding:0 4px;text-align:center;">
-                  By accepting this proposal, you consent to receive transactional SMS messages from
-                  Evolved Lawn and Garden Services LLC (dba Clean Air Lawn Care) regarding service
-                  scheduling, completion, and related notifications. Message and data rates may apply.
-                  Message frequency varies. Reply <strong>STOP</strong> to unsubscribe or <strong>HELP</strong>
-                  for help. See our
-                  <a href="/sms-terms" target="_blank" style="color:var(--green-dark);text-decoration:underline;">SMS Terms</a>
-                  and
-                  <a href="/privacy" target="_blank" style="color:var(--green-dark);text-decoration:underline;">Privacy Policy</a>.
-                </p>
+                <label for="smsOptInCheckbox" style="display:flex;gap:10px;align-items:flex-start;font-size:12px;color:var(--gray-700);line-height:1.5;margin-bottom:14px;padding:10px 12px;background:#f8faf6;border:1px solid #e5ecdb;border-radius:8px;cursor:pointer;">
+                  <input type="checkbox" id="smsOptInCheckbox" style="margin-top:2px;flex-shrink:0;width:16px;height:16px;cursor:pointer;">
+                  <span>
+                    Yes, I'd like to receive SMS service notifications (appointment reminders,
+                    completion confirmations) from Clean Air Lawn Care. Message &amp; data rates
+                    may apply. Reply <strong>STOP</strong> to unsubscribe or <strong>HELP</strong>
+                    for help. See our
+                    <a href="/sms-terms" target="_blank" style="color:var(--green-dark);text-decoration:underline;">SMS Terms</a>
+                    and
+                    <a href="/privacy" target="_blank" style="color:var(--green-dark);text-decoration:underline;">Privacy Policy</a>.
+                  </span>
+                </label>
                 <button class="accept-btn" id="acceptBtn" onclick="showPaymentPicker()">
                   Accept Proposal
                 </button>
@@ -335,6 +338,11 @@
     }
 
     function showPaymentPicker() {
+      // Capture the SMS opt-in state BEFORE we replace the CTA section's HTML.
+      // Checkbox is unchecked by default and is never a condition of acceptance.
+      const optInBox = document.getElementById('smsOptInCheckbox');
+      smsOptIn = !!(optInBox && optInBox.checked);
+
       const est = proposalData;
       const cta = document.getElementById('ctaSection');
       selectedPlan = 'monthly';
@@ -486,7 +494,8 @@
           body: JSON.stringify({
             payment_plan: selectedPlan,
             payment_method_preference: selectedMethod,
-            excluded_items: Array.from(excludedItems)
+            excluded_items: Array.from(excludedItems),
+            sms_opt_in: smsOptIn
           })
         });
 
