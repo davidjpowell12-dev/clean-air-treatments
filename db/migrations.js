@@ -367,6 +367,24 @@ const migrations = [
     db.exec('CREATE INDEX IF NOT EXISTS idx_followups_status ON follow_ups(status)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_followups_property ON follow_ups(property_id)');
     db.exec('CREATE INDEX IF NOT EXISTS idx_followups_bucket ON follow_ups(bucket)');
+  },
+  // QuickBooks Online OAuth connection storage.
+  // Single-row table — there's only ever one QBO connection for the
+  // whole business. If a new connect happens, the old row is replaced.
+  function addQuickBooksConnection(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS quickbooks_connection (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        realm_id TEXT NOT NULL,
+        access_token TEXT NOT NULL,
+        refresh_token TEXT NOT NULL,
+        access_expires_at DATETIME NOT NULL,
+        refresh_expires_at DATETIME NOT NULL,
+        environment TEXT DEFAULT 'sandbox',
+        connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_refreshed_at DATETIME
+      )
+    `);
   }
 ];
 

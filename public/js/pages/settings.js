@@ -221,6 +221,13 @@ const SettingsPage = {
         </div>
 
         <div class="card" style="margin-top:16px;">
+          <div class="card-header"><h3>📒 QuickBooks Online</h3></div>
+          <div class="card-body" id="qboCardBody">
+            <p style="font-size:13px;color:var(--gray-500);">Loading…</p>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;">
           <div class="card-header">
             <h3>CRM Import</h3>
           </div>
@@ -387,6 +394,7 @@ const SettingsPage = {
       // Load backups section asynchronously after render
       this.loadBackupsSection();
       this.loadTwilioStatus();
+      this.loadQboStatus();
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
@@ -698,6 +706,65 @@ const SettingsPage = {
       App.toast('Service settings saved', 'success');
     } catch (err) {
       App.toast('Save failed: ' + err.message, 'error');
+    }
+  },
+
+  // ─── QuickBooks Online ──────────────────────────────────────────────
+  async loadQboStatus() {
+    const box = document.getElementById('qboCardBody');
+    if (!box) return;
+    try {
+      const s = await Api.get('/api/quickbooks/status');
+      if (!s.connected) {
+        box.innerHTML = `
+          <p style="font-size:14px;color:var(--gray-700);margin-bottom:12px;">Not connected. Click below to authorize this app to push invoices and payments to your QuickBooks Online company.</p>
+          <a href="/api/quickbooks/connect" class="btn btn-primary btn-full" style="text-decoration:none;text-align:center;">Connect to QuickBooks</a>
+        `;
+        return;
+      }
+      const env = s.environment === 'production' ? 'Production' : 'Sandbox';
+      const connectedAgo = s.connected_at ? new Date(s.connected_at).toLocaleString() : '—';
+      box.innerHTML = `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;">
+          <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--green);"></span>
+          <strong style="font-size:14px;">Connected (${env})</strong>
+        </div>
+        <p style="font-size:12px;color:var(--gray-500);margin-bottom:4px;">Realm ID: <code>${this.esc(s.realm_id)}</code></p>
+        <p style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">Connected: ${connectedAgo}</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="SettingsPage.testQbo()">Test Connection</button>
+          <button class="btn btn-outline btn-sm" onclick="SettingsPage.disconnectQbo()">Disconnect</button>
+        </div>
+        <div id="qboTestResult" style="margin-top:10px;"></div>
+      `;
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Could not load status: ${this.esc(err.message)}</p>`;
+    }
+  },
+
+  async testQbo() {
+    const box = document.getElementById('qboTestResult');
+    if (box) box.innerHTML = '<p style="font-size:12px;color:var(--gray-500);">Testing…</p>';
+    try {
+      const r = await Api.get('/api/quickbooks/company-info');
+      box.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;padding:8px 10px;border-radius:6px;font-size:13px;">
+          ✓ Connected. Company: <strong>${this.esc(r.company_name || '?')}</strong>
+        </div>
+      `;
+    } catch (err) {
+      box.innerHTML = `<div style="background:#fee2e2;border:1px solid #fca5a5;padding:8px 10px;border-radius:6px;font-size:13px;color:var(--red);">✗ ${this.esc(err.message)}</div>`;
+    }
+  },
+
+  async disconnectQbo() {
+    if (!confirm('Disconnect QuickBooks? This stops invoice/payment syncing. You can reconnect anytime.')) return;
+    try {
+      await Api.post('/api/quickbooks/disconnect');
+      App.toast('QuickBooks disconnected', 'success');
+      this.loadQboStatus();
+    } catch (err) {
+      App.toast('Disconnect failed: ' + err.message, 'error');
     }
   },
 
