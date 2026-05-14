@@ -181,4 +181,107 @@ router.get('/company-info', requireAuth, async (req, res) => {
   }
 });
 
+// ─── Invoice Sync ─────────────────────────────────────────────
+const qboSync = require('../utils/quickbooks-sync');
+
+// Push a single invoice to QBO. Idempotent — skips if already synced.
+router.post('/sync-invoice/:id', requireAdmin, async (req, res) => {
+  const db = getDb();
+  try {
+    const result = await qboSync.pushInvoiceToQbo(db, parseInt(req.params.id, 10));
+    res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error('[qbo-sync-invoice] error:', err);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// Bulk push: every CAT invoice that's pending/paid and not yet in QBO.
+// Scheduled invoices are skipped (they're not "due" yet, no AR to track).
+router.post('/sync-pending', requireAdmin, async (req, res) => {
+  const db = getDb();
+  const pending = db.prepare(`
+    SELECT id, invoice_number FROM invoices
+     WHERE status IN ('pending', 'paid')
+       AND qbo_invoice_id IS NULL
+       AND status != 'voided'
+     ORDER BY id ASC
+  `).all();
+
+  const results = [];
+  let succeeded = 0, failed = 0;
+  for (const inv of pending) {
+    try {
+      const r = await qboSync.pushInvoiceToQbo(db, inv.id);
+      results.push({ invoice_number: inv.invoice_number, success: true, ...r });
+      succeeded++;
+    } catch (err) {
+      results.push({ invoice_number: inv.invoice_number, success: false, error: err.message });
+      failed++;
+    }
+  }
+  res.json({ ok: true, total: pending.length, succeeded, failed, results });
+});
+
+// Reconciliation: compares CAT invoice totals to QBO invoice totals for
+// every synced invoice. Surfaces any drift so the controller can spot
+// manual edits or partial syncs.
+router.get('/reconcile', requireAuth, async (req, res) => {
+  const db = getDb();
+  const synced = db.prepare(`
+    SELECT id, invoice_number, amount_cents, qbo_invoice_id, qbo_synced_at, status
+      FROM invoices
+     WHERE qbo_invoice_id IS NOT NULL
+     ORDER BY id DESC
+     LIMIT 500
+  `).all();
+
+  const rows = [];
+  for (const inv of synced) {
+    try {
+      const data = await qbo.qboFetch(db, 'invoice/' + inv.qbo_invoice_id);
+      const qboTotalCents = Math.round((data?.Invoice?.TotalAmt || 0) * 100);
+      const drift = qboTotalCents - inv.amount_cents;
+      rows.push({
+        invoice_number: inv.invoice_number,
+        cat_amount: inv.amount_cents / 100,
+        qbo_amount: qboTotalCents / 100,
+        drift_cents: drift,
+        qbo_invoice_id: inv.qbo_invoice_id,
+        status: inv.status
+      });
+    } catch (err) {
+      rows.push({
+        invoice_number: inv.invoice_number,
+        cat_amount: inv.amount_cents / 100,
+        qbo_amount: null,
+        error: err.message,
+        qbo_invoice_id: inv.qbo_invoice_id,
+        status: inv.status
+      });
+    }
+  }
+
+  const withDrift = rows.filter(r => r.drift_cents && r.drift_cents !== 0).length;
+  const errors = rows.filter(r => r.error).length;
+  res.json({ ok: true, checked: rows.length, with_drift: withDrift, errors, rows });
+});
+
+// List CAT invoices with QBO sync status — for the Settings panel.
+router.get('/sync-status', requireAuth, (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      i.id, i.invoice_number, i.amount_cents, i.status, i.payment_plan,
+      i.qbo_invoice_id, i.qbo_synced_at, i.qbo_sync_error,
+      e.customer_name
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.status IN ('pending', 'paid')
+    ORDER BY i.id DESC
+    LIMIT 200
+  `).all();
+  res.json({ ok: true, invoices: rows });
+});
+
 module.exports = router;

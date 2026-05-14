@@ -731,12 +731,26 @@ const SettingsPage = {
         </div>
         <p style="font-size:12px;color:var(--gray-500);margin-bottom:4px;">Realm ID: <code>${this.esc(s.realm_id)}</code></p>
         <p style="font-size:12px;color:var(--gray-500);margin-bottom:12px;">Connected: ${connectedAgo}</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
           <button class="btn btn-secondary btn-sm" onclick="SettingsPage.testQbo()">Test Connection</button>
           <button class="btn btn-outline btn-sm" onclick="SettingsPage.disconnectQbo()">Disconnect</button>
         </div>
-        <div id="qboTestResult" style="margin-top:10px;"></div>
+        <div id="qboTestResult" style="margin-bottom:12px;"></div>
+
+        <div style="border-top:1px solid var(--gray-200);padding-top:12px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;">
+            <strong style="font-size:13px;">Invoice Sync</strong>
+            <div style="display:flex;gap:6px;">
+              <button class="btn btn-secondary btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Refresh</button>
+              <button class="btn btn-primary btn-sm" onclick="SettingsPage.syncPendingQboInvoices()">Sync Pending →</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.reconcileQbo()">Reconcile</button>
+            </div>
+          </div>
+          <div id="qboSyncResult" style="font-size:12px;color:var(--gray-600);margin-bottom:8px;"></div>
+          <div id="qboSyncTable" style="font-size:12px;max-height:320px;overflow-y:auto;"></div>
+        </div>
       `;
+      this.loadQboSyncStatus();
     } catch (err) {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Could not load status: ${this.esc(err.message)}</p>`;
     }
@@ -765,6 +779,137 @@ const SettingsPage = {
       this.loadQboStatus();
     } catch (err) {
       App.toast('Disconnect failed: ' + err.message, 'error');
+    }
+  },
+
+  async loadQboSyncStatus() {
+    const table = document.getElementById('qboSyncTable');
+    if (!table) return;
+    table.innerHTML = '<p style="color:var(--gray-500);">Loading…</p>';
+    try {
+      const r = await Api.get('/api/quickbooks/sync-status');
+      const invoices = r.invoices || [];
+      const synced = invoices.filter(i => i.qbo_invoice_id).length;
+      const errored = invoices.filter(i => i.qbo_sync_error).length;
+      const unsynced = invoices.length - synced;
+
+      const summary = document.getElementById('qboSyncResult');
+      if (summary) {
+        summary.innerHTML = `<strong>${invoices.length}</strong> invoices in scope (pending/paid) — <span style="color:var(--green);">${synced} synced</span>, <span style="color:var(--gray-700);">${unsynced} unsynced</span>${errored ? `, <span style="color:var(--red);">${errored} with errors</span>` : ''}`;
+      }
+
+      if (invoices.length === 0) {
+        table.innerHTML = '<p style="color:var(--gray-500);">No invoices to sync yet.</p>';
+        return;
+      }
+
+      const rows = invoices.map(i => {
+        const dollars = (i.amount_cents / 100).toFixed(2);
+        let statusCell;
+        if (i.qbo_invoice_id) {
+          statusCell = `<span style="color:var(--green);">✓ QBO #${this.esc(i.qbo_invoice_id)}</span>`;
+        } else if (i.qbo_sync_error) {
+          statusCell = `<span style="color:var(--red);" title="${this.esc(i.qbo_sync_error)}">⚠ Error</span>`;
+        } else {
+          statusCell = '<span style="color:var(--gray-500);">—</span>';
+        }
+        const action = i.qbo_invoice_id
+          ? ''
+          : `<button class="btn btn-outline btn-xs" onclick="SettingsPage.syncSingleQboInvoice(${i.id})">Push</button>`;
+        return `
+          <tr>
+            <td style="padding:4px 8px;"><code>${this.esc(i.invoice_number)}</code></td>
+            <td style="padding:4px 8px;">${this.esc(i.customer_name || '—')}</td>
+            <td style="padding:4px 8px;text-align:right;">$${dollars}</td>
+            <td style="padding:4px 8px;">${this.esc(i.status)}</td>
+            <td style="padding:4px 8px;">${statusCell}</td>
+            <td style="padding:4px 8px;">${action}</td>
+          </tr>
+        `;
+      }).join('');
+
+      table.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:var(--gray-100);text-align:left;">
+            <th style="padding:4px 8px;">Invoice</th>
+            <th style="padding:4px 8px;">Customer</th>
+            <th style="padding:4px 8px;text-align:right;">Amount</th>
+            <th style="padding:4px 8px;">Status</th>
+            <th style="padding:4px 8px;">QBO</th>
+            <th style="padding:4px 8px;"></th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      table.innerHTML = `<p style="color:var(--red);">${this.esc(err.message)}</p>`;
+    }
+  },
+
+  async syncSingleQboInvoice(id) {
+    try {
+      const r = await Api.post(`/api/quickbooks/sync-invoice/${id}`);
+      App.toast(`Pushed to QBO (#${r.qbo_invoice_id})`, 'success');
+      this.loadQboSyncStatus();
+    } catch (err) {
+      App.toast('Push failed: ' + err.message, 'error');
+      this.loadQboSyncStatus();
+    }
+  },
+
+  async syncPendingQboInvoices() {
+    if (!confirm('Push all unsynced pending/paid invoices to QuickBooks?')) return;
+    const summary = document.getElementById('qboSyncResult');
+    if (summary) summary.innerHTML = '<em>Syncing…</em>';
+    try {
+      const r = await Api.post('/api/quickbooks/sync-pending');
+      App.toast(`Synced ${r.succeeded}/${r.total} invoices${r.failed ? ` (${r.failed} failed)` : ''}`, r.failed ? 'warning' : 'success');
+      this.loadQboSyncStatus();
+    } catch (err) {
+      App.toast('Bulk sync failed: ' + err.message, 'error');
+    }
+  },
+
+  async reconcileQbo() {
+    const table = document.getElementById('qboSyncTable');
+    const summary = document.getElementById('qboSyncResult');
+    if (table) table.innerHTML = '<p style="color:var(--gray-500);">Reconciling against QBO… (this can take a moment)</p>';
+    try {
+      const r = await Api.get('/api/quickbooks/reconcile');
+      if (summary) {
+        const drift = r.with_drift || 0;
+        const errs = r.errors || 0;
+        summary.innerHTML = `Reconciled <strong>${r.checked}</strong> invoices — ${drift ? `<span style="color:var(--red);">${drift} with drift</span>` : '<span style="color:var(--green);">all match ✓</span>'}${errs ? `, <span style="color:var(--red);">${errs} errors</span>` : ''}`;
+      }
+      const problematic = (r.rows || []).filter(row => row.error || (row.drift_cents && row.drift_cents !== 0));
+      if (problematic.length === 0) {
+        table.innerHTML = '<p style="color:var(--green);padding:8px;">All synced invoices match QBO totals. ✓</p>';
+        return;
+      }
+      const rows = problematic.map(row => `
+        <tr>
+          <td style="padding:4px 8px;"><code>${this.esc(row.invoice_number)}</code></td>
+          <td style="padding:4px 8px;text-align:right;">$${(row.cat_amount || 0).toFixed(2)}</td>
+          <td style="padding:4px 8px;text-align:right;">${row.qbo_amount != null ? '$' + row.qbo_amount.toFixed(2) : '—'}</td>
+          <td style="padding:4px 8px;text-align:right;color:var(--red);">${row.drift_cents != null ? '$' + (row.drift_cents / 100).toFixed(2) : ''}</td>
+          <td style="padding:4px 8px;color:var(--red);">${this.esc(row.error || '')}</td>
+        </tr>
+      `).join('');
+      table.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:var(--gray-100);text-align:left;">
+            <th style="padding:4px 8px;">Invoice</th>
+            <th style="padding:4px 8px;text-align:right;">CAT</th>
+            <th style="padding:4px 8px;text-align:right;">QBO</th>
+            <th style="padding:4px 8px;text-align:right;">Drift</th>
+            <th style="padding:4px 8px;">Error</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      `;
+    } catch (err) {
+      if (summary) summary.innerHTML = `<span style="color:var(--red);">${this.esc(err.message)}</span>`;
+      if (table) table.innerHTML = '';
     }
   },
 

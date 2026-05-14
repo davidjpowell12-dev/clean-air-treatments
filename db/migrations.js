@@ -385,6 +385,16 @@ const migrations = [
         last_refreshed_at DATETIME
       )
     `);
+  },
+  // Migration: QBO sync ID columns + card-fee item config
+  function addQuickBooksSyncColumns(db) {
+    try { db.exec('ALTER TABLE properties ADD COLUMN qbo_customer_id TEXT'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE services ADD COLUMN qbo_item_id TEXT'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE invoices ADD COLUMN qbo_invoice_id TEXT'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE invoices ADD COLUMN qbo_synced_at DATETIME'); } catch (e) { /* exists */ }
+    try { db.exec('ALTER TABLE invoices ADD COLUMN qbo_sync_error TEXT'); } catch (e) { /* exists */ }
+    // Card fee gets its own pseudo-service so we can store its qbo_item_id in app_settings.
+    // We use app_settings keys: qbo_card_fee_item_id, qbo_generic_service_item_id
   }
 ];
 
