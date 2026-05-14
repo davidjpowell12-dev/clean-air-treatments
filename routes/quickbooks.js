@@ -80,8 +80,23 @@ router.get('/callback', async (req, res) => {
 
     if (!resp.ok) {
       const text = await resp.text();
-      console.error('[qbo-callback] token exchange failed:', text);
-      return res.status(500).send(`Token exchange failed: ${text}`);
+      const sentRedirectUri = getRedirectUri(req);
+      console.error('[qbo-callback] token exchange failed', {
+        status: resp.status,
+        statusText: resp.statusText,
+        body: text,
+        redirect_uri_sent: sentRedirectUri,
+        client_id_prefix: (clientId || '').slice(0, 12) + '…'
+      });
+      return res.status(500).type('text/plain').send(
+        `Token exchange failed.\n\n` +
+        `HTTP Status: ${resp.status} ${resp.statusText}\n` +
+        `Response body: ${text || '(empty)'}\n\n` +
+        `Redirect URI we sent: ${sentRedirectUri}\n` +
+        `Client ID prefix: ${(clientId || '').slice(0, 12)}…\n\n` +
+        `Check: (1) the redirect URI saved in Intuit exactly matches what we sent above, ` +
+        `(2) QBO_CLIENT_ID and QBO_CLIENT_SECRET env vars match the values from Intuit's Development tab.`
+      );
     }
 
     const tokens = await resp.json();
