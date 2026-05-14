@@ -17,7 +17,7 @@ const qbo = require('../utils/quickbooks');
 const router = express.Router();
 
 const QBO_AUTH_URL = 'https://appcenter.intuit.com/connect/oauth2';
-const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens';
+const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 const QBO_SCOPE = 'com.intuit.quickbooks.accounting';
 
 function getRedirectUri(req) {

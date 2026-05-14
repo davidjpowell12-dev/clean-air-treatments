@@ -1,7 +1,7 @@
 // QuickBooks Online integration helpers — OAuth token storage,
 // automatic refresh, and authenticated request wrapper.
 
-const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens';
+const QBO_TOKEN_URL = 'https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer';
 
 function getConnection(db) {
   return db.prepare('SELECT * FROM quickbooks_connection LIMIT 1').get() || null;
