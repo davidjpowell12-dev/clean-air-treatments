@@ -267,6 +267,51 @@ router.get('/reconcile', requireAuth, async (req, res) => {
   res.json({ ok: true, checked: rows.length, with_drift: withDrift, errors, rows });
 });
 
+// Debug: dump a QBO invoice + its customer + the CAT-side data so we can
+// see exactly what got created (vs what we think we created). Visible JSON.
+router.get('/debug/invoice/:catInvoiceId', requireAdmin, async (req, res) => {
+  const db = getDb();
+  try {
+    const catInv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.catInvoiceId, 10));
+    if (!catInv) return res.status(404).json({ error: 'Invoice not found in app' });
+    if (!catInv.qbo_invoice_id) return res.json({ ok: false, message: 'Not synced to QBO', cat: catInv });
+
+    const qboInvoice = await qbo.qboFetch(db, 'invoice/' + catInv.qbo_invoice_id);
+    const customerRef = qboInvoice?.Invoice?.CustomerRef?.value;
+    let qboCustomer = null;
+    if (customerRef) {
+      try {
+        qboCustomer = await qbo.qboFetch(db, 'customer/' + customerRef);
+      } catch (e) {
+        qboCustomer = { error: e.message };
+      }
+    }
+
+    const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(catInv.estimate_id);
+    const property = estimate?.property_id
+      ? db.prepare('SELECT * FROM properties WHERE id = ?').get(estimate.property_id)
+      : null;
+
+    res.json({
+      ok: true,
+      cat_invoice: {
+        id: catInv.id,
+        invoice_number: catInv.invoice_number,
+        amount_cents: catInv.amount_cents,
+        status: catInv.status,
+        qbo_invoice_id: catInv.qbo_invoice_id,
+        qbo_synced_at: catInv.qbo_synced_at
+      },
+      cat_estimate: estimate ? { id: estimate.id, customer_name: estimate.customer_name, email: estimate.email, property_id: estimate.property_id } : null,
+      cat_property: property ? { id: property.id, customer_name: property.customer_name, email: property.email, qbo_customer_id: property.qbo_customer_id } : null,
+      qbo_invoice: qboInvoice?.Invoice || qboInvoice,
+      qbo_customer: qboCustomer?.Customer || qboCustomer
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // List CAT invoices with QBO sync status — for the Settings panel.
 router.get('/sync-status', requireAuth, (req, res) => {
   const db = getDb();
