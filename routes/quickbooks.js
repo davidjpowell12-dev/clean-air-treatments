@@ -269,10 +269,14 @@ router.get('/reconcile', requireAuth, async (req, res) => {
 
 // Debug: dump a QBO invoice + its customer + the CAT-side data so we can
 // see exactly what got created (vs what we think we created). Visible JSON.
+// Accepts either the numeric DB id or the invoice_number (CA-2026-XXXX).
 router.get('/debug/invoice/:catInvoiceId', requireAdmin, async (req, res) => {
   const db = getDb();
   try {
-    const catInv = db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(req.params.catInvoiceId, 10));
+    const idParam = req.params.catInvoiceId;
+    const catInv = /^\d+$/.test(idParam)
+      ? db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(idParam, 10))
+      : db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(idParam);
     if (!catInv) return res.status(404).json({ error: 'Invoice not found in app' });
     if (!catInv.qbo_invoice_id) return res.json({ ok: false, message: 'Not synced to QBO', cat: catInv });
 
