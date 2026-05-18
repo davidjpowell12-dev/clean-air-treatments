@@ -798,7 +798,7 @@ const InvoicingPage = {
 
         <!-- Actions -->
         <div class="est-actions" style="margin-top:16px;">
-          ${inv.status === 'pending' || inv.status === 'failed' ? `
+          ${(inv.status === 'pending' || inv.status === 'failed' || inv.status === 'scheduled') ? `
             ${inv.stripe_customer_id ? `
               <button class="btn btn-primary btn-full" onclick="InvoicingPage.chargeInvoice(${inv.id})" id="chargeNowBtn">
                 💳 Charge Card Now — $${amount}
