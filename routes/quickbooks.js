@@ -295,6 +295,12 @@ router.get('/debug/invoice/:catInvoiceId', requireAdmin, async (req, res) => {
     const property = estimate?.property_id
       ? db.prepare('SELECT * FROM properties WHERE id = ?').get(estimate.property_id)
       : null;
+    const estimateItems = estimate
+      ? db.prepare('SELECT id, service_id, service_name, price, is_recurring, rounds, is_included, sort_order FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id').all(estimate.id)
+      : [];
+    const siblingInvoices = estimate
+      ? db.prepare('SELECT id, invoice_number, amount_cents, status, installment_number, total_installments FROM invoices WHERE estimate_id = ? ORDER BY COALESCE(installment_number, 0), id').all(estimate.id)
+      : [];
 
     res.json({
       ok: true,
@@ -303,10 +309,24 @@ router.get('/debug/invoice/:catInvoiceId', requireAdmin, async (req, res) => {
         invoice_number: catInv.invoice_number,
         amount_cents: catInv.amount_cents,
         status: catInv.status,
+        payment_plan: catInv.payment_plan,
+        installment_number: catInv.installment_number,
+        total_installments: catInv.total_installments,
         qbo_invoice_id: catInv.qbo_invoice_id,
         qbo_synced_at: catInv.qbo_synced_at
       },
-      cat_estimate: estimate ? { id: estimate.id, customer_name: estimate.customer_name, email: estimate.email, property_id: estimate.property_id } : null,
+      cat_estimate: estimate ? {
+        id: estimate.id,
+        customer_name: estimate.customer_name,
+        email: estimate.email,
+        property_id: estimate.property_id,
+        total_price: estimate.total_price,
+        monthly_price: estimate.monthly_price,
+        payment_months: estimate.payment_months,
+        payment_plan: estimate.payment_plan
+      } : null,
+      cat_estimate_items: estimateItems,
+      cat_sibling_invoices: siblingInvoices,
       cat_property: property ? { id: property.id, customer_name: property.customer_name, email: property.email, qbo_customer_id: property.qbo_customer_id } : null,
       qbo_invoice: qboInvoice?.Invoice || qboInvoice,
       qbo_customer: qboCustomer?.Customer || qboCustomer
