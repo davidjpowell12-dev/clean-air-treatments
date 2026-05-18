@@ -278,16 +278,18 @@ router.get('/debug/invoice/:catInvoiceId', requireAdmin, async (req, res) => {
       ? db.prepare('SELECT * FROM invoices WHERE id = ?').get(parseInt(idParam, 10))
       : db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(idParam);
     if (!catInv) return res.status(404).json({ error: 'Invoice not found in app' });
-    if (!catInv.qbo_invoice_id) return res.json({ ok: false, message: 'Not synced to QBO', cat: catInv });
 
-    const qboInvoice = await qbo.qboFetch(db, 'invoice/' + catInv.qbo_invoice_id);
-    const customerRef = qboInvoice?.Invoice?.CustomerRef?.value;
-    let qboCustomer = null;
-    if (customerRef) {
+    // Fetch QBO data only if synced — otherwise we still want the CAT-side dump.
+    let qboInvoice = null, qboCustomer = null;
+    if (catInv.qbo_invoice_id) {
       try {
-        qboCustomer = await qbo.qboFetch(db, 'customer/' + customerRef);
+        qboInvoice = await qbo.qboFetch(db, 'invoice/' + catInv.qbo_invoice_id);
+        const customerRef = qboInvoice?.Invoice?.CustomerRef?.value;
+        if (customerRef) {
+          qboCustomer = await qbo.qboFetch(db, 'customer/' + customerRef);
+        }
       } catch (e) {
-        qboCustomer = { error: e.message };
+        qboInvoice = { error: e.message };
       }
     }
 
