@@ -305,6 +305,19 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Resync Billing to Estimate Items</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              When services are toggled off an estimate <em>after</em> acceptance, the existing invoices stay at the old amount. Enter the estimate ID — this recalculates the total from the current included items, voids unpaid invoices, and generates fresh ones at the corrected amount. Paid invoices are preserved.
+            </p>
+            <div style="display:grid;grid-template-columns:130px 100px 1fr;gap:8px;margin-bottom:12px;">
+              <input type="number" id="resyncEstId" class="form-input" placeholder="Estimate ID">
+              <button class="btn btn-secondary" onclick="SettingsPage.resyncBilling()">Resync</button>
+              <span></span>
+            </div>
+            <div id="resyncBillingResults"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Accepted Estimates Missing Invoices</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               Lists accepted estimates that have zero invoices in the system. Each can be fixed in place by setting a payment plan + method.
@@ -1425,6 +1438,27 @@ const SettingsPage = {
         </div>
       `;
       App.toast('Card attached — refresh Invoicing to see Charge button', 'success');
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    }
+  },
+
+  async resyncBilling() {
+    const estId = (document.getElementById('resyncEstId').value || '').trim();
+    const box = document.getElementById('resyncBillingResults');
+    if (!estId) { App.toast('Estimate ID required', 'error'); return; }
+    if (!confirm(`Resync billing for estimate #${estId}?\n\nThis voids any unpaid invoices and creates new ones based on the estimate's current included items. Paid invoices are preserved. Cannot be undone.`)) return;
+    box.innerHTML = '<p style="font-size:13px;color:var(--gray-500);">Working...</p>';
+    try {
+      const r = await Api.post(`/api/admin/fix/resync-billing-to-items/${estId}`);
+      box.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;padding:10px;border-radius:6px;font-size:13px;">
+          ✓ Resynced.<br>
+          New total: <strong>$${r.new_total.toFixed(2)}</strong> (monthly: $${r.new_monthly.toFixed(2)})<br>
+          Voided ${r.voided_count} unpaid invoice(s), created ${r.created_count} new, preserved ${r.paid_preserved} paid.
+        </div>
+      `;
+      App.toast('Billing resynced', 'success');
     } catch (err) {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     }

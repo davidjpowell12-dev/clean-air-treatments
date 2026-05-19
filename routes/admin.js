@@ -1117,6 +1117,115 @@ router.post('/fix/copy-card-from-sibling/:estimateId', requireAdmin, (req, res) 
 // ─── Set payment plan + regenerate invoices for an estimate.
 // Used to fix accepted estimates that landed with NULL payment_plan
 // (because admin status-change skipped the customer-side plan picker).
+// Fix: recalculate an estimate's total_price/monthly_price from its current
+// is_included items, then void unpaid invoices and regenerate fresh ones at
+// the corrected amount. Use when post-acceptance edits left invoices out of
+// sync with what the estimate actually has. Paid invoices are preserved.
+router.post('/fix/resync-billing-to-items/:estimateId', requireAdmin, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.status !== 'accepted') return res.status(400).json({ error: 'Estimate is not accepted' });
+  if (!est.payment_plan) return res.status(400).json({ error: 'Estimate has no payment_plan' });
+
+  const items = db.prepare(
+    'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
+  ).all(est.id);
+  if (items.length === 0) return res.status(400).json({ error: 'No included items — cannot rebuild billing' });
+
+  // Recalculate using the same formula as the proposal acceptance path
+  const newTotal = items.reduce((sum, i) => {
+    return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
+  }, 0);
+  const months = est.payment_months || 8;
+  const newMonthly = Math.round((newTotal / months) * 100) / 100;
+
+  const CARD_FEE_RATE = 0.035;
+  const method = est.payment_method_preference || 'card';
+
+  const invoices = db.prepare(
+    'SELECT id, amount_cents, status, installment_number FROM invoices WHERE estimate_id = ? ORDER BY COALESCE(installment_number, 0), id'
+  ).all(est.id);
+  const paid = invoices.filter(i => i.status === 'paid');
+  const unpaid = invoices.filter(i => i.status === 'scheduled' || i.status === 'pending' || i.status === 'failed');
+  const paidCents = paid.reduce((s, i) => s + (i.amount_cents || 0), 0);
+
+  const totalCents = Math.round(newTotal * 100);
+  const totalWithFee = method === 'card' ? Math.round(totalCents * (1 + CARD_FEE_RATE)) : totalCents;
+  const remainingCents = Math.max(0, totalWithFee - paidCents);
+
+  const stripeUtils = require('../utils/stripe');
+  const crypto = require('crypto');
+
+  const run = db.transaction(() => {
+    // 1. Update estimate totals to match current items
+    db.prepare(`
+      UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ?
+    `).run(newTotal, newMonthly, est.id);
+
+    // 2. Void every unpaid invoice
+    for (const inv of unpaid) {
+      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+    }
+
+    // 3. Create new invoices for the remaining amount
+    const newInvoices = [];
+    if (remainingCents <= 0 || est.payment_plan === 'per_service') return newInvoices;
+
+    if (est.payment_plan === 'full') {
+      const invNumber = stripeUtils.generateInvoiceNumber(db);
+      const today = new Date().toISOString().split('T')[0];
+      db.prepare(`
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date, token)
+        VALUES (?, ?, ?, 'pending', 'full', ?, ?)
+      `).run(invNumber, est.id, remainingCents, today, crypto.randomBytes(16).toString('hex'));
+      newInvoices.push({ invoice_number: invNumber, amount_cents: remainingCents });
+    } else {
+      // monthly: spread remainingCents across months still due
+      const paidInstallments = paid.length;
+      const monthsRemaining = Math.max(1, (est.payment_months || 8) - paidInstallments);
+      const perMonth = Math.floor(remainingCents / monthsRemaining);
+      let remainder = remainingCents - perMonth * monthsRemaining;
+      const now = new Date();
+      for (let i = 0; i < monthsRemaining; i++) {
+        const invNumber = stripeUtils.generateInvoiceNumber(db);
+        const amount = i === monthsRemaining - 1 ? perMonth + remainder : perMonth;
+        const due = new Date(now.getFullYear(), now.getMonth() + i, 1);
+        const dueStr = due.toISOString().split('T')[0];
+        db.prepare(`
+          INSERT INTO invoices (
+            invoice_number, estimate_id, amount_cents, status, payment_plan,
+            installment_number, total_installments, due_date, token
+          ) VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?, ?, ?)
+        `).run(invNumber, est.id, amount, paidInstallments + i + 1, est.payment_months || monthsRemaining, dueStr, crypto.randomBytes(16).toString('hex'));
+        newInvoices.push({ invoice_number: invNumber, amount_cents: amount });
+      }
+    }
+    return newInvoices;
+  });
+
+  const newInvoiceList = run();
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'fix_resync_billing_to_items', {
+    new_total: newTotal,
+    new_monthly: newMonthly,
+    voided_count: unpaid.length,
+    created_count: newInvoiceList.length,
+    paid_preserved: paid.length
+  });
+
+  res.json({
+    ok: true,
+    new_total: newTotal,
+    new_monthly: newMonthly,
+    voided_count: unpaid.length,
+    created_count: newInvoiceList.length,
+    paid_preserved: paid.length,
+    created_invoices: newInvoiceList
+  });
+});
+
 router.post('/fix/set-plan-and-regen/:estimateId', requireAdmin, (req, res) => {
   const db = getDb();
   const { payment_plan, payment_method_preference } = req.body || {};
