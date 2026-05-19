@@ -305,6 +305,32 @@ const SettingsPage = {
 
             <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
 
+            <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Convert to Paid in Full</p>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Customer was set up monthly but paid the whole thing at once. Voids unpaid monthly invoices, creates one consolidated invoice marked paid. Check the <em>recalculate from items</em> box if items were also toggled off the estimate (Marie's case — recalculates total first).
+            </p>
+            <div style="display:grid;grid-template-columns:130px 130px 130px 1fr;gap:8px;margin-bottom:8px;">
+              <input type="number" id="paidFullEstId" class="form-input" placeholder="Estimate ID">
+              <input type="number" id="paidFullAmount" class="form-input" placeholder="Amount $" step="0.01">
+              <select id="paidFullMethod" class="form-input">
+                <option value="check">Check</option>
+                <option value="card">Card</option>
+                <option value="cash">Cash</option>
+              </select>
+              <span></span>
+            </div>
+            <div style="display:grid;grid-template-columns:130px 130px 1fr 100px;gap:8px;margin-bottom:8px;">
+              <input type="text" id="paidFullCheckNum" class="form-input" placeholder="Check # (opt)">
+              <input type="date" id="paidFullCheckDate" class="form-input">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--gray-700);">
+                <input type="checkbox" id="paidFullRecalc"> Recalculate total from current items first
+              </label>
+              <button class="btn btn-secondary" onclick="SettingsPage.convertToPaidInFull()">Convert</button>
+            </div>
+            <div id="paidFullResults"></div>
+
+            <hr style="margin:20px 0;border:none;border-top:1px solid var(--gray-200);">
+
             <p style="font-size:14px;color:var(--gray-700);margin-bottom:4px;font-weight:600;">Resync Billing to Estimate Items</p>
             <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
               When services are toggled off an estimate <em>after</em> acceptance, the existing invoices stay at the old amount. Enter the estimate ID — this recalculates the total from the current included items, voids unpaid invoices, and generates fresh ones at the corrected amount. Paid invoices are preserved.
@@ -1438,6 +1464,39 @@ const SettingsPage = {
         </div>
       `;
       App.toast('Card attached — refresh Invoicing to see Charge button', 'success');
+    } catch (err) {
+      box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
+    }
+  },
+
+  async convertToPaidInFull() {
+    const estId = (document.getElementById('paidFullEstId').value || '').trim();
+    const amount = (document.getElementById('paidFullAmount').value || '').trim();
+    const method = document.getElementById('paidFullMethod').value;
+    const checkNum = (document.getElementById('paidFullCheckNum').value || '').trim();
+    const checkDate = document.getElementById('paidFullCheckDate').value;
+    const recalc = document.getElementById('paidFullRecalc').checked;
+    const box = document.getElementById('paidFullResults');
+
+    if (!estId || !amount) { App.toast('Estimate ID and amount required', 'error'); return; }
+    if (!confirm(`Convert estimate #${estId} to paid in full?\n\n$${amount} via ${method}${recalc ? ' (with recalc from items)' : ''}.\n\nThis voids all unpaid invoices and creates one paid invoice. Cannot be undone.`)) return;
+
+    box.innerHTML = '<p style="font-size:13px;color:var(--gray-500);">Working...</p>';
+    try {
+      const r = await Api.post(`/api/admin/fix/convert-to-paid-in-full/${estId}`, {
+        amount_paid: Number(amount),
+        payment_method: method,
+        check_number: checkNum || null,
+        check_date: checkDate || null,
+        recalculate_from_items: recalc
+      });
+      box.innerHTML = `
+        <div style="background:#dcfce7;border:1px solid #86efac;padding:10px;border-radius:6px;font-size:13px;">
+          ✓ Converted. New invoice <code>${this.esc(r.invoice_number)}</code> for $${r.amount_paid.toFixed(2)} marked paid.<br>
+          Voided ${r.voided_count} unpaid invoice(s).
+        </div>
+      `;
+      App.toast('Converted to paid in full', 'success');
     } catch (err) {
       box.innerHTML = `<p style="color:var(--red);font-size:13px;">Error: ${this.esc(err.message)}</p>`;
     }

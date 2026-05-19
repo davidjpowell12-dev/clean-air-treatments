@@ -1117,6 +1117,96 @@ router.post('/fix/copy-card-from-sibling/:estimateId', requireAdmin, (req, res) 
 // ─── Set payment plan + regenerate invoices for an estimate.
 // Used to fix accepted estimates that landed with NULL payment_plan
 // (because admin status-change skipped the customer-side plan picker).
+// Fix: convert an accepted estimate to "paid in full" — voids unpaid
+// invoices, creates a single consolidated invoice marked paid with the
+// supplied payment details. Optionally recalculates the estimate total
+// from current is_included items first (use when items were toggled
+// off post-acceptance). For customers who were set up monthly but paid
+// the whole thing at once.
+router.post('/fix/convert-to-paid-in-full/:estimateId', requireAdmin, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+  if (est.status !== 'accepted') return res.status(400).json({ error: 'Estimate is not accepted' });
+
+  const {
+    amount_paid,           // dollars, e.g. 678 — required
+    payment_method,        // 'check' | 'card' | 'cash'
+    check_number,
+    check_date,            // YYYY-MM-DD
+    paid_at,               // ISO datetime, defaults to now
+    notes,
+    recalculate_from_items // boolean — if true, also updates est.total_price first
+  } = req.body || {};
+
+  const amountCents = Math.round(Number(amount_paid) * 100);
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    return res.status(400).json({ error: 'amount_paid must be a positive number' });
+  }
+
+  const stripeUtils = require('../utils/stripe');
+  const crypto = require('crypto');
+  const today = new Date().toISOString().split('T')[0];
+  const paidStamp = paid_at || new Date().toISOString();
+
+  const run = db.transaction(() => {
+    // 1. Optionally recalculate the estimate total
+    if (recalculate_from_items) {
+      const items = db.prepare(
+        'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1'
+      ).all(est.id);
+      if (items.length === 0) throw new Error('No included items — cannot recalculate');
+      const newTotal = items.reduce((sum, i) =>
+        sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0);
+      db.prepare(`
+        UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?
+      `).run(newTotal, Math.round((newTotal / (est.payment_months || 8)) * 100) / 100, est.id);
+    }
+
+    // 2. Switch payment_plan to 'full'
+    db.prepare("UPDATE estimates SET payment_plan = 'full', updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(est.id);
+
+    // 3. Void every unpaid invoice
+    const unpaid = db.prepare(
+      "SELECT id FROM invoices WHERE estimate_id = ? AND status IN ('scheduled', 'pending', 'failed')"
+    ).all(est.id);
+    for (const inv of unpaid) {
+      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+    }
+
+    // 4. Create one consolidated, already-paid invoice
+    const invNumber = stripeUtils.generateInvoiceNumber(db);
+    const token = crypto.randomBytes(16).toString('hex');
+    db.prepare(`
+      INSERT INTO invoices (
+        invoice_number, estimate_id, amount_cents, status, payment_plan,
+        due_date, paid_at, payment_method, check_number, check_date, notes, token
+      ) VALUES (?, ?, ?, 'paid', 'full', ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      invNumber, est.id, amountCents, today, paidStamp,
+      payment_method || null, check_number || null, check_date || null,
+      notes || null, token
+    );
+
+    return { voided_count: unpaid.length, invoice_number: invNumber };
+  });
+
+  const result = run();
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'fix_convert_to_paid_in_full', {
+    amount_paid: amountCents / 100,
+    payment_method,
+    check_number,
+    recalculated: !!recalculate_from_items,
+    voided_count: result.voided_count,
+    new_invoice: result.invoice_number
+  });
+
+  res.json({ ok: true, ...result, amount_paid: amountCents / 100 });
+});
+
 // Fix: recalculate an estimate's total_price/monthly_price from its current
 // is_included items, then void unpaid invoices and regenerate fresh ones at
 // the corrected amount. Use when post-acceptance edits left invoices out of
