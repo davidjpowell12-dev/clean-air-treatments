@@ -258,6 +258,52 @@ router.post('/invoices/:id/void', requireAuth, (req, res) => {
   res.json({ success: true, invoice_number: invoice.invoice_number });
 });
 
+// Create an ad-hoc invoice on an existing estimate. Used when an
+// admin needs to add a one-off charge (mid-season service, correction,
+// etc.) without touching the estimate's auto-generated installments.
+// Caller can supply amount, due date, payment plan, notes; status
+// defaults to 'pending' so it shows up in the invoicing queue.
+router.post('/invoices', requireAuth, (req, res) => {
+  const db = getDb();
+  const b = req.body || {};
+  const estimateId = Number(b.estimate_id);
+  const amountCents = Math.round(Number(b.amount) * 100);
+  if (!estimateId) return res.status(400).json({ error: 'estimate_id required' });
+  if (!Number.isFinite(amountCents) || amountCents <= 0) {
+    return res.status(400).json({ error: 'amount must be a positive number' });
+  }
+  const est = db.prepare('SELECT id FROM estimates WHERE id = ?').get(estimateId);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const stripeUtils = require('../utils/stripe');
+  const crypto = require('crypto');
+  const invNumber = stripeUtils.generateInvoiceNumber(db);
+  const token = crypto.randomBytes(16).toString('hex');
+  const status = b.status || 'pending';
+  const dueDate = b.due_date || new Date().toISOString().split('T')[0];
+  const plan = b.payment_plan || 'full';
+
+  db.prepare(`
+    INSERT INTO invoices (
+      invoice_number, estimate_id, amount_cents, status, payment_plan,
+      due_date, notes, token, payment_method, check_number, check_date, paid_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    invNumber, estimateId, amountCents, status, plan,
+    dueDate, b.notes || null, token,
+    b.payment_method || null, b.check_number || null,
+    b.check_date || null,
+    status === 'paid' ? (b.paid_at || new Date().toISOString()) : null
+  );
+
+  const created = db.prepare('SELECT * FROM invoices WHERE invoice_number = ?').get(invNumber);
+  logAudit(db, 'invoice', created.id, req.session.userId, 'create_adhoc', {
+    invoice_number: invNumber, estimate_id: estimateId, amount_cents: amountCents
+  });
+
+  res.json(created);
+});
+
 // General-purpose invoice edit. Accepts any subset of editable fields and
 // updates them. Used for one-off corrections (amount mis-billed, status
 // needs manual flip, notes, payment method). Any field omitted from the

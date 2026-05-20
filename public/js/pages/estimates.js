@@ -702,6 +702,10 @@ const EstimatesPage = {
           </div>
         ` : ''}
 
+        ${est.status === 'accepted' ? `
+          <div id="estBillingManager" style="margin-top:16px;"></div>
+        ` : ''}
+
         <!-- Actions -->
         <div class="est-actions" style="margin-top:16px;">
           <button class="btn btn-primary btn-full" onclick="App.navigate('estimates', 'edit', ${est.id})">
@@ -777,8 +781,195 @@ const EstimatesPage = {
           </button>
         </div>
       `;
+
+      // If estimate is accepted, populate the billing manager panel
+      if (est.status === 'accepted') {
+        this.renderBillingManager(est.id);
+      }
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
+    }
+  },
+
+  // ─── Billing Manager Panel ──────────────────────────────────
+  // Lives on an accepted estimate's detail page. Shows every invoice
+  // (paid, pending, scheduled, voided) with inline edit + add + void.
+  // No silent cascades — admin chooses when to act.
+  async renderBillingManager(estId) {
+    const box = document.getElementById('estBillingManager');
+    if (!box) return;
+    box.innerHTML = '<div class="card"><div class="card-body" style="text-align:center;color:var(--gray-400);font-size:13px;">Loading billing…</div></div>';
+
+    try {
+      // Pull every invoice for this estimate (including voided)
+      const all = await Api.get(`/api/payments/invoices?estimate_id=${estId}&include_voided=1`);
+      const invoices = (all.invoices || all || []).filter(i => i.estimate_id === Number(estId));
+      // Sort: installments first, then ad-hoc by id
+      invoices.sort((a, b) => (a.installment_number || 9999) - (b.installment_number || 9999) || a.id - b.id);
+
+      const showVoided = this._showVoidedInvoices !== false; // default on
+      const visible = showVoided ? invoices : invoices.filter(i => i.status !== 'voided' && i.status !== 'void');
+
+      // Totals
+      const billed = invoices.filter(i => i.status !== 'voided' && i.status !== 'void').reduce((s, i) => s + (i.amount_cents || 0), 0);
+      const paid = invoices.filter(i => i.status === 'paid').reduce((s, i) => s + (i.amount_cents || 0), 0);
+      const outstanding = billed - paid;
+      const voidedCount = invoices.filter(i => i.status === 'voided' || i.status === 'void').length;
+
+      const rows = visible.map(inv => this._renderBillingRow(inv, estId)).join('');
+
+      box.innerHTML = `
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <h3 style="margin:0;">Billing</h3>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;">
+              <button class="btn btn-outline btn-sm" onclick="EstimatesPage.addAdhocInvoice(${estId})">＋ Add Invoice</button>
+              <button class="btn btn-outline btn-sm" onclick="EstimatesPage.rebuildInvoicesFromItems(${estId})" title="Voids unpaid invoices and recreates them from the estimate's current included items">↻ Rebuild from Items</button>
+              ${voidedCount > 0 ? `<button class="btn btn-outline btn-sm" onclick="EstimatesPage.toggleVoidedInvoices(${estId})">${showVoided ? 'Hide' : 'Show'} ${voidedCount} voided</button>` : ''}
+            </div>
+          </div>
+          <div class="card-body" style="padding:0;">
+            <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:0;padding:12px 16px;background:#f8faf6;border-bottom:1px solid var(--gray-100);font-size:12px;">
+              <div><span style="color:var(--gray-500);">Billed</span><br><strong style="font-size:14px;">$${(billed/100).toFixed(2)}</strong></div>
+              <div><span style="color:var(--gray-500);">Paid</span><br><strong style="font-size:14px;color:var(--green-dark);">$${(paid/100).toFixed(2)}</strong></div>
+              <div><span style="color:var(--gray-500);">Outstanding</span><br><strong style="font-size:14px;color:${outstanding > 0 ? 'var(--red)' : 'var(--gray-400)'};">$${(outstanding/100).toFixed(2)}</strong></div>
+            </div>
+            ${visible.length === 0
+              ? '<p style="padding:16px;color:var(--gray-400);text-align:center;font-size:13px;">No invoices yet. Click ＋ Add Invoice or ↻ Rebuild from Items.</p>'
+              : `<div>${rows}</div>`}
+          </div>
+        </div>
+      `;
+    } catch (err) {
+      box.innerHTML = `<div class="card"><div class="card-body" style="color:var(--red);font-size:13px;">Could not load billing: ${this._esc(err.message)}</div></div>`;
+    }
+  },
+
+  _renderBillingRow(inv, estId) {
+    const isVoided = inv.status === 'voided' || inv.status === 'void';
+    const isPaid = inv.status === 'paid';
+    const amt = (inv.amount_cents / 100).toFixed(2);
+    const rowStyle = isVoided ? 'opacity:0.55;background:#fafafa;' : (isPaid ? 'background:#f0fdf4;' : '');
+    const amtStyle = isVoided ? 'text-decoration:line-through;color:var(--gray-400);' : '';
+
+    let badge;
+    if (isVoided) badge = '<span class="badge badge-gray" style="font-size:10px;">Voided</span>';
+    else if (isPaid) badge = '<span class="badge badge-green" style="font-size:10px;">Paid</span>';
+    else if (inv.status === 'scheduled') badge = '<span class="badge badge-muted" style="font-size:10px;">Scheduled</span>';
+    else if (inv.status === 'failed') badge = '<span class="badge badge-red" style="font-size:10px;">Failed</span>';
+    else badge = '<span class="badge badge-orange" style="font-size:10px;">Pending</span>';
+
+    const dueLabel = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString() : 'no date';
+    const paidInfo = isPaid && inv.paid_at ? `<span style="color:var(--green-dark);font-size:11px;">paid ${new Date(inv.paid_at).toLocaleDateString()}${inv.check_number ? ' · #' + this._esc(inv.check_number) : ''}</span>` : '';
+
+    return `
+      <div style="display:grid;grid-template-columns:auto 1fr auto auto;gap:10px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--gray-100);${rowStyle}">
+        <div style="font-family:monospace;font-size:11px;color:var(--gray-500);min-width:110px;">
+          ${this._esc(inv.invoice_number)}${inv.installment_number ? ` #${inv.installment_number}` : ''}
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <span style="font-size:14px;font-weight:700;${amtStyle}">$${amt}</span>
+          ${badge}
+          ${!isVoided ? `<span style="font-size:12px;color:var(--gray-500);">due ${dueLabel}</span>` : ''}
+          ${paidInfo}
+        </div>
+        <button class="btn btn-outline btn-xs" onclick="EstimatesPage.editInvoice(${inv.id})" style="font-size:11px;padding:4px 10px;">✎ Edit</button>
+        ${isVoided
+          ? `<button class="btn btn-outline btn-xs" onclick="EstimatesPage.unvoidInvoice(${inv.id}, ${estId})" style="font-size:11px;padding:4px 10px;color:var(--green-dark);">Restore</button>`
+          : isPaid
+            ? '<span style="width:60px;"></span>'
+            : `<button class="btn btn-outline btn-xs" onclick="EstimatesPage.voidInvoiceQuick(${inv.id}, ${estId})" style="font-size:11px;padding:4px 10px;color:var(--red);">Void</button>`}
+      </div>
+    `;
+  },
+
+  toggleVoidedInvoices(estId) {
+    this._showVoidedInvoices = this._showVoidedInvoices === false ? true : false;
+    this.renderBillingManager(estId);
+  },
+
+  async addAdhocInvoice(estId) {
+    const amount = prompt('Amount in dollars (e.g. 84.75):');
+    if (!amount) return;
+    const num = Number(amount);
+    if (!Number.isFinite(num) || num <= 0) { App.toast('Invalid amount', 'error'); return; }
+    const dueDate = prompt('Due date (YYYY-MM-DD), or leave blank for today:') || new Date().toISOString().split('T')[0];
+    try {
+      await Api.post('/api/payments/invoices', {
+        estimate_id: estId, amount: num, due_date: dueDate, status: 'pending'
+      });
+      App.toast('Invoice added', 'success');
+      this.renderBillingManager(estId);
+    } catch (err) {
+      App.toast('Could not add: ' + err.message, 'error');
+    }
+  },
+
+  async voidInvoiceQuick(invId, estId) {
+    if (!confirm('Void this invoice? It will be hidden from active lists but stay in the audit trail.')) return;
+    try {
+      await Api.post(`/api/payments/invoices/${invId}/void`);
+      App.toast('Invoice voided', 'success');
+      this.renderBillingManager(estId);
+    } catch (err) {
+      App.toast('Could not void: ' + err.message, 'error');
+    }
+  },
+
+  async unvoidInvoice(invId, estId) {
+    if (!confirm('Restore this invoice to pending status?')) return;
+    try {
+      await Api.put(`/api/payments/invoices/${invId}`, { status: 'pending', paid_at: null });
+      App.toast('Invoice restored', 'success');
+      this.renderBillingManager(estId);
+    } catch (err) {
+      App.toast('Could not restore: ' + err.message, 'error');
+    }
+  },
+
+  async editInvoice(invId) {
+    const inv = await Api.get(`/api/payments/invoices/${invId}`);
+    const dollars = (inv.amount_cents / 100).toFixed(2);
+    const newAmt = prompt(`Edit amount for ${inv.invoice_number} (dollars):`, dollars);
+    if (newAmt === null) return;
+    const amountCents = Math.round(Number(newAmt) * 100);
+    if (!Number.isFinite(amountCents) || amountCents < 0) { App.toast('Invalid amount', 'error'); return; }
+
+    const newDue = prompt(`Due date (YYYY-MM-DD):`, inv.due_date || '');
+    if (newDue === null) return;
+
+    const newStatus = prompt(`Status (pending / paid / scheduled / failed / voided):`, inv.status);
+    if (newStatus === null) return;
+
+    const body = { amount_cents: amountCents, due_date: newDue || null, status: newStatus };
+
+    if (newStatus === 'paid') {
+      const method = prompt('Payment method (check / card / cash):', inv.payment_method || 'check');
+      if (method) body.payment_method = method;
+      if (method === 'check') {
+        body.check_number = prompt('Check number:', inv.check_number || '') || null;
+        body.check_date = prompt('Check date (YYYY-MM-DD):', inv.check_date || '') || null;
+      }
+      body.paid_at = prompt('Paid date (ISO or blank for now):', inv.paid_at || '') || new Date().toISOString();
+    }
+
+    try {
+      await Api.put(`/api/payments/invoices/${invId}`, body);
+      App.toast('Invoice updated', 'success');
+      this.renderBillingManager(inv.estimate_id);
+    } catch (err) {
+      App.toast('Could not update: ' + err.message, 'error');
+    }
+  },
+
+  async rebuildInvoicesFromItems(estId) {
+    if (!confirm('Rebuild this estimate\'s billing?\n\nVoids unpaid invoices and creates fresh ones from the current included items. Paid invoices are preserved. Cannot be undone.')) return;
+    try {
+      const r = await Api.post(`/api/admin/fix/resync-billing-to-items/${estId}`);
+      App.toast(`Rebuilt — ${r.created_count} new invoice(s) at $${r.new_monthly.toFixed(2)}`, 'success');
+      this.renderBillingManager(estId);
+    } catch (err) {
+      App.toast('Rebuild failed: ' + err.message, 'error');
     }
   },
 

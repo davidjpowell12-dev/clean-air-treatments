@@ -1125,6 +1125,110 @@ router.put('/:id/items/:itemId/toggle', requireAuth, (req, res) => {
   res.json({ is_included: newIncluded, total_price: totalPrice, monthly_price: monthlyPrice });
 });
 
+// Per-item CRUD — for the dynamic estimate edit panel. Recalculates the
+// estimate's total_price + monthly_price after any change so the UI stays
+// in sync, but does NOT rebuild invoices (use the resync endpoint for that).
+
+// Add a single line item to an estimate.
+router.post('/:id/items', requireAuth, (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const b = req.body || {};
+  const price = Number(b.price);
+  if (!b.service_name || !Number.isFinite(price)) {
+    return res.status(400).json({ error: 'service_name and price required' });
+  }
+
+  const maxOrder = db.prepare('SELECT MAX(sort_order) as m FROM estimate_items WHERE estimate_id = ?').get(req.params.id);
+  const sortOrder = (maxOrder?.m ?? -1) + 1;
+
+  const result = db.prepare(`
+    INSERT INTO estimate_items (
+      estimate_id, service_id, service_name, description, price,
+      is_recurring, rounds, is_included, sort_order
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    req.params.id, b.service_id || null, b.service_name,
+    b.description || null, price,
+    b.is_recurring ? 1 : 0, b.rounds || 1,
+    b.is_included !== undefined ? (b.is_included ? 1 : 0) : 1,
+    sortOrder
+  );
+
+  recalcEstimateTotals(db, req.params.id);
+  logAudit(db, 'estimate', req.params.id, req.session.userId, 'item_add', {
+    item_id: result.lastInsertRowid, service_name: b.service_name, price
+  });
+
+  const created = db.prepare('SELECT * FROM estimate_items WHERE id = ?').get(result.lastInsertRowid);
+  res.json(created);
+});
+
+// Patch any subset of fields on a single item.
+router.patch('/:id/items/:itemId', requireAuth, (req, res) => {
+  const db = getDb();
+  const item = db.prepare('SELECT * FROM estimate_items WHERE id = ? AND estimate_id = ?')
+    .get(req.params.itemId, req.params.id);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+
+  const b = req.body || {};
+  const next = {
+    service_name: b.service_name !== undefined ? b.service_name : item.service_name,
+    description: b.description !== undefined ? b.description : item.description,
+    price: b.price !== undefined ? Number(b.price) : item.price,
+    is_recurring: b.is_recurring !== undefined ? (b.is_recurring ? 1 : 0) : item.is_recurring,
+    rounds: b.rounds !== undefined ? Number(b.rounds) : item.rounds,
+    is_included: b.is_included !== undefined ? (b.is_included ? 1 : 0) : item.is_included
+  };
+
+  db.prepare(`
+    UPDATE estimate_items SET service_name = ?, description = ?, price = ?,
+      is_recurring = ?, rounds = ?, is_included = ?
+     WHERE id = ?
+  `).run(
+    next.service_name, next.description, next.price,
+    next.is_recurring, next.rounds, next.is_included, item.id
+  );
+
+  recalcEstimateTotals(db, req.params.id);
+  logAudit(db, 'estimate', req.params.id, req.session.userId, 'item_edit', {
+    item_id: item.id, before: item, after: next
+  });
+
+  const updated = db.prepare('SELECT * FROM estimate_items WHERE id = ?').get(item.id);
+  res.json(updated);
+});
+
+// Hard-delete a single item (estimate_items have no downstream FKs).
+router.delete('/:id/items/:itemId', requireAuth, (req, res) => {
+  const db = getDb();
+  const item = db.prepare('SELECT * FROM estimate_items WHERE id = ? AND estimate_id = ?')
+    .get(req.params.itemId, req.params.id);
+  if (!item) return res.status(404).json({ error: 'Item not found' });
+
+  db.prepare('DELETE FROM estimate_items WHERE id = ?').run(item.id);
+  recalcEstimateTotals(db, req.params.id);
+  logAudit(db, 'estimate', req.params.id, req.session.userId, 'item_delete', {
+    item_id: item.id, service_name: item.service_name, price: item.price
+  });
+
+  res.json({ ok: true, deleted_id: item.id });
+});
+
+function recalcEstimateTotals(db, estimateId) {
+  const est = db.prepare('SELECT payment_months FROM estimates WHERE id = ?').get(estimateId);
+  if (!est) return;
+  const items = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1').all(estimateId);
+  const totalPrice = items.reduce((sum, i) =>
+    sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price), 0);
+  const months = est.payment_months || 8;
+  const monthlyPrice = Math.round((totalPrice / months) * 100) / 100;
+  db.prepare('UPDATE estimates SET total_price = ?, monthly_price = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(totalPrice, monthlyPrice, estimateId);
+}
+
 // Send estimate to customer via email
 router.post('/:id/send', requireAuth, async (req, res) => {
   const db = getDb();
