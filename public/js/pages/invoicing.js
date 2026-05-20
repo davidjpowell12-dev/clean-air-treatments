@@ -780,18 +780,40 @@ const InvoicingPage = {
           <div class="card" style="margin-bottom:12px;">
             <div class="card-header"><h3>Payment Schedule</h3></div>
             <div class="card-body" style="padding:0;">
-              ${inv.related_invoices.map(ri => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--gray-100);${ri.id === inv.id ? 'background:#f0fdf4;' : ''}">
+              ${inv.related_invoices.map(ri => {
+                const isVoided = ri.status === 'voided' || ri.status === 'void';
+                const rowStyle = ri.id === inv.id ? 'background:#f0fdf4;' : (isVoided ? 'background:#fafafa;opacity:0.6;' : '');
+                const amtStyle = isVoided ? 'text-decoration:line-through;color:var(--gray-400);' : '';
+                let badgeClass, badgeText;
+                if (isVoided) {
+                  badgeClass = 'badge-gray';
+                  badgeText = 'Voided';
+                } else if (ri.status === 'paid') {
+                  badgeClass = 'badge-green';
+                  badgeText = 'Paid';
+                } else if (ri.status === 'failed') {
+                  badgeClass = 'badge-red';
+                  badgeText = 'Failed';
+                } else if (ri.status === 'scheduled') {
+                  badgeClass = 'badge-muted';
+                  badgeText = ri.due_date ? new Date(ri.due_date + 'T12:00:00').toLocaleDateString() + ' (sched)' : 'Scheduled — no date';
+                } else {
+                  badgeClass = 'badge-orange';
+                  badgeText = ri.due_date ? new Date(ri.due_date + 'T12:00:00').toLocaleDateString() : 'Pending — no date';
+                }
+                return `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--gray-100);${rowStyle}">
                   <div>
-                    <span style="font-family:monospace;font-size:12px;">${this._esc(ri.invoice_number)}</span>
+                    <span style="font-family:monospace;font-size:12px;${amtStyle}">${this._esc(ri.invoice_number)}</span>
                     ${ri.installment_number ? `<span style="color:var(--gray-400);font-size:12px;"> #${ri.installment_number}</span>` : ''}
                   </div>
                   <div style="display:flex;align-items:center;gap:12px;">
-                    <span style="font-size:13px;">$${(ri.amount_cents / 100).toFixed(2)}</span>
-                    <span class="badge ${ri.status === 'paid' ? 'badge-green' : ri.status === 'scheduled' ? 'badge-muted' : ri.status === 'failed' ? 'badge-red' : 'badge-orange'}" style="font-size:11px;">${ri.status === 'paid' ? 'Paid' : ri.due_date ? new Date(ri.due_date + 'T12:00:00').toLocaleDateString() + (ri.status === 'scheduled' ? ' (sched)' : '') : (ri.status === 'scheduled' ? 'Scheduled — no date' : 'Pending — no date')}</span>
+                    <span style="font-size:13px;${amtStyle}">$${(ri.amount_cents / 100).toFixed(2)}</span>
+                    <span class="badge ${badgeClass}" style="font-size:11px;">${badgeText}</span>
                   </div>
                 </div>
-              `).join('')}
+                `;
+              }).join('')}
             </div>
           </div>
         ` : ''}
