@@ -409,6 +409,13 @@ const migrations = [
   // records with 'voided' kept showing up in active lists despite being voided.
   function normalizeVoidedInvoiceStatus(db) {
     db.exec("UPDATE invoices SET status = 'void' WHERE status = 'voided'");
+  },
+  // Migration: first_due_date on estimates. Replaces the standalone Reset
+  // Invoice Schedule button — this is now a first-class field on the estimate
+  // that the save-with-billing flow uses when generating the installment
+  // schedule.
+  function addEstimateFirstDueDate(db) {
+    try { db.exec('ALTER TABLE estimates ADD COLUMN first_due_date DATE'); } catch (e) { /* exists */ }
   }
 ];
 

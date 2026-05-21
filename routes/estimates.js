@@ -1229,6 +1229,250 @@ function recalcEstimateTotals(db, estimateId) {
     .run(totalPrice, monthlyPrice, estimateId);
 }
 
+// ─── Unified Save + Billing Rebuild ──────────────────────────
+// Single entry point that replaces: Regenerate Unpaid Invoices, Reset
+// Invoice Schedule, Resync Billing to Items, Convert to Paid in Full,
+// and the items-only PUT-rewrite path.
+//
+// Two-step protocol:
+//   1. Client POSTs payload without confirm:true → server detects
+//      whether the change affects billing. If not, saves immediately.
+//      If yes, returns a preview (without modifying anything).
+//   2. Client POSTs the same payload with confirm:true → server
+//      executes the rebuild (save fields, void unpaid, create new),
+//      optionally voids in QBO based on the user's choice.
+router.post('/:id/save-with-billing', requireAuth, async (req, res) => {
+  const db = getDb();
+  const est = db.prepare('SELECT * FROM estimates WHERE id = ?').get(req.params.id);
+  if (!est) return res.status(404).json({ error: 'Estimate not found' });
+
+  const b = req.body || {};
+  const incomingItems = Array.isArray(b.items) ? b.items : null;
+  const confirm = b.confirm === true;
+  const qboChoice = b.qbo_void_choice; // 'this_time' | 'skip_this_time' | 'always' | 'never'
+
+  // Detect billing-relevant changes
+  const billingFields = ['payment_plan', 'payment_method_preference', 'payment_months', 'first_due_date'];
+  const planChanged = billingFields.some(f =>
+    b[f] !== undefined && String(b[f] ?? '') !== String(est[f] ?? '')
+  );
+  const currentItems = db.prepare('SELECT * FROM estimate_items WHERE estimate_id = ? ORDER BY id').all(est.id);
+  const itemsChanged = incomingItems && !itemsEqual(incomingItems, currentItems);
+
+  const hasBillingImpact = (est.status === 'accepted')
+    && (planChanged || itemsChanged)
+    && (est.payment_plan !== 'per_service' && b.payment_plan !== 'per_service');
+
+  // Path A — no billing impact: save immediately
+  if (!hasBillingImpact) {
+    applyEstimateEdits(db, est.id, b, incomingItems);
+    logAudit(db, 'estimate', est.id, req.session.userId, 'edit_no_billing', {});
+    return res.json({ ok: true, has_billing_impact: false });
+  }
+
+  // Compute the billing diff
+  const newItems = incomingItems || currentItems;
+  const newPlan = b.payment_plan || est.payment_plan;
+  const newMethod = b.payment_method_preference || est.payment_method_preference || 'card';
+  const newMonths = Number(b.payment_months) || est.payment_months || 8;
+  const newFirstDue = b.first_due_date || est.first_due_date;
+
+  const newTotalCents = computeTotalFromItems(newItems);
+  const cardFee = newMethod === 'card' ? 1.035 : 1;
+  const newTotalWithFee = Math.round(newTotalCents * cardFee);
+
+  const existing = db.prepare(
+    'SELECT * FROM invoices WHERE estimate_id = ? ORDER BY COALESCE(installment_number, 0), id'
+  ).all(est.id);
+  const paid = existing.filter(i => i.status === 'paid');
+  const unpaid = existing.filter(i => ['scheduled', 'pending', 'failed'].includes(i.status));
+  const paidCents = paid.reduce((s, i) => s + (i.amount_cents || 0), 0);
+  const remainingCents = Math.max(0, newTotalWithFee - paidCents);
+
+  const plannedNew = planInvoices(newPlan, remainingCents, newMonths, paid.length, newFirstDue);
+
+  const syncedToVoid = unpaid.filter(i => i.qbo_invoice_id);
+  const qboPref = db.prepare("SELECT value FROM app_settings WHERE key = 'qbo_auto_void_on_rebuild'").get()?.value;
+
+  // Path B — preview mode (do not save)
+  if (!confirm) {
+    return res.json({
+      ok: true,
+      has_billing_impact: true,
+      preview: {
+        current_total: est.total_price,
+        new_total: newTotalCents / 100,
+        voiding: unpaid.map(i => ({
+          invoice_number: i.invoice_number,
+          amount: i.amount_cents / 100,
+          due_date: i.due_date,
+          qbo_invoice_id: i.qbo_invoice_id || null
+        })),
+        creating: plannedNew.map(p => ({
+          amount: p.amount_cents / 100,
+          due_date: p.due_date,
+          installment_number: p.installment_number
+        })),
+        preserving_paid: paid.map(i => ({
+          invoice_number: i.invoice_number,
+          amount: i.amount_cents / 100,
+          paid_at: i.paid_at
+        })),
+        qbo_voids_needed: syncedToVoid.length,
+        qbo_preference: qboPref || null
+      }
+    });
+  }
+
+  // Path C — confirmed: execute the rebuild
+  const stripeUtils = require('../utils/stripe');
+  const crypto = require('crypto');
+
+  const txn = db.transaction(() => {
+    applyEstimateEdits(db, est.id, b, incomingItems);
+    for (const inv of unpaid) {
+      db.prepare("UPDATE invoices SET status = 'void', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+    }
+    let createdCount = 0;
+    for (const p of plannedNew) {
+      const invNumber = stripeUtils.generateInvoiceNumber(db);
+      const token = crypto.randomBytes(16).toString('hex');
+      db.prepare(`
+        INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status,
+          payment_plan, installment_number, total_installments, due_date, token)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(invNumber, est.id, p.amount_cents, p.status, newPlan,
+             p.installment_number, p.total_installments, p.due_date, token);
+      createdCount++;
+    }
+    return { voided: unpaid.length, created: createdCount };
+  });
+
+  const result = txn();
+
+  // QBO void handling (outside DB txn because of network calls)
+  let qboVoided = 0;
+  let shouldVoidInQbo = false;
+  if (syncedToVoid.length > 0) {
+    if (qboChoice === 'always') {
+      db.prepare(`INSERT INTO app_settings (key, value, updated_at) VALUES ('qbo_auto_void_on_rebuild', 'true', CURRENT_TIMESTAMP)
+                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`).run();
+      shouldVoidInQbo = true;
+    } else if (qboChoice === 'never') {
+      db.prepare(`INSERT INTO app_settings (key, value, updated_at) VALUES ('qbo_auto_void_on_rebuild', 'false', CURRENT_TIMESTAMP)
+                  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`).run();
+    } else if (qboChoice === 'this_time') {
+      shouldVoidInQbo = true;
+    } else if (qboPref === 'true' && qboChoice !== 'skip_this_time') {
+      shouldVoidInQbo = true;
+    }
+
+    if (shouldVoidInQbo) {
+      const qboUtils = require('../utils/quickbooks');
+      for (const inv of syncedToVoid) {
+        try {
+          await qboUtils.voidQboInvoice(db, inv.qbo_invoice_id);
+          qboVoided++;
+        } catch (err) {
+          console.error(`[save-with-billing] QBO void failed for ${inv.invoice_number}:`, err.message);
+        }
+      }
+    }
+  }
+
+  logAudit(db, 'estimate', est.id, req.session.userId, 'edit_with_rebuild', {
+    voided: result.voided, created: result.created, qbo_voided: qboVoided
+  });
+
+  res.json({ ok: true, has_billing_impact: true, ...result, qbo_voided: qboVoided });
+});
+
+// ─── Helpers for save-with-billing ───────────────────────────
+function applyEstimateEdits(db, estId, body, items) {
+  const fields = ['customer_name', 'address', 'city', 'state', 'zip', 'email', 'phone',
+                  'property_sqft', 'payment_plan', 'payment_method_preference',
+                  'payment_months', 'first_due_date', 'notes', 'customer_message',
+                  'valid_until'];
+  const set = [];
+  const vals = [];
+  for (const f of fields) {
+    if (body[f] !== undefined) { set.push(`${f} = ?`); vals.push(body[f] === '' ? null : body[f]); }
+  }
+  if (set.length > 0) {
+    vals.push(estId);
+    db.prepare(`UPDATE estimates SET ${set.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...vals);
+  }
+  if (Array.isArray(items)) {
+    db.prepare('DELETE FROM estimate_items WHERE estimate_id = ?').run(estId);
+    const ins = db.prepare(`INSERT INTO estimate_items
+      (estimate_id, service_id, service_name, description, price, is_recurring, rounds, is_included, sort_order)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    items.forEach((it, idx) => {
+      ins.run(estId, it.service_id || null, it.service_name, it.description || null,
+              Number(it.price), it.is_recurring ? 1 : 0, Number(it.rounds) || 1,
+              it.is_included !== undefined ? (it.is_included ? 1 : 0) : 1, idx);
+    });
+  }
+  recalcEstimateTotals(db, estId);
+}
+
+function computeTotalFromItems(items) {
+  const total = items
+    .filter(i => i.is_included !== 0 && i.is_included !== false)
+    .reduce((s, i) => s + (i.is_recurring ? Number(i.price) * (Number(i.rounds) || 1) : Number(i.price)), 0);
+  return Math.round(total * 100);
+}
+
+function itemsEqual(a, b) {
+  if (a.length !== b.length) return false;
+  const norm = arr => arr.map(i =>
+    `${i.service_name}|${Number(i.price)}|${Number(i.rounds) || 1}|${i.is_included ? 1 : 0}|${i.is_recurring ? 1 : 0}`
+  ).sort().join(',');
+  return norm(a) === norm(b);
+}
+
+function planInvoices(plan, remainingCents, months, paidCount, firstDueDate) {
+  if (remainingCents <= 0 || plan === 'per_service') return [];
+  const today = new Date().toISOString().split('T')[0];
+
+  if (plan === 'full') {
+    return [{
+      amount_cents: remainingCents,
+      status: 'pending',
+      installment_number: null,
+      total_installments: null,
+      due_date: firstDueDate || today
+    }];
+  }
+
+  // monthly
+  const monthsRemaining = Math.max(1, months - paidCount);
+  const per = Math.floor(remainingCents / monthsRemaining);
+  const remainder = remainingCents - per * monthsRemaining;
+  const start = firstDueDate
+    ? new Date(firstDueDate + 'T12:00:00')
+    : new Date();
+  const out = [];
+  for (let i = 0; i < monthsRemaining; i++) {
+    const amount = i === monthsRemaining - 1 ? per + remainder : per;
+    // First invoice on start date, subsequent on the 1st of each successive month
+    let due;
+    if (i === 0) {
+      due = start;
+    } else {
+      due = new Date(start.getFullYear(), start.getMonth() + i, 1);
+    }
+    out.push({
+      amount_cents: amount,
+      status: i === 0 ? 'pending' : 'scheduled',
+      installment_number: paidCount + i + 1,
+      total_installments: months,
+      due_date: due.toISOString().split('T')[0]
+    });
+  }
+  return out;
+}
+
 // Send estimate to customer via email
 router.post('/:id/send', requireAuth, async (req, res) => {
   const db = getDb();

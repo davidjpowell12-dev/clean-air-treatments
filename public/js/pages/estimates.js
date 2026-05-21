@@ -348,6 +348,13 @@ const EstimatesPage = {
               <input type="number" step="0.01" min="0" id="estBundleDiscount" class="est-input" value="${estimate?.bundle_discount || ''}" placeholder="0.00">
               <p class="form-hint">Applied to the season total. Shown as a line item on the estimate.</p>
             </div>
+            ${estimate?.status === 'accepted' ? `
+              <div class="form-group">
+                <label>First Invoice Due Date</label>
+                <input type="date" id="estFirstDueDate" class="est-input" value="${estimate?.first_due_date || ''}">
+                <p class="form-hint">For monthly plans, this becomes the due date of the first installment. Subsequent installments fall on the 1st of each following month. Leave blank to start today.</p>
+              </div>
+            ` : ''}
           </div>
         </div>
 
@@ -568,19 +575,123 @@ const EstimatesPage = {
 
       let est;
       if (this._currentEstimate) {
-        est = await Api.put(`/api/estimates/${this._currentEstimate.id}`, data);
-        App.toast('Estimate updated', 'success');
-      } else {
-        est = await Api.post('/api/estimates', data);
-        App.toast('Estimate created', 'success');
+        // Existing estimate: use the unified save-with-billing flow. If
+        // the edit has any billing impact, the server returns a preview
+        // and we show a confirmation modal before executing.
+        data.first_due_date = document.getElementById('estFirstDueDate')?.value || null;
+        const preview = await Api.post(`/api/estimates/${this._currentEstimate.id}/save-with-billing`, data);
+
+        if (!preview.has_billing_impact) {
+          App.toast('Estimate saved', 'success');
+          App.navigate('estimates', 'view', this._currentEstimate.id);
+          return;
+        }
+
+        // Show preview modal, get user confirmation
+        const choice = await this._showBillingPreviewModal(preview.preview);
+        if (!choice) {
+          // Cancelled
+          btn.disabled = false;
+          btn.textContent = 'Update Estimate';
+          return;
+        }
+
+        // Confirm + execute
+        const result = await Api.post(`/api/estimates/${this._currentEstimate.id}/save-with-billing`, {
+          ...data,
+          confirm: true,
+          qbo_void_choice: choice.qbo_void_choice
+        });
+
+        const msg = `Saved. Voided ${result.voided}, created ${result.created}${result.qbo_voided ? `, voided ${result.qbo_voided} in QBO` : ''}.`;
+        App.toast(msg, 'success');
+        App.navigate('estimates', 'view', this._currentEstimate.id);
+        return;
       }
 
+      // New estimate (no rebuild logic needed)
+      est = await Api.post('/api/estimates', data);
+      App.toast('Estimate created', 'success');
       App.navigate('estimates', 'view', est.id);
     } catch (err) {
       App.toast(err.message, 'error');
       btn.disabled = false;
       btn.textContent = this._currentEstimate ? 'Update Estimate' : 'Save Estimate';
     }
+  },
+
+  // Modal that previews the billing changes (void X, create Y, preserve Z)
+  // and asks about QBO sync if relevant. Resolves with { qbo_void_choice }
+  // when the user confirms, or null on cancel.
+  _showBillingPreviewModal(preview) {
+    return new Promise(resolve => {
+      const showQbo = preview.qbo_voids_needed > 0 && !preview.qbo_preference;
+      const voidedTotal = preview.voiding.reduce((s, v) => s + v.amount, 0);
+      const createdTotal = preview.creating.reduce((s, c) => s + c.amount, 0);
+      const preservedTotal = preview.preserving_paid.reduce((s, p) => s + p.amount, 0);
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;';
+      overlay.innerHTML = `
+        <div style="background:white;border-radius:12px;max-width:540px;width:100%;max-height:90vh;overflow-y:auto;padding:20px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+          <h3 style="margin:0 0 8px;font-size:18px;color:var(--navy);">Confirm Billing Changes</h3>
+          <p style="margin:0 0 16px;font-size:13px;color:var(--gray-500);">Saving these estimate edits will rebuild billing. Review before continuing.</p>
+
+          ${preview.voiding.length > 0 ? `
+            <div style="margin-bottom:14px;">
+              <strong style="font-size:14px;color:var(--red);">Voiding ${preview.voiding.length} unpaid invoice${preview.voiding.length > 1 ? 's' : ''} — $${voidedTotal.toFixed(2)}</strong>
+              <ul style="font-size:12px;color:var(--gray-600);margin:6px 0 0 0;padding-left:18px;max-height:140px;overflow-y:auto;">
+                ${preview.voiding.map(v => `<li><code style="font-size:11px;">${this._esc(v.invoice_number)}</code> — $${v.amount.toFixed(2)} ${v.qbo_invoice_id ? '<span style="color:var(--orange);font-weight:600;">[in QBO]</span>' : ''}</li>`).join('')}
+              </ul>
+            </div>
+          ` : ''}
+
+          ${preview.creating.length > 0 ? `
+            <div style="margin-bottom:14px;">
+              <strong style="font-size:14px;color:var(--green-dark);">Creating ${preview.creating.length} new invoice${preview.creating.length > 1 ? 's' : ''} — $${createdTotal.toFixed(2)} total</strong>
+              <p style="font-size:12px;color:var(--gray-500);margin:4px 0 0;">First due ${preview.creating[0].due_date}, ${preview.creating.length > 1 ? `then ${preview.creating.length - 1} more` : 'one-time'}</p>
+            </div>
+          ` : ''}
+
+          ${preview.preserving_paid.length > 0 ? `
+            <div style="margin-bottom:14px;">
+              <strong style="font-size:14px;color:var(--gray-700);">Preserving ${preview.preserving_paid.length} paid — $${preservedTotal.toFixed(2)}</strong>
+            </div>
+          ` : ''}
+
+          ${showQbo ? `
+            <div style="background:#fff7ed;border:1px solid #fdba74;padding:12px;border-radius:8px;margin:12px 0;font-size:13px;">
+              <strong style="color:#c2410c;">⚠ ${preview.qbo_voids_needed} of these invoices are in QuickBooks.</strong>
+              <p style="margin:6px 0;color:var(--gray-700);">Without also voiding them in QBO, you'll have stale invoices there that don't match your records.</p>
+              <div style="margin-top:8px;display:grid;gap:4px;">
+                <label><input type="radio" name="qboChoice" value="always" checked> <strong>Always void in QBO when I rebuild</strong> (recommended)</label>
+                <label><input type="radio" name="qboChoice" value="this_time"> Yes, void in QBO this time only</label>
+                <label><input type="radio" name="qboChoice" value="skip_this_time"> Leave QBO alone this time</label>
+                <label><input type="radio" name="qboChoice" value="never"> Never void in QBO automatically</label>
+              </div>
+            </div>
+          ` : (preview.qbo_voids_needed > 0 && preview.qbo_preference === 'true' ? `
+            <p style="font-size:12px;color:var(--gray-500);font-style:italic;margin:8px 0;">QBO will also be updated (per your preference).</p>
+          ` : '')}
+
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">
+            <button id="billingCancelBtn" class="btn btn-outline">Cancel</button>
+            <button id="billingConfirmBtn" class="btn btn-primary">Save & Rebuild Billing</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(overlay);
+
+      const cleanup = () => { overlay.remove(); };
+      overlay.querySelector('#billingCancelBtn').onclick = () => { cleanup(); resolve(null); };
+      overlay.querySelector('#billingConfirmBtn').onclick = () => {
+        const radio = overlay.querySelector('input[name="qboChoice"]:checked');
+        const choice = radio ? radio.value : null;
+        cleanup();
+        resolve({ qbo_void_choice: choice });
+      };
+      overlay.onclick = (e) => { if (e.target === overlay) { cleanup(); resolve(null); } };
+    });
   },
 
   // ─── Detail View ─────────────────────────────────────────
@@ -752,14 +863,7 @@ const EstimatesPage = {
               </button>
               <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use if customer needs to save a card on file</p>
             ` : ''}
-            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.regenerateInvoices(${est.id})">
-              ↻ Regenerate Unpaid Invoices
-            </button>
-            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Use after editing the estimate's line items, payment plan, or method</p>
-            <button class="btn btn-outline btn-full" style="margin-top:8px;" onclick="EstimatesPage.resetSchedule(${est.id})">
-              📅 Reset Invoice Schedule
-            </button>
-            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">Pick a new first-due date — re-dates all unpaid invoices to consecutive months</p>
+            <p style="font-size:12px;color:var(--gray-400);text-align:center;margin-top:4px;">To change items, plan, method, or due dates, use <strong>Edit Estimate</strong> above — billing rebuilds automatically with a preview.</p>
             <button class="btn btn-outline btn-full" style="margin-top:8px;color:var(--red);border-color:var(--red);" onclick="EstimatesPage.cancelJob(${est.id})">
               Cancel Job &amp; Remove Schedule
             </button>
@@ -963,10 +1067,42 @@ const EstimatesPage = {
   },
 
   async rebuildInvoicesFromItems(estId) {
-    if (!confirm('Rebuild this estimate\'s billing?\n\nVoids unpaid invoices and creates fresh ones from the current included items. Paid invoices are preserved. Cannot be undone.')) return;
+    // Calls the unified flow with no payload (no estimate changes), which
+    // still triggers a rebuild based on the current items. Goes through
+    // the same preview modal so QBO sync is handled correctly.
     try {
-      const r = await Api.post(`/api/admin/fix/resync-billing-to-items/${estId}`);
-      App.toast(`Rebuilt — ${r.created_count} new invoice(s) at $${r.new_monthly.toFixed(2)}`, 'success');
+      const preview = await Api.post(`/api/estimates/${estId}/save-with-billing`, {});
+
+      if (!preview.has_billing_impact) {
+        // Force-rebuild path: items unchanged AND plan unchanged, but user
+        // hit Rebuild anyway. Trigger a preview by passing the current items.
+        const est = await Api.get(`/api/estimates/${estId}`);
+        const force = await Api.post(`/api/estimates/${estId}/save-with-billing`, {
+          items: est.items, payment_plan: est.payment_plan,
+          payment_months: est.payment_months, payment_method_preference: est.payment_method_preference
+        });
+        if (!force.has_billing_impact) {
+          App.toast('Nothing to rebuild — billing already matches the current items.', 'info');
+          return;
+        }
+        const choice = await this._showBillingPreviewModal(force.preview);
+        if (!choice) return;
+        const r = await Api.post(`/api/estimates/${estId}/save-with-billing`, {
+          items: est.items, payment_plan: est.payment_plan,
+          payment_months: est.payment_months, payment_method_preference: est.payment_method_preference,
+          confirm: true, qbo_void_choice: choice.qbo_void_choice
+        });
+        App.toast(`Rebuilt — voided ${r.voided}, created ${r.created}`, 'success');
+        this.renderBillingManager(estId);
+        return;
+      }
+
+      const choice = await this._showBillingPreviewModal(preview.preview);
+      if (!choice) return;
+      const r = await Api.post(`/api/estimates/${estId}/save-with-billing`, {
+        confirm: true, qbo_void_choice: choice.qbo_void_choice
+      });
+      App.toast(`Rebuilt — voided ${r.voided}, created ${r.created}`, 'success');
       this.renderBillingManager(estId);
     } catch (err) {
       App.toast('Rebuild failed: ' + err.message, 'error');

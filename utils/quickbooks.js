@@ -105,11 +105,29 @@ async function qboFetch(db, path, { method = 'GET', body, query } = {}) {
   return resp.json();
 }
 
+// Void a QBO invoice by ID. QBO requires the current SyncToken; we fetch
+// the invoice first to get it. Uses POST /invoice?operation=void per
+// Intuit's API spec. Idempotent — if the invoice is already voided in
+// QBO, this throws a 400 which the caller can ignore.
+async function voidQboInvoice(db, qboInvoiceId) {
+  const current = await qboFetch(db, 'invoice/' + qboInvoiceId);
+  const syncToken = current?.Invoice?.SyncToken;
+  if (syncToken === undefined) {
+    throw new Error('Could not read SyncToken from QBO invoice ' + qboInvoiceId);
+  }
+  return qboFetch(db, 'invoice', {
+    method: 'POST',
+    query: { operation: 'void' },
+    body: { Id: String(qboInvoiceId), SyncToken: String(syncToken) }
+  });
+}
+
 module.exports = {
   getConnection,
   isConnected,
   getApiBase,
   getValidAccessToken,
   refreshAccessToken,
-  qboFetch
+  qboFetch,
+  voidQboInvoice
 };
