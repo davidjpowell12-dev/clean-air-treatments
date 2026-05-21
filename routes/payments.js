@@ -667,6 +667,78 @@ router.get('/dashboard', requireAuth, (req, res) => {
 // ─── Duplicate Invoice Diagnostic ────────────────────────────
 // One-time admin tool: finds estimates that have more than one installment_number=1
 // invoice, which indicates the invoice set was created more than once.
+// Diagnostic: full breakdown of the "Collected this year" total. Returns
+// every paid invoice for the current year + flags potential double-counts
+// (an estimate with more than one paid invoice). Use to audit the dashboard
+// figure and reconcile with bank deposits.
+router.get('/diag/collected-breakdown', requireAuth, (req, res) => {
+  const db = getDb();
+  const year = String(req.query.year || new Date().getFullYear());
+
+  const rows = db.prepare(`
+    SELECT
+      i.id, i.invoice_number, i.amount_cents, i.paid_at,
+      i.payment_method, i.check_number, i.check_date,
+      i.estimate_id, e.customer_name, e.address
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.status = 'paid' AND i.paid_at LIKE ? || '%'
+    ORDER BY i.paid_at DESC, i.id DESC
+  `).all(year);
+
+  const totalCents = rows.reduce((s, r) => s + (r.amount_cents || 0), 0);
+
+  // Group by estimate to find any estimate with >1 paid invoice — those
+  // are potential double-counts (or legit per-service / split payments).
+  const byEstimate = {};
+  for (const r of rows) {
+    if (!byEstimate[r.estimate_id]) byEstimate[r.estimate_id] = [];
+    byEstimate[r.estimate_id].push(r);
+  }
+  const multiPaidEstimates = Object.entries(byEstimate)
+    .filter(([, list]) => list.length > 1)
+    .map(([estId, list]) => ({
+      estimate_id: Number(estId),
+      customer_name: list[0].customer_name,
+      paid_invoice_count: list.length,
+      paid_total_cents: list.reduce((s, r) => s + (r.amount_cents || 0), 0),
+      invoices: list.map(r => ({
+        invoice_number: r.invoice_number,
+        amount: r.amount_cents / 100,
+        paid_at: r.paid_at,
+        payment_method: r.payment_method,
+        check_number: r.check_number
+      }))
+    }))
+    .sort((a, b) => b.paid_total_cents - a.paid_total_cents);
+
+  // Also check for invoices with status=paid but paid_at NULL — these wouldn't
+  // be counted in the dashboard total even though they're "paid" in the DB.
+  const orphanPaid = db.prepare(`
+    SELECT i.id, i.invoice_number, i.amount_cents, e.customer_name
+      FROM invoices i JOIN estimates e ON e.id = i.estimate_id
+     WHERE i.status = 'paid' AND i.paid_at IS NULL
+  `).all();
+
+  res.json({
+    year,
+    total_cents: totalCents,
+    total_dollars: totalCents / 100,
+    invoice_count: rows.length,
+    rows: rows.map(r => ({
+      customer_name: r.customer_name,
+      invoice_number: r.invoice_number,
+      amount: r.amount_cents / 100,
+      paid_at: r.paid_at,
+      payment_method: r.payment_method,
+      check_number: r.check_number,
+      estimate_id: r.estimate_id
+    })),
+    multi_paid_estimates: multiPaidEstimates,
+    orphan_paid_no_date: orphanPaid
+  });
+});
+
 router.get('/diag/duplicate-invoices', requireAuth, (req, res) => {
   const db = getDb();
 
