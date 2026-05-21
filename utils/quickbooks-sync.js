@@ -100,47 +100,24 @@ function escapeQbo(str) {
   return String(str).replace(/'/g, "\\'");
 }
 
-// ─── Item (Service) Matching ──────────────────────────────────
-// Looks up a QBO Item by Name (= service.name). Creates if missing.
-// Caches qbo_item_id on the services row.
-async function ensureQboItemForService(db, serviceId, serviceName) {
-  if (serviceId) {
-    const svc = db.prepare('SELECT * FROM services WHERE id = ?').get(serviceId);
-    if (svc?.qbo_item_id) return svc.qbo_item_id;
+// ─── Generic Service Item ─────────────────────────────────────
+// We push every CAT invoice as a single line in QBO using one shared
+// "Lawn Care Services" item. The controller asked to keep QBO as pure
+// invoicing — revenue breakdowns happen in CAT reports instead.
+async function ensureGenericServiceItemId(db) {
+  const cached = db.prepare("SELECT value FROM app_settings WHERE key = 'qbo_generic_service_item_id'").get();
+  if (cached?.value) {
+    // Verify it still exists in QBO (in case the user deleted it manually)
+    try {
+      const check = await qbo.qboFetch(db, 'item/' + cached.value);
+      if (check?.Item?.Id) return cached.value;
+    } catch (e) { /* fall through and recreate */ }
   }
 
   const incomeAccountId = await ensureIncomeAccountId(db);
-  const name = (serviceName || '').slice(0, 100); // QBO Item Name max 100 chars
+  const name = 'Lawn Care Services';
 
-  // Try existing by Name
-  const findQ = `SELECT * FROM Item WHERE Name = '${escapeQbo(name)}'`;
-  const data = await qbo.qboFetch(db, 'query', { query: { query: findQ } });
-  let item = data?.QueryResponse?.Item?.[0];
-
-  if (!item) {
-    const body = {
-      Name: name,
-      Type: 'Service',
-      IncomeAccountRef: { value: incomeAccountId }
-    };
-    const created = await qbo.qboFetch(db, 'item', { method: 'POST', body });
-    item = created?.Item;
-    if (!item?.Id) throw new Error(`QBO item creation failed for "${name}"`);
-  }
-
-  if (serviceId) {
-    db.prepare('UPDATE services SET qbo_item_id = ? WHERE id = ?').run(item.Id, serviceId);
-  }
-  return item.Id;
-}
-
-// Card-fee line uses its own QBO item stored in app_settings.
-async function ensureCardFeeItemId(db) {
-  const cached = db.prepare("SELECT value FROM app_settings WHERE key = 'qbo_card_fee_item_id'").get();
-  if (cached?.value) return cached.value;
-
-  const incomeAccountId = await ensureIncomeAccountId(db);
-  const name = 'Card Processing Fee';
+  // Try existing by Name first
   const findQ = `SELECT * FROM Item WHERE Name = '${escapeQbo(name)}'`;
   const data = await qbo.qboFetch(db, 'query', { query: { query: findQ } });
   let item = data?.QueryResponse?.Item?.[0];
@@ -151,80 +128,23 @@ async function ensureCardFeeItemId(db) {
       body: { Name: name, Type: 'Service', IncomeAccountRef: { value: incomeAccountId } }
     });
     item = created?.Item;
-    if (!item?.Id) throw new Error('QBO card-fee item creation failed');
+    if (!item?.Id) throw new Error('QBO item creation failed for Lawn Care Services');
   }
+
   db.prepare(`
-    INSERT INTO app_settings (key, value, updated_at) VALUES ('qbo_card_fee_item_id', ?, CURRENT_TIMESTAMP)
+    INSERT INTO app_settings (key, value, updated_at) VALUES ('qbo_generic_service_item_id', ?, CURRENT_TIMESTAMP)
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
   `).run(item.Id);
   return item.Id;
 }
 
-// ─── Invoice Line Computation ─────────────────────────────────
-// Given an invoice + its parent estimate, return the per-service split
-// in CENTS. For monthly: each service = item.price / total_installments.
-// For full: each service = item.price. For per_service: single line.
-// The card-fee remainder is returned separately.
-function computeInvoiceLinesCents(db, invoice, estimate) {
-  const items = db.prepare(
-    'SELECT * FROM estimate_items WHERE estimate_id = ? AND is_included = 1 ORDER BY sort_order, id'
-  ).all(estimate.id);
-
-  // Per-service: one line, just use the invoice's notes as description (set at creation).
-  if (invoice.payment_plan === 'per_service') {
-    return {
-      lines: [{
-        service_id: items[0]?.service_id || null,
-        service_name: invoice.notes || items[0]?.service_name || 'Service',
-        amount_cents: invoice.amount_cents
-      }],
-      card_fee_cents: 0,
-      mode: 'per_service'
-    };
-  }
-
-  const divisor = invoice.payment_plan === 'monthly'
-    ? (invoice.total_installments || estimate.payment_months || 1)
-    : 1;
-
-  // Per-service base allocations
-  const lines = [];
-  let baseSumCents = 0;
-  for (const it of items) {
-    const cents = Math.round((it.price * 100) / divisor);
-    if (cents > 0) {
-      lines.push({ service_id: it.service_id, service_name: it.service_name, amount_cents: cents });
-      baseSumCents += cents;
-    }
-  }
-
-  // Card fee = whatever's left between the invoice amount and the base sum.
-  // For the LAST installment we may also be absorbing penny rounding from earlier
-  // installments, so this can be slightly larger than baseSumCents * CARD_FEE_RATE.
-  const remainder = invoice.amount_cents - baseSumCents;
-
-  // Sanity check: if remainder is wildly off (negative or > 50% of base),
-  // fall back to a single "Lawn Care Services" line — invoice was probably
-  // manually adjusted and proportional split would be wrong.
-  if (remainder < -100 || remainder > baseSumCents * 0.5) {
-    return {
-      lines: [{ service_id: null, service_name: 'Lawn Care Services', amount_cents: invoice.amount_cents }],
-      card_fee_cents: 0,
-      mode: 'fallback_single_line',
-      reason: `unexpected remainder ${remainder} vs base ${baseSumCents}`
-    };
-  }
-
-  return {
-    lines,
-    card_fee_cents: Math.max(0, remainder),
-    mode: 'split'
-  };
-}
-
 // ─── Push Invoice to QBO ──────────────────────────────────────
-// Main entry point. Idempotent: if the invoice already has qbo_invoice_id
-// we skip. Records sync errors on the invoice row.
+// Single-line invoice push: one line for the full amount using the
+// generic Lawn Care Services item. Card fee is baked into the amount
+// (that's what the customer was actually billed). Description carries
+// the installment context so the controller can see what it covers.
+//
+// Idempotent: if the invoice already has qbo_invoice_id we skip.
 async function pushInvoiceToQbo(db, invoiceId) {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
   if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
@@ -237,29 +157,17 @@ async function pushInvoiceToQbo(db, invoiceId) {
     if (!estimate.property_id) throw new Error('Estimate has no property_id');
 
     const customerId = await ensureQboCustomer(db, estimate.property_id);
-    const { lines, card_fee_cents, mode } = computeInvoiceLinesCents(db, invoice, estimate);
+    const itemId = await ensureGenericServiceItemId(db);
 
-    // Resolve QBO item id for each service line
-    const qboLines = [];
-    for (const line of lines) {
-      const itemId = await ensureQboItemForService(db, line.service_id, line.service_name);
-      qboLines.push({
-        DetailType: 'SalesItemLineDetail',
-        Amount: line.amount_cents / 100,
-        Description: line.service_name,
-        SalesItemLineDetail: { ItemRef: { value: itemId } }
-      });
-    }
-
-    // Card fee line, if any
-    if (card_fee_cents > 0) {
-      const feeItemId = await ensureCardFeeItemId(db);
-      qboLines.push({
-        DetailType: 'SalesItemLineDetail',
-        Amount: card_fee_cents / 100,
-        Description: 'Card Processing Fee (3.5%)',
-        SalesItemLineDetail: { ItemRef: { value: feeItemId } }
-      });
+    // Human-readable line description that gives the controller context
+    // without exposing per-service splits.
+    let description = 'Lawn Care Services';
+    if (invoice.payment_plan === 'monthly' && invoice.installment_number && invoice.total_installments) {
+      description = `Lawn Care Services — Installment ${invoice.installment_number} of ${invoice.total_installments}`;
+    } else if (invoice.payment_plan === 'full') {
+      description = 'Lawn Care Services — Pay in Full';
+    } else if (invoice.payment_plan === 'per_service' && invoice.notes) {
+      description = `Lawn Care Services — ${invoice.notes}`;
     }
 
     const body = {
@@ -267,7 +175,12 @@ async function pushInvoiceToQbo(db, invoiceId) {
       DocNumber: invoice.invoice_number,
       TxnDate: invoice.due_date || invoice.created_at?.slice(0, 10),
       DueDate: invoice.due_date || undefined,
-      Line: qboLines,
+      Line: [{
+        DetailType: 'SalesItemLineDetail',
+        Amount: invoice.amount_cents / 100,
+        Description: description,
+        SalesItemLineDetail: { ItemRef: { value: itemId } }
+      }],
       PrivateNote: `CAT invoice #${invoice.invoice_number} (estimate ${estimate.id})`
     };
 
@@ -281,7 +194,7 @@ async function pushInvoiceToQbo(db, invoiceId) {
        WHERE id = ?
     `).run(qboId, invoiceId);
 
-    return { success: true, qbo_invoice_id: qboId, mode, line_count: qboLines.length };
+    return { success: true, qbo_invoice_id: qboId, line_count: 1 };
   } catch (err) {
     db.prepare('UPDATE invoices SET qbo_sync_error = ? WHERE id = ?').run(String(err.message || err), invoiceId);
     throw err;
@@ -291,8 +204,6 @@ async function pushInvoiceToQbo(db, invoiceId) {
 module.exports = {
   ensureIncomeAccountId,
   ensureQboCustomer,
-  ensureQboItemForService,
-  ensureCardFeeItemId,
-  computeInvoiceLinesCents,
+  ensureGenericServiceItemId,
   pushInvoiceToQbo
 };
