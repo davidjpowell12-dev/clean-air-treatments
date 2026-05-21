@@ -229,7 +229,7 @@ async function pushInvoiceToQbo(db, invoiceId) {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
   if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
   if (invoice.qbo_invoice_id) return { skipped: true, qbo_invoice_id: invoice.qbo_invoice_id };
-  if (invoice.status === 'voided') return { skipped: true, reason: 'voided' };
+  if (invoice.status === 'void' || invoice.status === 'voided') return { skipped: true, reason: 'voided' };
 
   try {
     const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(invoice.estimate_id);

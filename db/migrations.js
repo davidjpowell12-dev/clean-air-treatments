@@ -402,6 +402,13 @@ const migrations = [
   // condition of accepting the proposal.
   function addSmsConsentToEstimates(db) {
     try { db.exec('ALTER TABLE estimates ADD COLUMN sms_opt_in_at DATETIME'); } catch (e) { /* exists */ }
+  },
+  // Migration: normalize invoice status 'voided' → 'void'. Newer admin tools
+  // accidentally wrote 'voided' (with d) while the canonical column value
+  // everywhere else is 'void'. The invoicing UI filters by 'void' only, so
+  // records with 'voided' kept showing up in active lists despite being voided.
+  function normalizeVoidedInvoiceStatus(db) {
+    db.exec("UPDATE invoices SET status = 'void' WHERE status = 'voided'");
   }
 ];
 

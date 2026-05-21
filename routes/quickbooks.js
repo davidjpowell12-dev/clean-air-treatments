@@ -204,7 +204,7 @@ router.post('/sync-pending', requireAdmin, async (req, res) => {
     SELECT id, invoice_number FROM invoices
      WHERE status IN ('pending', 'paid')
        AND qbo_invoice_id IS NULL
-       AND status != 'voided'
+       AND status != 'void'
      ORDER BY id ASC
   `).all();
 

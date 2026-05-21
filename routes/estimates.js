@@ -981,7 +981,7 @@ router.post('/:id/regenerate-invoices', requireAuth, (req, res) => {
   const run = db.transaction(() => {
     // Void every unpaid invoice
     for (const inv of unpaid) {
-      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+      db.prepare("UPDATE invoices SET status = 'void', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
     }
 
     const newInvoices = [];

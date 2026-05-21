@@ -1173,7 +1173,7 @@ router.post('/fix/convert-to-paid-in-full/:estimateId', requireAdmin, (req, res)
       "SELECT id FROM invoices WHERE estimate_id = ? AND status IN ('scheduled', 'pending', 'failed')"
     ).all(est.id);
     for (const inv of unpaid) {
-      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+      db.prepare("UPDATE invoices SET status = 'void', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
     }
 
     // 4. Create one consolidated, already-paid invoice
@@ -1256,7 +1256,7 @@ router.post('/fix/resync-billing-to-items/:estimateId', requireAdmin, (req, res)
 
     // 2. Void every unpaid invoice
     for (const inv of unpaid) {
-      db.prepare("UPDATE invoices SET status = 'voided', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
+      db.prepare("UPDATE invoices SET status = 'void', updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(inv.id);
     }
 
     // 3. Create new invoices for the remaining amount
