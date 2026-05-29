@@ -457,6 +457,12 @@ function runMigrations(db) {
   // gap for check customers and for cards-paying customers who haven't
   // tapped yet.
   ensureColumn(db, 'invoices', 'sms_sent_at', 'DATETIME');
+
+  // QBO payment-push (Phase 3): once a paid CAT invoice's payment is recorded
+  // in QBO (as a Payment linked to the QBO invoice), we cache the QBO payment
+  // id here so re-running the bulk sync never double-applies a payment.
+  ensureColumn(db, 'invoices', 'qbo_payment_id', 'TEXT');
+  ensureColumn(db, 'invoices', 'qbo_payment_synced_at', 'DATETIME');
   // Backfill tokens for any existing invoices that lack one
   const missingTokens = db.prepare("SELECT id FROM invoices WHERE token IS NULL OR token = ''").all();
   if (missingTokens.length > 0) {

@@ -201,9 +201,103 @@ async function pushInvoiceToQbo(db, invoiceId) {
   }
 }
 
+// ─── Record Payment in QBO ─────────────────────────────────────
+// Once a paid CAT invoice exists in QBO (has qbo_invoice_id), we record a
+// QBO Payment linked to it so QBO shows the invoice as Paid. We omit
+// DepositToAccountRef so the payment lands in Undeposited Funds (QBO's
+// standard holding account); the controller clears those in batches that
+// match real Stripe payouts / check deposits.
+//
+// PaymentRefNum carries the Stripe payment-intent id (card) or check number
+// (check). QBO caps PaymentRefNum at 21 chars, so we truncate and keep the
+// full reference in PrivateNote.
+//
+// Safety: before applying a payment we fetch the QBO invoice and check its
+// Balance. If it's already 0 (e.g. the payment was recorded manually in QBO),
+// we skip — applying another payment would double-pay the invoice.
+//
+// Idempotent: if the invoice already has qbo_payment_id we skip.
+async function recordPaymentInQbo(db, invoiceId) {
+  const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
+  if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
+  if (invoice.status !== 'paid') return { skipped: true, reason: 'not paid' };
+  if (!invoice.qbo_invoice_id) throw new Error(`Invoice ${invoiceId} has no qbo_invoice_id — push the invoice first`);
+  if (invoice.qbo_payment_id) return { skipped: true, qbo_payment_id: invoice.qbo_payment_id };
+
+  try {
+    // Guard against double-paying an invoice already settled in QBO.
+    const qboInv = await qbo.qboFetch(db, 'invoice/' + invoice.qbo_invoice_id);
+    const balance = qboInv?.Invoice?.Balance;
+    if (balance !== undefined && balance <= 0) {
+      db.prepare(`
+        UPDATE invoices SET qbo_payment_synced_at = CURRENT_TIMESTAMP, qbo_sync_error = NULL WHERE id = ?
+      `).run(invoiceId);
+      return { skipped: true, reason: 'already paid in QBO' };
+    }
+
+    const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(invoice.estimate_id);
+    if (!estimate?.property_id) throw new Error('Estimate/property missing for payment');
+    const customerId = await ensureQboCustomer(db, estimate.property_id);
+
+    // Reference string: check number for checks, Stripe pi for cards.
+    const fullRef = invoice.payment_method === 'check'
+      ? (invoice.check_number ? `Check #${invoice.check_number}` : '')
+      : (invoice.stripe_payment_intent_id || '');
+    const refNum = fullRef.slice(0, 21); // QBO PaymentRefNum max length
+
+    // Payment date: prefer paid_at, fall back to check_date, then today.
+    const txnDate = (invoice.paid_at || invoice.check_date || new Date().toISOString()).slice(0, 10);
+
+    const body = {
+      CustomerRef: { value: customerId },
+      TotalAmt: invoice.amount_cents / 100,
+      TxnDate: txnDate,
+      ...(refNum ? { PaymentRefNum: refNum } : {}),
+      Line: [{
+        Amount: invoice.amount_cents / 100,
+        LinkedTxn: [{ TxnId: String(invoice.qbo_invoice_id), TxnType: 'Invoice' }]
+      }],
+      PrivateNote: `CAT payment for invoice #${invoice.invoice_number}`
+        + (fullRef ? ` — ${fullRef}` : '')
+        + ` (${invoice.payment_method || 'unknown'})`
+    };
+
+    const created = await qbo.qboFetch(db, 'payment', { method: 'POST', body });
+    const paymentId = created?.Payment?.Id;
+    if (!paymentId) throw new Error('QBO payment creation returned no Id');
+
+    db.prepare(`
+      UPDATE invoices
+         SET qbo_payment_id = ?, qbo_payment_synced_at = CURRENT_TIMESTAMP, qbo_sync_error = NULL
+       WHERE id = ?
+    `).run(paymentId, invoiceId);
+
+    return { success: true, qbo_payment_id: paymentId };
+  } catch (err) {
+    db.prepare('UPDATE invoices SET qbo_sync_error = ? WHERE id = ?').run(String(err.message || err), invoiceId);
+    throw err;
+  }
+}
+
+// ─── Combined: push invoice + record payment ───────────────────
+// For a paid CAT invoice this lands a fully-paid invoice in QBO in one call:
+// pushes the invoice (if needed) then applies the payment (if needed). For an
+// unpaid invoice it just pushes the open invoice (no payment recorded).
+async function syncPaidInvoiceToQbo(db, invoiceId) {
+  const invoiceResult = await pushInvoiceToQbo(db, invoiceId);
+  const invoice = db.prepare('SELECT status FROM invoices WHERE id = ?').get(invoiceId);
+  let paymentResult = { skipped: true, reason: 'not paid' };
+  if (invoice && invoice.status === 'paid') {
+    paymentResult = await recordPaymentInQbo(db, invoiceId);
+  }
+  return { invoice: invoiceResult, payment: paymentResult };
+}
+
 module.exports = {
   ensureIncomeAccountId,
   ensureQboCustomer,
   ensureGenericServiceItemId,
-  pushInvoiceToQbo
+  pushInvoiceToQbo,
+  recordPaymentInQbo,
+  syncPaidInvoiceToQbo
 };

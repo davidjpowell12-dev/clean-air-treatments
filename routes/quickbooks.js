@@ -223,6 +223,37 @@ router.post('/sync-pending', requireAdmin, async (req, res) => {
   res.json({ ok: true, total: pending.length, succeeded, failed, results });
 });
 
+// Bulk push of PAID invoices, fully settled: for each paid invoice not yet
+// fully synced, push the invoice (if needed) then record the payment in QBO
+// so it lands marked Paid — carrying the Stripe pi / check number as the
+// reference. Idempotent and safe to re-run: invoices already paid in QBO
+// (incl. manually-recorded ones) are detected via balance check and skipped.
+router.post('/sync-paid', requireAdmin, async (req, res) => {
+  const db = getDb();
+  const paid = db.prepare(`
+    SELECT id, invoice_number FROM invoices
+     WHERE status = 'paid'
+       AND qbo_payment_id IS NULL
+     ORDER BY id ASC
+  `).all();
+
+  const results = [];
+  let succeeded = 0, failed = 0, paymentsApplied = 0, alreadyPaid = 0;
+  for (const inv of paid) {
+    try {
+      const r = await qboSync.syncPaidInvoiceToQbo(db, inv.id);
+      if (r.payment?.success) paymentsApplied++;
+      else if (r.payment?.reason === 'already paid in QBO') alreadyPaid++;
+      results.push({ invoice_number: inv.invoice_number, success: true, ...r });
+      succeeded++;
+    } catch (err) {
+      results.push({ invoice_number: inv.invoice_number, success: false, error: err.message });
+      failed++;
+    }
+  }
+  res.json({ ok: true, total: paid.length, succeeded, failed, paymentsApplied, alreadyPaid, results });
+});
+
 // Reconciliation: compares CAT invoice totals to QBO invoice totals for
 // every synced invoice. Surfaces any drift so the controller can spot
 // manual edits or partial syncs.

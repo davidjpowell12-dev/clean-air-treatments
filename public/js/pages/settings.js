@@ -742,7 +742,8 @@ const SettingsPage = {
             <strong style="font-size:13px;">Invoice Sync</strong>
             <div style="display:flex;gap:6px;">
               <button class="btn btn-secondary btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Refresh</button>
-              <button class="btn btn-primary btn-sm" onclick="SettingsPage.syncPendingQboInvoices()">Sync Pending →</button>
+              <button class="btn btn-primary btn-sm" onclick="SettingsPage.syncPaidQboInvoices()">Sync Paid Invoices →</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.syncPendingQboInvoices()">Sync Pending</button>
               <button class="btn btn-outline btn-sm" onclick="SettingsPage.reconcileQbo()">Reconcile</button>
             </div>
           </div>
@@ -854,6 +855,50 @@ const SettingsPage = {
     } catch (err) {
       App.toast('Push failed: ' + err.message, 'error');
       this.loadQboSyncStatus();
+    }
+  },
+
+  async syncPaidQboInvoices() {
+    if (!confirm('Push all PAID invoices to QuickBooks and record their payments (Stripe/check) so they show as Paid? Invoices already paid in QBO are skipped automatically.')) return;
+    const summary = document.getElementById('qboSyncResult');
+    const table = document.getElementById('qboSyncTable');
+    if (summary) summary.innerHTML = '<em>Syncing paid invoices and recording payments… this can take a moment.</em>';
+    if (table) table.innerHTML = '';
+    try {
+      const r = await Api.post('/api/quickbooks/sync-paid');
+      if (summary) {
+        summary.innerHTML = `Processed <strong>${r.total}</strong> paid invoice${r.total === 1 ? '' : 's'} — `
+          + `<span style="color:var(--green);">${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded</span>`
+          + (r.alreadyPaid ? `, <span style="color:var(--gray-600);">${r.alreadyPaid} already paid in QBO</span>` : '')
+          + (r.failed ? `, <span style="color:var(--red);">${r.failed} failed</span>` : '');
+      }
+      const problematic = (r.results || []).filter(row => !row.success);
+      if (table) {
+        if (problematic.length === 0) {
+          table.innerHTML = '<p style="color:var(--green);padding:8px;">All paid invoices synced and payments recorded. ✓</p>';
+        } else {
+          const rows = problematic.map(row => `
+            <tr>
+              <td style="padding:4px 8px;"><code>${this.esc(row.invoice_number)}</code></td>
+              <td style="padding:4px 8px;color:var(--red);">${this.esc(row.error || 'failed')}</td>
+            </tr>
+          `).join('');
+          table.innerHTML = `
+            <table style="width:100%;border-collapse:collapse;">
+              <thead><tr style="background:var(--gray-100);text-align:left;">
+                <th style="padding:4px 8px;">Invoice</th>
+                <th style="padding:4px 8px;">Error</th>
+              </tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          `;
+        }
+      }
+      App.toast(`${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded in QuickBooks${r.failed ? ` (${r.failed} failed)` : ''}`, r.failed ? 'warning' : 'success');
+      this.loadQboSyncStatus();
+    } catch (err) {
+      if (summary) summary.innerHTML = `<span style="color:var(--red);">${this.esc(err.message)}</span>`;
+      App.toast('Paid sync failed: ' + err.message, 'error');
     }
   },
 
