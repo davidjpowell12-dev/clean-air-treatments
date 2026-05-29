@@ -254,6 +254,40 @@ router.post('/sync-paid', requireAdmin, async (req, res) => {
   res.json({ ok: true, total: paid.length, succeeded, failed, paymentsApplied, alreadyPaid, results });
 });
 
+// Dry-run preview for the bulk paid-invoice push. Returns the exact list of
+// invoices the /sync-paid button would process — same filter as that endpoint
+// (status='paid' and not yet payment-synced) — so the controller can eyeball
+// customer, amount, and the payment reference before anything is sent to QBO.
+// Read-only: makes no QBO calls and writes nothing.
+router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT
+      i.invoice_number, i.amount_cents, i.payment_method,
+      i.stripe_payment_intent_id, i.check_number,
+      i.qbo_invoice_id,
+      e.customer_name
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.status = 'paid'
+      AND i.qbo_payment_id IS NULL
+    ORDER BY i.id ASC
+  `).all();
+
+  const invoices = rows.map(r => ({
+    invoice_number: r.invoice_number,
+    customer_name: r.customer_name,
+    amount: r.amount_cents / 100,
+    payment_method: r.payment_method || 'unknown',
+    reference: r.payment_method === 'check'
+      ? (r.check_number ? `Check #${r.check_number}` : '(no check #)')
+      : (r.stripe_payment_intent_id || '(no reference)'),
+    already_in_qbo: !!r.qbo_invoice_id
+  }));
+
+  res.json({ ok: true, total: invoices.length, invoices });
+});
+
 // Reconciliation: compares CAT invoice totals to QBO invoice totals for
 // every synced invoice. Surfaces any drift so the controller can spot
 // manual edits or partial syncs.

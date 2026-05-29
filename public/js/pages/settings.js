@@ -858,11 +858,59 @@ const SettingsPage = {
     }
   },
 
+  // Step 1 of 2: fetch a read-only preview of exactly which paid invoices
+  // would be pushed, render them in a table, and wait for the controller to
+  // confirm before anything is sent to QBO.
   async syncPaidQboInvoices() {
-    if (!confirm('Push all PAID invoices to QuickBooks and record their payments (Stripe/check) so they show as Paid? Invoices already paid in QBO are skipped automatically.')) return;
     const summary = document.getElementById('qboSyncResult');
     const table = document.getElementById('qboSyncTable');
-    if (summary) summary.innerHTML = '<em>Syncing paid invoices and recording payments… this can take a moment.</em>';
+    if (summary) summary.innerHTML = '<em>Loading preview…</em>';
+    if (table) table.innerHTML = '';
+    try {
+      const p = await Api.get('/api/quickbooks/sync-paid/preview');
+      if (!p.total) {
+        if (summary) summary.innerHTML = '<span style="color:var(--green);">No paid invoices need syncing — everything is up to date. ✓</span>';
+        return;
+      }
+      if (summary) {
+        summary.innerHTML = `<strong>${p.total}</strong> paid invoice${p.total === 1 ? '' : 's'} ready to push. `
+          + `Review below, then confirm.`;
+      }
+      const rows = p.invoices.map(inv => `
+        <tr>
+          <td style="padding:4px 8px;"><code>${this.esc(inv.invoice_number)}</code></td>
+          <td style="padding:4px 8px;">${this.esc(inv.customer_name || '—')}</td>
+          <td style="padding:4px 8px;text-align:right;">$${inv.amount.toFixed(2)}</td>
+          <td style="padding:4px 8px;">${this.esc(inv.payment_method)}</td>
+          <td style="padding:4px 8px;"><span style="font-family:monospace;font-size:11px;">${this.esc(inv.reference)}</span></td>
+        </tr>
+      `).join('');
+      table.innerHTML = `
+        <table style="width:100%;border-collapse:collapse;">
+          <thead><tr style="background:var(--gray-100);text-align:left;">
+            <th style="padding:4px 8px;">Invoice</th>
+            <th style="padding:4px 8px;">Customer</th>
+            <th style="padding:4px 8px;text-align:right;">Amount</th>
+            <th style="padding:4px 8px;">Method</th>
+            <th style="padding:4px 8px;">Reference</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div style="margin-top:10px;display:flex;gap:8px;">
+          <button class="btn btn-primary btn-sm" onclick="SettingsPage.confirmSyncPaidQboInvoices()">Confirm &amp; Push ${p.total} →</button>
+          <button class="btn btn-outline btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Cancel</button>
+        </div>
+      `;
+    } catch (err) {
+      if (summary) summary.innerHTML = `<span style="color:var(--red);">${this.esc(err.message)}</span>`;
+    }
+  },
+
+  // Step 2 of 2: actually push the previewed invoices and record payments.
+  async confirmSyncPaidQboInvoices() {
+    const summary = document.getElementById('qboSyncResult');
+    const table = document.getElementById('qboSyncTable');
+    if (summary) summary.innerHTML = '<em>Pushing paid invoices and recording payments… this can take a moment.</em>';
     if (table) table.innerHTML = '';
     try {
       const r = await Api.post('/api/quickbooks/sync-paid');
