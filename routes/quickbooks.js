@@ -357,6 +357,80 @@ router.get('/payment-audit', requireAuth, (req, res) => {
   res.json({ ok: true, year, paid_count: paid.length, paid_total: totalCents / 100, summary, buckets });
 });
 
+// LIVE reconciliation: asks QBO directly how many Payments and Invoices
+// exist for the year, and compares to what CAT thinks it created. This is
+// the ground truth that settles "CAT says 103 payments, QBO shows 93".
+// Read-only — only runs SELECT queries against the QBO Query API.
+router.get('/payment-audit-live', requireAuth, async (req, res) => {
+  const db = getDb();
+  const year = String(req.query.year || new Date().getFullYear());
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+
+  // Pull every row of a QBO entity for the date range, paginating through
+  // the Query API (max 1000 rows/page). Returns the raw entity array.
+  async function queryAll(entity, dateField) {
+    const out = [];
+    let startPos = 1;
+    const PAGE = 1000;
+    for (let i = 0; i < 50; i++) {
+      const sql = `SELECT * FROM ${entity} WHERE ${dateField} >= '${start}' AND ${dateField} <= '${end}' STARTPOSITION ${startPos} MAXRESULTS ${PAGE}`;
+      const data = await qbo.qboFetch(db, 'query', { query: { query: sql, minorversion: '65' } });
+      const rows = (data && data.QueryResponse && data.QueryResponse[entity]) || [];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+      startPos += PAGE;
+    }
+    return out;
+  }
+
+  try {
+    const qboPayments = await queryAll('Payment', 'TxnDate');
+    const qboInvoices = await queryAll('Invoice', 'TxnDate');
+
+    const paymentsTotal = qboPayments.reduce((s, p) => s + (p.TotalAmt || 0), 0);
+    const invoicesTotal = qboInvoices.reduce((s, p) => s + (p.TotalAmt || 0), 0);
+
+    // What CAT believes it created.
+    const catPaid = db.prepare(`
+      SELECT invoice_number, amount_cents, qbo_invoice_id, qbo_payment_id
+        FROM invoices
+       WHERE status = 'paid' AND paid_at LIKE ? || '%'
+    `).all(year);
+    const catWithPaymentId = catPaid.filter(r => r.qbo_payment_id);
+
+    // Cross-check: does every CAT-cached qbo_payment_id actually exist as a
+    // live payment in QBO? Phantom ids (cached but not in QBO) explain a gap.
+    const livePaymentIds = new Set(qboPayments.map(p => String(p.Id)));
+    const phantomPayments = catWithPaymentId
+      .filter(r => !livePaymentIds.has(String(r.qbo_payment_id)))
+      .map(r => ({ invoice_number: r.invoice_number, amount: (r.amount_cents || 0) / 100, qbo_payment_id: r.qbo_payment_id }));
+
+    res.json({
+      ok: true,
+      year,
+      qbo: {
+        payments_count: qboPayments.length,
+        payments_total: Math.round(paymentsTotal * 100) / 100,
+        invoices_count: qboInvoices.length,
+        invoices_total: Math.round(invoicesTotal * 100) / 100
+      },
+      cat: {
+        paid_count: catPaid.length,
+        paid_total: catPaid.reduce((s, r) => s + (r.amount_cents || 0), 0) / 100,
+        with_qbo_payment_id: catWithPaymentId.length
+      },
+      phantom_payments: {
+        count: phantomPayments.length,
+        total: Math.round(phantomPayments.reduce((s, p) => s + p.amount, 0) * 100) / 100,
+        invoices: phantomPayments
+      }
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Reconciliation: compares CAT invoice totals to QBO invoice totals for
 // every synced invoice. Surfaces any drift so the controller can spot
 // manual edits or partial syncs.
