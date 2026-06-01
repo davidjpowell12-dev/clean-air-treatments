@@ -307,6 +307,56 @@ router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
   res.json({ ok: true, total, shown: invoices.length, limit, invoices });
 });
 
+// Read-only payment audit: buckets every paid invoice for the year by its
+// actual QBO payment state, using only local columns (no QBO calls). Explains
+// any gap between CAT's "collected" total and QBO's recorded payments:
+//   payment_recorded   — we created a QBO Payment (qbo_payment_id set)
+//   already_paid_in_qbo — skipped because QBO showed it already settled
+//   failed             — a sync was attempted but errored (qbo_sync_error)
+//   invoice_not_pushed — the invoice itself never reached QBO
+//   pending            — invoice is in QBO but no payment attempted yet
+router.get('/payment-audit', requireAuth, (req, res) => {
+  const db = getDb();
+  const year = String(req.query.year || new Date().getFullYear());
+  const paid = db.prepare(`
+    SELECT i.invoice_number, i.amount_cents, i.paid_at,
+           i.qbo_invoice_id, i.qbo_payment_id, i.qbo_payment_synced_at, i.qbo_sync_error,
+           e.customer_name
+      FROM invoices i JOIN estimates e ON e.id = i.estimate_id
+     WHERE i.status = 'paid' AND i.paid_at LIKE ? || '%'
+     ORDER BY i.amount_cents DESC
+  `).all(year);
+
+  const categorize = (r) => {
+    if (r.qbo_payment_id) return 'payment_recorded';
+    if (r.qbo_payment_synced_at) return 'already_paid_in_qbo';
+    if (r.qbo_sync_error) return 'failed';
+    if (!r.qbo_invoice_id) return 'invoice_not_pushed';
+    return 'pending';
+  };
+
+  const buckets = {};
+  for (const r of paid) {
+    const cat = categorize(r);
+    if (!buckets[cat]) buckets[cat] = { count: 0, total_cents: 0, invoices: [] };
+    buckets[cat].count++;
+    buckets[cat].total_cents += r.amount_cents || 0;
+    buckets[cat].invoices.push({
+      invoice_number: r.invoice_number,
+      customer_name: r.customer_name,
+      amount: (r.amount_cents || 0) / 100,
+      paid_at: r.paid_at,
+      qbo_sync_error: r.qbo_sync_error || null
+    });
+  }
+
+  const summary = {};
+  for (const [k, v] of Object.entries(buckets)) summary[k] = { count: v.count, total: v.total_cents / 100 };
+  const totalCents = paid.reduce((s, r) => s + (r.amount_cents || 0), 0);
+
+  res.json({ ok: true, year, paid_count: paid.length, paid_total: totalCents / 100, summary, buckets });
+});
+
 // Reconciliation: compares CAT invoice totals to QBO invoice totals for
 // every synced invoice. Surfaces any drift so the controller can spot
 // manual edits or partial syncs.
