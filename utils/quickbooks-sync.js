@@ -223,6 +223,10 @@ async function recordPaymentInQbo(db, invoiceId) {
   if (invoice.status !== 'paid') return { skipped: true, reason: 'not paid' };
   if (!invoice.qbo_invoice_id) throw new Error(`Invoice ${invoiceId} has no qbo_invoice_id — push the invoice first`);
   if (invoice.qbo_payment_id) return { skipped: true, qbo_payment_id: invoice.qbo_payment_id };
+  // Already processed (either paid via this sync, or detected as already paid
+  // in QBO and intentionally skipped). qbo_payment_synced_at is the canonical
+  // "done" marker; bail before making any QBO calls.
+  if (invoice.qbo_payment_synced_at) return { skipped: true, reason: 'already synced' };
 
   try {
     // Guard against double-paying an invoice already settled in QBO.

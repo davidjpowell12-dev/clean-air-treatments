@@ -234,10 +234,15 @@ router.post('/sync-paid', requireAdmin, async (req, res) => {
   // first 3) before committing to the whole set. Same ordering as the preview
   // so "test 3" pushes exactly the 3 rows shown at the top of the preview.
   const limit = Number.isInteger(req.body?.limit) && req.body.limit > 0 ? req.body.limit : null;
+  // "Needs syncing" = paid but not yet processed. We key off
+  // qbo_payment_synced_at (set on BOTH a successful payment AND the
+  // "already paid in QBO" skip) rather than qbo_payment_id, so invoices we
+  // intentionally skipped don't reappear forever (qbo_payment_id stays NULL
+  // for those because we never created a payment).
   const paid = db.prepare(`
     SELECT id, invoice_number FROM invoices
      WHERE status = 'paid'
-       AND qbo_payment_id IS NULL
+       AND qbo_payment_synced_at IS NULL
      ORDER BY id ASC
      ${limit ? 'LIMIT ?' : ''}
   `).all(...(limit ? [limit] : []));
@@ -272,7 +277,7 @@ router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
   // "showing 3 of 107"); rows = the (optionally limited) batch to display.
   const total = db.prepare(`
     SELECT COUNT(*) AS n FROM invoices
-     WHERE status = 'paid' AND qbo_payment_id IS NULL
+     WHERE status = 'paid' AND qbo_payment_synced_at IS NULL
   `).get().n;
   const rows = db.prepare(`
     SELECT
@@ -283,7 +288,7 @@ router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
     FROM invoices i
     JOIN estimates e ON e.id = i.estimate_id
     WHERE i.status = 'paid'
-      AND i.qbo_payment_id IS NULL
+      AND i.qbo_payment_synced_at IS NULL
     ORDER BY i.id ASC
     ${limit ? 'LIMIT ?' : ''}
   `).all(...(limit ? [limit] : []));
