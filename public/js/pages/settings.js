@@ -910,47 +910,102 @@ const SettingsPage = {
   },
 
   // Step 2 of 2: actually push the previewed invoices and record payments.
+  // For an explicit test batch (limit set) we do one short request. For the
+  // full push we loop in small chunks so each request finishes well inside the
+  // proxy/browser timeout — the sync is idempotent, so each chunk simply picks
+  // up the next unsynced invoices. Progress is shown live.
   async confirmSyncPaidQboInvoices(limit) {
     const summary = document.getElementById('qboSyncResult');
     const table = document.getElementById('qboSyncTable');
-    if (summary) summary.innerHTML = '<em>Pushing paid invoices and recording payments… this can take a moment.</em>';
     if (table) table.innerHTML = '';
-    try {
-      const r = await Api.post('/api/quickbooks/sync-paid', limit ? { limit } : {});
-      if (summary) {
-        summary.innerHTML = `Processed <strong>${r.total}</strong> paid invoice${r.total === 1 ? '' : 's'} — `
-          + `<span style="color:var(--green);">${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded</span>`
-          + (r.alreadyPaid ? `, <span style="color:var(--gray-600);">${r.alreadyPaid} already paid in QBO</span>` : '')
-          + (r.failed ? `, <span style="color:var(--red);">${r.failed} failed</span>` : '');
+
+    // Test batch: single short request, render once.
+    if (limit) {
+      if (summary) summary.innerHTML = '<em>Pushing test batch and recording payments…</em>';
+      try {
+        const r = await Api.post('/api/quickbooks/sync-paid', { limit });
+        this.renderPaidSyncResult(r.total, r.paymentsApplied, r.alreadyPaid, r.failed, (r.results || []).filter(x => !x.success));
+        App.toast(`${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded${r.failed ? ` (${r.failed} failed)` : ''}`, r.failed ? 'warning' : 'success');
+        this.loadQboSyncStatus();
+      } catch (err) {
+        if (summary) summary.innerHTML = `<span style="color:var(--red);">${this.esc(err.message)}</span>`;
+        App.toast('Paid sync failed: ' + err.message, 'error');
       }
-      const problematic = (r.results || []).filter(row => !row.success);
-      if (table) {
-        if (problematic.length === 0) {
-          table.innerHTML = '<p style="color:var(--green);padding:8px;">All paid invoices synced and payments recorded. ✓</p>';
-        } else {
-          const rows = problematic.map(row => `
-            <tr>
-              <td style="padding:4px 8px;"><code>${this.esc(row.invoice_number)}</code></td>
-              <td style="padding:4px 8px;color:var(--red);">${this.esc(row.error || 'failed')}</td>
-            </tr>
-          `).join('');
-          table.innerHTML = `
-            <table style="width:100%;border-collapse:collapse;">
-              <thead><tr style="background:var(--gray-100);text-align:left;">
-                <th style="padding:4px 8px;">Invoice</th>
-                <th style="padding:4px 8px;">Error</th>
-              </tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          `;
-        }
-      }
-      App.toast(`${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded in QuickBooks${r.failed ? ` (${r.failed} failed)` : ''}`, r.failed ? 'warning' : 'success');
-      this.loadQboSyncStatus();
-    } catch (err) {
-      if (summary) summary.innerHTML = `<span style="color:var(--red);">${this.esc(err.message)}</span>`;
-      App.toast('Paid sync failed: ' + err.message, 'error');
+      return;
     }
+
+    // Full push: chunk through the list so we never hit the request timeout.
+    const CHUNK = 20;
+    let totalProcessed = 0, payments = 0, already = 0, failed = 0;
+    const failures = [];
+    for (let batch = 1; batch <= 200; batch++) {
+      if (summary) {
+        summary.innerHTML = `<em>Pushing batch ${batch}… ${payments} payment${payments === 1 ? '' : 's'} recorded so far`
+          + (already ? `, ${already} already paid` : '')
+          + (failed ? `, ${failed} failed` : '')
+          + `. Keep this tab open.</em>`;
+      }
+      let r;
+      try {
+        r = await Api.post('/api/quickbooks/sync-paid', { limit: CHUNK });
+      } catch (err) {
+        // A chunk failed (timeout/network). Stop cleanly — it's idempotent, so
+        // clicking Sync Paid Invoices again resumes exactly where we left off.
+        if (summary) {
+          summary.innerHTML = `<span style="color:var(--red);">Paused after a network hiccup (${this.esc(err.message)}).</span> `
+            + `<strong>${payments}</strong> payment${payments === 1 ? '' : 's'} recorded so far. `
+            + `Click <strong>Sync Paid Invoices →</strong> again to continue where it left off.`;
+        }
+        this.loadQboSyncStatus();
+        return;
+      }
+      totalProcessed += r.total || 0;
+      payments += r.paymentsApplied || 0;
+      already += r.alreadyPaid || 0;
+      failed += r.failed || 0;
+      (r.results || []).filter(x => !x.success).forEach(x => failures.push(x));
+      // Nothing left to process → done.
+      if (!r.total) break;
+      // Safety: a whole batch that made no forward progress (all failures) would
+      // otherwise loop forever — stop and surface the errors.
+      if ((r.paymentsApplied || 0) + (r.alreadyPaid || 0) === 0 && (r.failed || 0) > 0) break;
+    }
+
+    this.renderPaidSyncResult(totalProcessed, payments, already, failed, failures);
+    App.toast(`${payments} payment${payments === 1 ? '' : 's'} recorded in QuickBooks${failed ? ` (${failed} failed)` : ''}`, failed ? 'warning' : 'success');
+    this.loadQboSyncStatus();
+  },
+
+  // Shared renderer for the paid-sync result summary + failures table.
+  renderPaidSyncResult(total, payments, already, failed, failures) {
+    const summary = document.getElementById('qboSyncResult');
+    const table = document.getElementById('qboSyncTable');
+    if (summary) {
+      summary.innerHTML = `Processed <strong>${total}</strong> paid invoice${total === 1 ? '' : 's'} — `
+        + `<span style="color:var(--green);">${payments} payment${payments === 1 ? '' : 's'} recorded</span>`
+        + (already ? `, <span style="color:var(--gray-600);">${already} already paid in QBO</span>` : '')
+        + (failed ? `, <span style="color:var(--red);">${failed} failed</span>` : '');
+    }
+    if (!table) return;
+    if (!failures.length) {
+      table.innerHTML = '<p style="color:var(--green);padding:8px;">All paid invoices synced and payments recorded. ✓</p>';
+      return;
+    }
+    const rows = failures.map(row => `
+      <tr>
+        <td style="padding:4px 8px;"><code>${this.esc(row.invoice_number)}</code></td>
+        <td style="padding:4px 8px;color:var(--red);">${this.esc(row.error || 'failed')}</td>
+      </tr>
+    `).join('');
+    table.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;">
+        <thead><tr style="background:var(--gray-100);text-align:left;">
+          <th style="padding:4px 8px;">Invoice</th>
+          <th style="padding:4px 8px;">Error</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
   },
 
   async syncPendingQboInvoices() {
