@@ -742,6 +742,7 @@ const SettingsPage = {
             <strong style="font-size:13px;">Invoice Sync</strong>
             <div style="display:flex;gap:6px;">
               <button class="btn btn-secondary btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Refresh</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.syncPaidQboInvoices(3)">Test First 3 →</button>
               <button class="btn btn-primary btn-sm" onclick="SettingsPage.syncPaidQboInvoices()">Sync Paid Invoices →</button>
               <button class="btn btn-outline btn-sm" onclick="SettingsPage.syncPendingQboInvoices()">Sync Pending</button>
               <button class="btn btn-outline btn-sm" onclick="SettingsPage.reconcileQbo()">Reconcile</button>
@@ -861,20 +862,22 @@ const SettingsPage = {
   // Step 1 of 2: fetch a read-only preview of exactly which paid invoices
   // would be pushed, render them in a table, and wait for the controller to
   // confirm before anything is sent to QBO.
-  async syncPaidQboInvoices() {
+  async syncPaidQboInvoices(limit) {
     const summary = document.getElementById('qboSyncResult');
     const table = document.getElementById('qboSyncTable');
     if (summary) summary.innerHTML = '<em>Loading preview…</em>';
     if (table) table.innerHTML = '';
     try {
-      const p = await Api.get('/api/quickbooks/sync-paid/preview');
+      const qs = limit ? `?limit=${limit}` : '';
+      const p = await Api.get('/api/quickbooks/sync-paid/preview' + qs);
       if (!p.total) {
         if (summary) summary.innerHTML = '<span style="color:var(--green);">No paid invoices need syncing — everything is up to date. ✓</span>';
         return;
       }
       if (summary) {
-        summary.innerHTML = `<strong>${p.total}</strong> paid invoice${p.total === 1 ? '' : 's'} ready to push. `
-          + `Review below, then confirm.`;
+        summary.innerHTML = limit && p.shown < p.total
+          ? `Test batch: showing the first <strong>${p.shown}</strong> of <strong>${p.total}</strong> paid invoices. Review below, then confirm to push just these ${p.shown}.`
+          : `<strong>${p.total}</strong> paid invoice${p.total === 1 ? '' : 's'} ready to push. Review below, then confirm.`;
       }
       const rows = p.invoices.map(inv => `
         <tr>
@@ -897,7 +900,7 @@ const SettingsPage = {
           <tbody>${rows}</tbody>
         </table>
         <div style="margin-top:10px;display:flex;gap:8px;">
-          <button class="btn btn-primary btn-sm" onclick="SettingsPage.confirmSyncPaidQboInvoices()">Confirm &amp; Push ${p.total} →</button>
+          <button class="btn btn-primary btn-sm" onclick="SettingsPage.confirmSyncPaidQboInvoices(${limit || 'null'})">Confirm &amp; Push ${p.shown} →</button>
           <button class="btn btn-outline btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Cancel</button>
         </div>
       `;
@@ -907,13 +910,13 @@ const SettingsPage = {
   },
 
   // Step 2 of 2: actually push the previewed invoices and record payments.
-  async confirmSyncPaidQboInvoices() {
+  async confirmSyncPaidQboInvoices(limit) {
     const summary = document.getElementById('qboSyncResult');
     const table = document.getElementById('qboSyncTable');
     if (summary) summary.innerHTML = '<em>Pushing paid invoices and recording payments… this can take a moment.</em>';
     if (table) table.innerHTML = '';
     try {
-      const r = await Api.post('/api/quickbooks/sync-paid');
+      const r = await Api.post('/api/quickbooks/sync-paid', limit ? { limit } : {});
       if (summary) {
         summary.innerHTML = `Processed <strong>${r.total}</strong> paid invoice${r.total === 1 ? '' : 's'} — `
           + `<span style="color:var(--green);">${r.paymentsApplied} payment${r.paymentsApplied === 1 ? '' : 's'} recorded</span>`

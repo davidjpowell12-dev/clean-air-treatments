@@ -230,12 +230,17 @@ router.post('/sync-pending', requireAdmin, async (req, res) => {
 // (incl. manually-recorded ones) are detected via balance check and skipped.
 router.post('/sync-paid', requireAdmin, async (req, res) => {
   const db = getDb();
+  // Optional limit: lets the controller push a small test batch (e.g. the
+  // first 3) before committing to the whole set. Same ordering as the preview
+  // so "test 3" pushes exactly the 3 rows shown at the top of the preview.
+  const limit = Number.isInteger(req.body?.limit) && req.body.limit > 0 ? req.body.limit : null;
   const paid = db.prepare(`
     SELECT id, invoice_number FROM invoices
      WHERE status = 'paid'
        AND qbo_payment_id IS NULL
      ORDER BY id ASC
-  `).all();
+     ${limit ? 'LIMIT ?' : ''}
+  `).all(...(limit ? [limit] : []));
 
   const results = [];
   let succeeded = 0, failed = 0, paymentsApplied = 0, alreadyPaid = 0;
@@ -261,6 +266,14 @@ router.post('/sync-paid', requireAdmin, async (req, res) => {
 // Read-only: makes no QBO calls and writes nothing.
 router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
   const db = getDb();
+  const reqLimit = parseInt(req.query.limit, 10);
+  const limit = Number.isInteger(reqLimit) && reqLimit > 0 ? reqLimit : null;
+  // total = how many would be pushed with no limit (so the UI can say
+  // "showing 3 of 107"); rows = the (optionally limited) batch to display.
+  const total = db.prepare(`
+    SELECT COUNT(*) AS n FROM invoices
+     WHERE status = 'paid' AND qbo_payment_id IS NULL
+  `).get().n;
   const rows = db.prepare(`
     SELECT
       i.invoice_number, i.amount_cents, i.payment_method,
@@ -272,7 +285,8 @@ router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
     WHERE i.status = 'paid'
       AND i.qbo_payment_id IS NULL
     ORDER BY i.id ASC
-  `).all();
+    ${limit ? 'LIMIT ?' : ''}
+  `).all(...(limit ? [limit] : []));
 
   const invoices = rows.map(r => ({
     invoice_number: r.invoice_number,
@@ -285,7 +299,7 @@ router.get('/sync-paid/preview', requireAdmin, async (req, res) => {
     already_in_qbo: !!r.qbo_invoice_id
   }));
 
-  res.json({ ok: true, total: invoices.length, invoices });
+  res.json({ ok: true, total, shown: invoices.length, limit, invoices });
 });
 
 // Reconciliation: compares CAT invoice totals to QBO invoice totals for
