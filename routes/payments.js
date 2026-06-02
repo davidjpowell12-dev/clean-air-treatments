@@ -664,6 +664,73 @@ router.get('/dashboard', requireAuth, (req, res) => {
   res.json(stats);
 });
 
+// ─── R2 (monthly installment 2) preview ──────────────────────
+// Read-only. Lists every monthly-plan installment-2 invoice and buckets it
+// by what would happen if we ran the charge batch right now. Pay-in-full and
+// per-service invoices are excluded by construction (they have no
+// installment_number / payment_plan != 'monthly'). Nothing is charged here.
+router.get('/r2-preview', requireAuth, (req, res) => {
+  const db = getDb();
+  const installment = parseInt(req.query.installment, 10) || 2;
+  const today = new Date().toISOString().split('T')[0];
+
+  const rows = db.prepare(`
+    SELECT i.id, i.invoice_number, i.amount_cents, i.status, i.due_date,
+           i.installment_number, i.total_installments,
+           e.customer_name, e.email, e.stripe_customer_id,
+           e.payment_method_preference
+      FROM invoices i
+      JOIN estimates e ON e.id = i.estimate_id
+     WHERE i.payment_plan = 'monthly'
+       AND i.installment_number = ?
+     ORDER BY e.customer_name COLLATE NOCASE ASC
+  `).all(installment);
+
+  const categorize = (r) => {
+    if (r.status === 'paid') return 'already_paid';
+    if (r.status === 'void' || r.status === 'voided') return 'voided';
+    if (r.status === 'scheduled') return 'not_activated';      // first visit not logged → not billable yet
+    // pending or failed:
+    if (!r.stripe_customer_id) return 'no_card';               // needs email / manual / check
+    if (r.due_date && r.due_date > today) return 'pending_not_due';
+    return 'ready_to_charge';                                  // pending/failed, due, card on file
+  };
+
+  const buckets = {};
+  for (const r of rows) {
+    const cat = categorize(r);
+    if (!buckets[cat]) buckets[cat] = { count: 0, total_cents: 0, invoices: [] };
+    buckets[cat].count++;
+    buckets[cat].total_cents += r.amount_cents || 0;
+    buckets[cat].invoices.push({
+      id: r.id,
+      invoice_number: r.invoice_number,
+      customer_name: r.customer_name,
+      amount: (r.amount_cents || 0) / 100,
+      status: r.status,
+      due_date: r.due_date,
+      has_card: !!r.stripe_customer_id,
+      method: r.payment_method_preference
+    });
+  }
+
+  const summary = {};
+  for (const [k, v] of Object.entries(buckets)) summary[k] = { count: v.count, total: v.total_cents / 100 };
+
+  const pausedRow = db.prepare("SELECT value FROM app_settings WHERE key = 'cron_paused'").get();
+
+  res.json({
+    ok: true,
+    installment,
+    today,
+    cron_paused: !!(pausedRow && pausedRow.value === 'true'),
+    total_invoices: rows.length,
+    total_amount: rows.reduce((s, r) => s + (r.amount_cents || 0), 0) / 100,
+    summary,
+    buckets
+  });
+});
+
 // ─── Duplicate Invoice Diagnostic ────────────────────────────
 // One-time admin tool: finds estimates that have more than one installment_number=1
 // invoice, which indicates the invoice set was created more than once.
