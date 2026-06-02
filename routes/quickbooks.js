@@ -357,6 +357,50 @@ router.get('/payment-audit', requireAuth, (req, res) => {
   res.json({ ok: true, year, paid_count: paid.length, paid_total: totalCents / 100, summary, buckets });
 });
 
+// Inspector: look up specific QBO invoices by DocNumber (no date filter, so
+// it finds invoices from any year) and report their balance/paid status and
+// any payments linked to them. Used to decide whether old straggler invoices
+// are safe to void. Read-only. Pass ?docs=1000,1072,1074
+router.get('/qbo-inspect', requireAuth, async (req, res) => {
+  const db = getDb();
+  const docs = String(req.query.docs || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!docs.length) return res.status(400).json({ ok: false, error: 'pass ?docs=1000,1072' });
+  try {
+    const out = [];
+    for (const doc of docs) {
+      const sql = `SELECT * FROM Invoice WHERE DocNumber = '${doc.replace(/'/g, "\\'")}'`;
+      const data = await qbo.qboFetch(db, 'query', { query: { query: sql, minorversion: '65' } });
+      const found = (data && data.QueryResponse && data.QueryResponse.Invoice) || [];
+      for (const inv of found) {
+        // Pull payments linked to this invoice.
+        const paySql = `SELECT * FROM Payment WHERE Line.LinkedTxn.TxnId = '${inv.Id}'`;
+        let payments = [];
+        try {
+          const pd = await qbo.qboFetch(db, 'query', { query: { query: paySql, minorversion: '65' } });
+          payments = ((pd && pd.QueryResponse && pd.QueryResponse.Payment) || [])
+            .map(p => ({ id: p.Id, amount: p.TotalAmt, date: p.TxnDate, ref: p.PaymentRefNum }));
+        } catch (e) { payments = [{ error: e.message }]; }
+        out.push({
+          doc_number: inv.DocNumber,
+          qbo_id: inv.Id,
+          customer: inv.CustomerRef?.name,
+          total: inv.TotalAmt,
+          balance: inv.Balance,
+          paid: inv.Balance === 0,
+          txn_date: inv.TxnDate,
+          line_count: (inv.Line || []).filter(l => l.DetailType === 'SalesItemLineDetail').length,
+          sync_token: inv.SyncToken,
+          linked_payments: payments
+        });
+      }
+      if (!found.length) out.push({ doc_number: doc, not_found: true });
+    }
+    res.json({ ok: true, results: out });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Lists every QBO invoice for the year and tags which ones OUR sync created
 // (Id matches a cached qbo_invoice_id in CAT) vs. foreign invoices that came
 // from somewhere else. Also flags multi-line invoices — our sync only ever
