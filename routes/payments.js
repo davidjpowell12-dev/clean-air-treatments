@@ -664,6 +664,54 @@ router.get('/dashboard', requireAuth, (req, res) => {
   res.json(stats);
 });
 
+// ─── Customer invoice timeline ───────────────────────────────
+// Read-only. Given a partial customer name, dumps the FULL invoice set for
+// every matching estimate — all installments, statuses, due dates, paid
+// dates, and created/updated timestamps — so we can see exactly what
+// happened to Round 1 vs Round 2 for a real customer. ?name=Aaron
+router.get('/customer-invoices', requireAuth, (req, res) => {
+  const db = getDb();
+  const name = String(req.query.name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, error: 'pass ?name=...' });
+
+  const ests = db.prepare(`
+    SELECT id, customer_name, payment_plan, stripe_customer_id, payment_method_preference, status
+      FROM estimates
+     WHERE customer_name LIKE '%' || ? || '%'
+  `).all(name);
+
+  const out = ests.map(e => {
+    const invoices = db.prepare(`
+      SELECT id, invoice_number, amount_cents, status, installment_number, total_installments,
+             due_date, paid_at, payment_method, created_at, updated_at
+        FROM invoices
+       WHERE estimate_id = ?
+       ORDER BY COALESCE(installment_number, 0), id
+    `).all(e.id).map(i => ({
+      invoice_number: i.invoice_number,
+      installment: i.installment_number ? `${i.installment_number}/${i.total_installments}` : null,
+      amount: (i.amount_cents || 0) / 100,
+      status: i.status,
+      due_date: i.due_date,
+      paid_at: i.paid_at,
+      method: i.payment_method,
+      created_at: i.created_at,
+      updated_at: i.updated_at
+    }));
+    return {
+      estimate_id: e.id,
+      customer_name: e.customer_name,
+      estimate_status: e.status,
+      payment_plan: e.payment_plan,
+      has_card: !!e.stripe_customer_id,
+      method_pref: e.payment_method_preference,
+      invoices
+    };
+  });
+
+  res.json({ ok: true, matches: out.length, estimates: out });
+});
+
 // ─── R2 (monthly installment 2) preview ──────────────────────
 // Read-only. Lists every monthly-plan installment-2 invoice and buckets it
 // by what would happen if we ran the charge batch right now. Pay-in-full and
