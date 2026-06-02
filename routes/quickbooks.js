@@ -357,6 +357,67 @@ router.get('/payment-audit', requireAuth, (req, res) => {
   res.json({ ok: true, year, paid_count: paid.length, paid_total: totalCents / 100, summary, buckets });
 });
 
+// Lists every QBO invoice for the year and tags which ones OUR sync created
+// (Id matches a cached qbo_invoice_id in CAT) vs. foreign invoices that came
+// from somewhere else. Also flags multi-line invoices — our sync only ever
+// creates single "Lawn Care Services" lines, so multi-line = not ours.
+// Read-only — only runs a SELECT against the QBO Query API.
+router.get('/qbo-invoice-list', requireAuth, async (req, res) => {
+  const db = getDb();
+  const year = String(req.query.year || new Date().getFullYear());
+  const start = `${year}-01-01`;
+  const end = `${year}-12-31`;
+  try {
+    const out = [];
+    let startPos = 1;
+    for (let i = 0; i < 50; i++) {
+      const sql = `SELECT * FROM Invoice WHERE TxnDate >= '${start}' AND TxnDate <= '${end}' STARTPOSITION ${startPos} MAXRESULTS 1000`;
+      const data = await qbo.qboFetch(db, 'query', { query: { query: sql, minorversion: '65' } });
+      const rows = (data && data.QueryResponse && data.QueryResponse.Invoice) || [];
+      out.push(...rows);
+      if (rows.length < 1000) break;
+      startPos += 1000;
+    }
+
+    // Which QBO invoice Ids does CAT believe it created?
+    const ourIds = new Set(
+      db.prepare("SELECT qbo_invoice_id FROM invoices WHERE qbo_invoice_id IS NOT NULL").all()
+        .map(r => String(r.qbo_invoice_id))
+    );
+
+    const invoices = out.map(inv => {
+      const lines = (inv.Line || []).filter(l => l.DetailType === 'SalesItemLineDetail');
+      return {
+        qbo_id: inv.Id,
+        doc_number: inv.DocNumber,
+        customer: inv.CustomerRef?.name,
+        total: inv.TotalAmt,
+        txn_date: inv.TxnDate,
+        line_count: lines.length,
+        is_ours: ourIds.has(String(inv.Id)),
+        first_line_desc: lines[0]?.Description || lines[0]?.SalesItemLineDetail?.ItemRef?.name || null
+      };
+    });
+
+    const ours = invoices.filter(i => i.is_ours);
+    const foreign = invoices.filter(i => !i.is_ours);
+    const sum = (arr) => Math.round(arr.reduce((s, i) => s + (i.total || 0), 0) * 100) / 100;
+
+    res.json({
+      ok: true,
+      year,
+      qbo_invoice_count: invoices.length,
+      qbo_invoice_total: sum(invoices),
+      ours: { count: ours.length, total: sum(ours) },
+      foreign: { count: foreign.length, total: sum(foreign) },
+      multi_line_count: invoices.filter(i => i.line_count > 1).length,
+      invoices
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // LIVE reconciliation: asks QBO directly how many Payments and Invoices
 // exist for the year, and compares to what CAT thinks it created. This is
 // the ground truth that settles "CAT says 103 payments, QBO shows 93".
