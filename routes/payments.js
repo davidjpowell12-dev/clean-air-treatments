@@ -712,6 +712,79 @@ router.get('/customer-invoices', requireAuth, (req, res) => {
   res.json({ ok: true, matches: out.length, estimates: out });
 });
 
+// ─── Stripe PaymentIntent status lookup (read-only) ──────────
+// For a customer name, finds every invoice that has a stripe_payment_intent_id
+// and asks Stripe for the LIVE status of that PaymentIntent. Read-only:
+// paymentIntents.retrieve never moves money. Answers "she says she paid but
+// I see nothing in Stripe" — distinguishes ACH still processing vs. succeeded
+// vs. failed vs. test/live mode mismatch. Returns the FULL pi id (the UI
+// truncates it, which alone can make a Stripe search come up empty).
+router.get('/stripe-pi-status', requireAuth, async (req, res) => {
+  const db = getDb();
+  const name = String(req.query.name || '').trim();
+  if (!name) return res.status(400).json({ ok: false, error: 'pass ?name=...' });
+  if (!stripeUtils.isEnabled()) {
+    return res.status(503).json({ ok: false, error: 'Stripe not configured' });
+  }
+
+  const key = stripeUtils.getStripeKey();
+  const keyMode = key.startsWith('sk_live') ? 'live' : key.startsWith('sk_test') ? 'test' : 'unknown';
+  const stripe = require('stripe')(key);
+
+  const rows = db.prepare(`
+    SELECT i.id, i.invoice_number, i.amount_cents, i.status, i.payment_method,
+           i.installment_number, i.total_installments, i.paid_at,
+           i.stripe_payment_intent_id, e.customer_name
+      FROM invoices i
+      JOIN estimates e ON e.id = i.estimate_id
+     WHERE e.customer_name LIKE '%' || ? || '%'
+       AND i.stripe_payment_intent_id IS NOT NULL
+     ORDER BY i.customer_name, COALESCE(i.installment_number, 0), i.id
+  `).all(name);
+
+  const out = [];
+  for (const r of rows) {
+    const rec = {
+      invoice_number: r.invoice_number,
+      installment: r.installment_number ? `${r.installment_number}/${r.total_installments}` : null,
+      cat_status: r.status,
+      cat_method: r.payment_method,
+      cat_paid_at: r.paid_at,
+      amount_expected: (r.amount_cents || 0) / 100,
+      payment_intent_id: r.stripe_payment_intent_id, // FULL id, not truncated
+      customer_name: r.customer_name
+    };
+    try {
+      const pi = await stripe.paymentIntents.retrieve(r.stripe_payment_intent_id, {
+        expand: ['latest_charge']
+      });
+      const ch = pi.latest_charge;
+      rec.stripe = {
+        status: pi.status,                       // succeeded | processing | requires_payment_method | canceled | ...
+        livemode: pi.livemode,                   // true=live, false=test
+        amount: pi.amount / 100,
+        currency: pi.currency,
+        payment_method_types: pi.payment_method_types,
+        created: new Date(pi.created * 1000).toISOString(),
+        charge_status: ch ? ch.status : null,    // succeeded | pending | failed
+        charge_paid: ch ? ch.paid : null,
+        failure_message: ch ? (ch.failure_message || null) : null
+      };
+    } catch (err) {
+      rec.stripe_error = err.message;            // e.g. "No such payment_intent" => wrong mode / different account
+    }
+    out.push(rec);
+  }
+
+  res.json({
+    ok: true,
+    key_mode: keyMode,
+    note: 'If stripe.livemode does not match where you are looking in the Stripe dashboard, flip the Test mode toggle. ACH (us_bank_account) sits in status=processing ~4 business days before succeeded.',
+    matches: out.length,
+    invoices: out
+  });
+});
+
 // ─── R2 (monthly installment 2) preview ──────────────────────
 // Read-only. Lists every monthly-plan installment-2 invoice and buckets it
 // by what would happen if we ran the charge batch right now. Pay-in-full and
