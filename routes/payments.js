@@ -731,6 +731,7 @@ router.get('/stripe-pi-status', requireAuth, async (req, res) => {
   const keyMode = key.startsWith('sk_live') ? 'live' : key.startsWith('sk_test') ? 'test' : 'unknown';
   const stripe = require('stripe')(key);
 
+  try {
   const rows = db.prepare(`
     SELECT i.id, i.invoice_number, i.amount_cents, i.status, i.payment_method,
            i.installment_number, i.total_installments, i.paid_at,
@@ -739,7 +740,7 @@ router.get('/stripe-pi-status', requireAuth, async (req, res) => {
       JOIN estimates e ON e.id = i.estimate_id
      WHERE e.customer_name LIKE '%' || ? || '%'
        AND i.stripe_payment_intent_id IS NOT NULL
-     ORDER BY i.customer_name, COALESCE(i.installment_number, 0), i.id
+     ORDER BY e.customer_name, COALESCE(i.installment_number, 0), i.id
   `).all(name);
 
   const out = [];
@@ -783,6 +784,10 @@ router.get('/stripe-pi-status', requireAuth, async (req, res) => {
     matches: out.length,
     invoices: out
   });
+  } catch (err) {
+    console.error('[stripe-pi-status] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 // ─── R2 (monthly installment 2) preview ──────────────────────
