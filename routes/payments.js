@@ -712,6 +712,141 @@ router.get('/customer-invoices', requireAuth, (req, res) => {
   res.json({ ok: true, matches: out.length, estimates: out });
 });
 
+// ─── Find who an unmatched deposit belongs to (read-only) ────
+// Given one or more dollar amounts, hunts for any record that could explain
+// a check/deposit of that size: invoices at that amount (any status), an
+// estimate's monthly_price or total_price, or a line-item price. Helps match
+// a bank deposit back to a customer when no CRM payment was recorded.
+// Usage: /find-amount?amounts=594,490  (optional &tol=2 dollar tolerance)
+router.get('/find-amount', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const tol = Math.round((Number(req.query.tol) || 1) * 100); // cents tolerance
+    const amounts = String(req.query.amounts || '')
+      .split(',').map(s => Math.round(Number(s.trim()) * 100)).filter(c => Number.isFinite(c) && c > 0);
+    if (!amounts.length) return res.status(400).json({ ok: false, error: 'pass ?amounts=594,490' });
+
+    const out = amounts.map(target => {
+      const lo = target - tol, hi = target + tol;
+
+      const invoices = db.prepare(`
+        SELECT i.invoice_number, i.amount_cents, i.status, i.installment_number,
+               i.total_installments, i.due_date, i.paid_at, i.payment_method,
+               e.customer_name
+          FROM invoices i JOIN estimates e ON e.id = i.estimate_id
+         WHERE i.amount_cents BETWEEN ? AND ?
+         ORDER BY e.customer_name
+      `).all(lo, hi).map(i => ({
+        customer_name: i.customer_name,
+        invoice_number: i.invoice_number,
+        amount: i.amount_cents / 100,
+        status: i.status,
+        installment: i.installment_number ? `${i.installment_number}/${i.total_installments}` : null,
+        due_date: i.due_date, paid_at: i.paid_at, method: i.payment_method
+      }));
+
+      const byMonthly = db.prepare(`
+        SELECT customer_name, monthly_price, total_price, payment_plan, status
+          FROM estimates
+         WHERE ROUND(monthly_price * 100) BETWEEN ? AND ?
+            OR ROUND(total_price * 100) BETWEEN ? AND ?
+      `).all(lo, hi, lo, hi).map(e => ({
+        customer_name: e.customer_name, monthly_price: e.monthly_price,
+        total_price: e.total_price, payment_plan: e.payment_plan, estimate_status: e.status
+      }));
+
+      const byItem = db.prepare(`
+        SELECT e.customer_name, ei.service_name, ei.price
+          FROM estimate_items ei JOIN estimates e ON e.id = ei.estimate_id
+         WHERE ROUND(ei.price * 100) BETWEEN ? AND ?
+      `).all(lo, hi).map(x => ({
+        customer_name: x.customer_name, service_name: x.service_name, price: x.price
+      }));
+
+      return {
+        amount: target / 100,
+        tolerance_dollars: tol / 100,
+        invoice_matches: invoices,
+        estimate_price_matches: byMonthly,
+        line_item_matches: byItem
+      };
+    });
+
+    res.json({ ok: true, results: out });
+  } catch (err) {
+    console.error('[find-amount] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Estimate vs. invoice reconciliation (read-only) ─────────
+// Dumps an estimate's header (total/monthly/plan), its line items, and its
+// invoices WITH timestamps — to diagnose "estimate total doesn't match the
+// installment total". The usual cause: the estimate was edited after the
+// invoices were generated, so the invoices reflect the OLD price.
+router.get('/estimate-detail', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const name = String(req.query.name || '').trim();
+    if (!name) return res.status(400).json({ ok: false, error: 'pass ?name=...' });
+
+    const ests = db.prepare(`
+      SELECT id, customer_name, status, payment_plan, total_price, monthly_price,
+             payment_months, accepted_at, created_at, updated_at
+        FROM estimates
+       WHERE customer_name LIKE '%' || ? || '%'
+    `).all(name);
+
+    const out = ests.map(e => {
+      const items = db.prepare(`
+        SELECT service_name, price, is_included, is_recurring, rounds, sort_order
+          FROM estimate_items WHERE estimate_id = ? ORDER BY sort_order, id
+      `).all(e.id);
+
+      const invoices = db.prepare(`
+        SELECT invoice_number, amount_cents, status, installment_number,
+               total_installments, due_date, created_at, updated_at
+          FROM invoices WHERE estimate_id = ?
+         ORDER BY COALESCE(installment_number, 0), id
+      `).all(e.id).map(i => ({
+        invoice_number: i.invoice_number,
+        installment: i.installment_number ? `${i.installment_number}/${i.total_installments}` : null,
+        amount: (i.amount_cents || 0) / 100,
+        status: i.status,
+        due_date: i.due_date,
+        created_at: i.created_at,
+        updated_at: i.updated_at
+      }));
+
+      const invoiceTotal = invoices.reduce((s, i) => s + i.amount, 0);
+      const includedItemTotal = items.filter(i => i.is_included).reduce((s, i) => s + i.price, 0);
+
+      return {
+        estimate_id: e.id,
+        customer_name: e.customer_name,
+        status: e.status,
+        payment_plan: e.payment_plan,
+        total_price: e.total_price,
+        monthly_price: e.monthly_price,
+        payment_months: e.payment_months,
+        accepted_at: e.accepted_at,
+        estimate_created_at: e.created_at,
+        estimate_updated_at: e.updated_at,
+        line_items: items,
+        included_item_total: Math.round(includedItemTotal * 100) / 100,
+        invoice_count: invoices.length,
+        invoice_total: Math.round(invoiceTotal * 100) / 100,
+        invoices
+      };
+    });
+
+    res.json({ ok: true, matches: out.length, estimates: out });
+  } catch (err) {
+    console.error('[estimate-detail] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Stripe PaymentIntent status lookup (read-only) ──────────
 // For a customer name, finds every invoice that has a stripe_payment_intent_id
 // and asks Stripe for the LIVE status of that PaymentIntent. Read-only:

@@ -401,6 +401,34 @@ router.get('/qbo-inspect', requireAuth, async (req, res) => {
   }
 });
 
+// Read-only: reports the single generic Item that every CAT invoice is
+// pushed under, and its CURRENT name in QBO. Diagnoses "all invoices show
+// service X" — they all reference this one item, so whatever it's named in
+// QBO is what every invoice line shows.
+router.get('/generic-item', requireAuth, async (req, res) => {
+  const db = getDb();
+  try {
+    const cached = db.prepare("SELECT value FROM app_settings WHERE key = 'qbo_generic_service_item_id'").get();
+    if (!cached?.value) {
+      return res.json({ ok: true, cached_item_id: null, note: 'No generic item cached yet — next sync will create/link one named "Lawn Care Services".' });
+    }
+    const data = await qbo.qboFetch(db, 'item/' + cached.value);
+    const item = data?.Item;
+    res.json({
+      ok: true,
+      cached_item_id: cached.value,
+      qbo_item_name: item?.Name || null,
+      qbo_item_type: item?.Type || null,
+      active: item?.Active,
+      expected_name: 'Lawn Care Services',
+      name_matches_expected: item?.Name === 'Lawn Care Services',
+      note: 'Every CAT invoice line references this one item. Rename it in QBO and ALL invoices update at once.'
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // Lists every QBO invoice for the year and tags which ones OUR sync created
 // (Id matches a cached qbo_invoice_id in CAT) vs. foreign invoices that came
 // from somewhere else. Also flags multi-line invoices — our sync only ever
