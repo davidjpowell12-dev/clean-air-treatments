@@ -779,6 +779,65 @@ router.get('/find-amount', requireAuth, (req, res) => {
   }
 });
 
+// ─── Find a deposit as a COMBINATION of invoices (read-only) ─
+// A check often pays several invoices at once, so the deposit won't equal
+// any single record. For each customer, this enumerates subsets of their
+// invoices (up to maxsize) and reports any subset that sums to the target.
+// Usage: /find-combo?amounts=594,490  (&tol=2 dollars, &maxsize=4)
+router.get('/find-combo', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const tol = Math.round((Number(req.query.tol) || 2) * 100);
+    const maxSize = Math.min(Number(req.query.maxsize) || 4, 6);
+    const targets = String(req.query.amounts || '')
+      .split(',').map(s => Math.round(Number(s.trim()) * 100)).filter(c => Number.isFinite(c) && c > 0);
+    if (!targets.length) return res.status(400).json({ ok: false, error: 'pass ?amounts=594,490' });
+
+    const ests = db.prepare('SELECT id, customer_name FROM estimates').all();
+
+    const results = targets.map(target => {
+      const matches = [];
+      for (const e of ests) {
+        const invs = db.prepare(`
+          SELECT invoice_number, amount_cents, status, installment_number, total_installments
+            FROM invoices WHERE estimate_id = ?
+           ORDER BY COALESCE(installment_number, 0), id
+        `).all(e.id);
+        if (!invs.length) continue;
+
+        const n = invs.length;
+        const rec = (start, chosen, sum) => {
+          if (chosen.length && Math.abs(sum - target) <= tol) {
+            matches.push({
+              customer_name: e.customer_name,
+              sum: sum / 100,
+              count: chosen.length,
+              invoices: chosen.map(idx => ({
+                invoice_number: invs[idx].invoice_number,
+                amount: invs[idx].amount_cents / 100,
+                status: invs[idx].status,
+                installment: invs[idx].installment_number
+                  ? `${invs[idx].installment_number}/${invs[idx].total_installments}` : null
+              }))
+            });
+          }
+          if (chosen.length >= maxSize) return;
+          for (let i = start; i < n; i++) { chosen.push(i); rec(i + 1, chosen, sum + invs[i].amount_cents); chosen.pop(); }
+        };
+        rec(0, [], 0);
+      }
+      // Prefer fewer-invoice explanations first.
+      matches.sort((a, b) => a.count - b.count);
+      return { amount: target / 100, tolerance_dollars: tol / 100, max_invoices: maxSize, combo_matches: matches };
+    });
+
+    res.json({ ok: true, results });
+  } catch (err) {
+    console.error('[find-combo] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Estimate vs. invoice reconciliation (read-only) ─────────
 // Dumps an estimate's header (total/monthly/plan), its line items, and its
 // invoices WITH timestamps — to diagnose "estimate total doesn't match the
