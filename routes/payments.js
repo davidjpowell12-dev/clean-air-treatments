@@ -906,6 +906,84 @@ router.get('/estimate-detail', requireAuth, (req, res) => {
   }
 });
 
+// ─── Books reconciliation report (read-only) ────────────────
+// Surfaces invoices/estimates that are internally inconsistent or out of sync
+// with Stripe/QBO. Renders a readable HTML page in a browser, JSON otherwise.
+// /api/payments/reconcile?year=2026  (add &format=json to force JSON)
+router.get('/reconcile', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const { computeReconciliation } = require('../utils/reconcile');
+    const report = computeReconciliation(db, req.query.year);
+
+    if (req.query.format === 'json' || !req.accepts('html')) {
+      return res.json({ ok: true, ...report });
+    }
+    res.set('Content-Type', 'text/html').send(renderReconcileHtml(report));
+  } catch (err) {
+    console.error('[reconcile] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+const RECONCILE_LABELS = {
+  not_synced_to_qbo: 'Paid but not synced to QuickBooks',
+  payment_not_in_qbo: 'In QuickBooks but payment not recorded (shows as unpaid there)',
+  card_paid_no_stripe: 'Paid by card/ACH but no Stripe trace',
+  paid_without_date: 'Marked paid but missing a paid date (drops out of totals)',
+  duplicate_installments: 'Duplicate installments (same estimate + number)',
+  estimate_total_mismatch: "Estimate total doesn't match what was invoiced",
+};
+
+function renderReconcileHtml(report) {
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const money = (n) => '$' + Number(n || 0).toFixed(2);
+  const clean = report.summary.clean;
+
+  const sections = Object.entries(report.discrepancies)
+    .filter(([, rows]) => rows.length > 0)
+    .map(([key, rows]) => {
+      const cols = Object.keys(rows[0]);
+      const head = cols.map(c => `<th>${esc(c.replace(/_/g, ' '))}</th>`).join('');
+      const body = rows.map(r => '<tr>' + cols.map(c => {
+        let v = r[c];
+        if (typeof v === 'number' && /amount|total|invoiced|difference/.test(c)) v = c.includes('cents') ? money(v / 100) : money(v);
+        return `<td>${esc(v)}</td>`;
+      }).join('') + '</tr>').join('');
+      return `<section><h2>${esc(RECONCILE_LABELS[key] || key)} <span class="badge">${rows.length}</span></h2>
+        <table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></section>`;
+    }).join('');
+
+  const banner = clean
+    ? `<div class="banner ok">✓ Books are clean — no discrepancies found for ${esc(report.year)}.</div>`
+    : `<div class="banner bad">${report.summary.total_discrepancies} discrepanc${report.summary.total_discrepancies === 1 ? 'y' : 'ies'} found for ${esc(report.year)}. Review below.</div>`;
+
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Books Reconciliation — ${esc(report.year)}</title>
+  <style>
+    body{font-family:system-ui,-apple-system,sans-serif;max-width:960px;margin:24px auto;padding:0 16px;color:#1f2937}
+    h1{font-size:22px;margin:0 0 4px} .sub{color:#6b7280;font-size:13px;margin:0 0 16px}
+    .banner{padding:14px 16px;border-radius:10px;font-weight:600;margin:16px 0}
+    .banner.ok{background:#e8f5e9;color:#256029;border:1px solid #4caf50}
+    .banner.bad{background:#fdeef0;color:#9a3540;border:1px solid #cf6b78}
+    section{margin:22px 0} h2{font-size:15px;margin:0 0 8px;color:#334155}
+    .badge{background:#fdeef0;color:#9a3540;border-radius:10px;padding:1px 8px;font-size:12px;margin-left:6px}
+    table{border-collapse:collapse;width:100%;font-size:13px}
+    th,td{border:1px solid #e5e7eb;padding:6px 10px;text-align:left} th{background:#f8faf9;text-transform:capitalize}
+    .stat{display:inline-block;margin-right:24px;font-size:13px;color:#6b7280}
+    .stat b{display:block;font-size:18px;color:#1f2937}
+  </style></head><body>
+  <h1>Books Reconciliation</h1>
+  <p class="sub">Year ${esc(report.year)} · read-only · refresh to re-run</p>
+  <div>
+    <span class="stat">Collected this year<b>${money(report.summary.collected_this_year)}</b></span>
+    <span class="stat">Discrepancies<b>${report.summary.total_discrepancies}</b></span>
+  </div>
+  ${banner}
+  ${sections || ''}
+  </body></html>`;
+}
+
 // ─── Stripe PaymentIntent status lookup (read-only) ──────────
 // For a customer name, finds every invoice that has a stripe_payment_intent_id
 // and asks Stripe for the LIVE status of that PaymentIntent. Read-only:
