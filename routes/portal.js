@@ -83,15 +83,20 @@ router.post('/request-link', async (req, res) => {
 
 // Magic-link target. Consumes the token, starts a session, sets the cookie.
 router.get('/auth', (req, res) => {
-  const db = getDb();
-  const clientId = clientAuth.consumeLoginToken(db, req.query.token);
-  if (!clientId) {
-    return res.status(400).send(authPage('This sign-in link is invalid or has expired. Please request a new one.'));
+  try {
+    const db = getDb();
+    const clientId = clientAuth.consumeLoginToken(db, req.query.token);
+    if (!clientId) {
+      return res.status(400).send(authPage('This sign-in link is invalid or has expired. Please request a new one.'));
+    }
+    const session = clientAuth.createSession(db, clientId);
+    res.cookie(COOKIE, session, COOKIE_OPTS);
+    // Phase 1 will render the real dashboard; for now confirm success.
+    res.send(authPage("You're signed in. Your customer portal is coming soon.", true));
+  } catch (err) {
+    console.error('[portal] /auth error:', err.message);
+    res.status(400).send(authPage('This sign-in link is invalid or has expired. Please request a new one.'));
   }
-  const session = clientAuth.createSession(db, clientId);
-  res.cookie(COOKIE, session, COOKIE_OPTS);
-  // Phase 1 will render the real dashboard; for now confirm success.
-  res.send(authPage("You're signed in. Your customer portal is coming soon.", true));
 });
 
 router.post('/logout', (req, res) => {

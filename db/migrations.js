@@ -504,6 +504,35 @@ function runMigrations(db) {
   // id here so re-running the bulk sync never double-applies a payment.
   ensureColumn(db, 'invoices', 'qbo_payment_id', 'TEXT');
   ensureColumn(db, 'invoices', 'qbo_payment_synced_at', 'DATETIME');
+
+  // Client portal foundation — created here (not just in a numbered migration)
+  // so the tables exist even on DBs where schema_version is ahead of when the
+  // migration was added. Idempotent.
+  db.exec(`CREATE TABLE IF NOT EXISTS clients (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE, phone TEXT, name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec(`CREATE TABLE IF NOT EXISTS client_auth_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    token_hash TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'login', channel TEXT,
+    expires_at DATETIME NOT NULL, used_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)');
+  ensureColumn(db, 'estimates', 'client_id', 'INTEGER REFERENCES clients(id)');
+  db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)');
+  try {
+    const { backfillClients } = require('../utils/clients');
+    const r = backfillClients(db);
+    if (r.estimatesLinked > 0) {
+      console.log(`[schema-repair] Linked ${r.estimatesLinked} estimate(s) to ${r.clientsCreated} new client(s)`);
+    }
+  } catch (e) { console.error('[schema-repair] client backfill failed (non-fatal):', e.message); }
+
   // Backfill tokens for any existing invoices that lack one
   const missingTokens = db.prepare("SELECT id FROM invoices WHERE token IS NULL OR token = ''").all();
   if (missingTokens.length > 0) {
