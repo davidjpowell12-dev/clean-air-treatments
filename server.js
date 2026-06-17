@@ -2,12 +2,30 @@ require('dotenv').config();
 // Also load .env.production for keys that Railway fails to inject
 require('dotenv').config({ path: '.env.production', override: true });
 const express = require('express');
+// Patches Express so a thrown/rejected error inside an async route handler is
+// forwarded to the error-handling middleware (below) instead of becoming an
+// unhandled promise rejection that kills the whole process. Must be required
+// before the route handlers are defined.
+require('express-async-errors');
 const session = require('express-session');
 const path = require('path');
 const fs = require('fs');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// ─── Process-level safety net ───────────────────────────────────────
+// Last-resort guards so a single bad code path can never take the whole
+// app down for every user. A request-scoped error should be caught by the
+// Express error handler below; these catch anything that slips past it
+// (e.g. a stray rejection in a setInterval callback). We log loudly and
+// keep the process alive rather than crashing.
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
 
 console.log(`[startup] PORT=${PORT}, NODE_ENV=${process.env.NODE_ENV}`);
 console.log(`[startup] DB_PATH=${process.env.DB_PATH || 'not set'}`);
@@ -268,6 +286,21 @@ app.get('/app/*', (req, res) => {
 // Default route
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// ─── Global error handler ───────────────────────────────────────────
+// Must be registered AFTER all routes. Any error thrown in a handler
+// (including async, thanks to express-async-errors) lands here. We log
+// the full stack and return a clean response — never a hang or a crash.
+// For /api/* requests we return JSON so the frontend can surface it.
+// eslint-disable-next-line no-unused-vars  (Express needs the 4-arg signature)
+app.use((err, req, res, next) => {
+  console.error(`[error] ${req.method} ${req.originalUrl}:`, err && err.stack ? err.stack : err);
+  if (res.headersSent) return next(err);
+  if (req.path.startsWith('/api/')) {
+    return res.status(500).json({ error: 'Something went wrong. Please try again.' });
+  }
+  res.status(500).send('Something went wrong. Please try again.');
 });
 
 // Start the server — this MUST succeed for Railway to see the app as alive
