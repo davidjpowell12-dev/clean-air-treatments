@@ -416,6 +416,47 @@ const migrations = [
   // schedule.
   function addEstimateFirstDueDate(db) {
     try { db.exec('ALTER TABLE estimates ADD COLUMN first_due_date DATE'); } catch (e) { /* exists */ }
+  },
+  // Migration: Client Portal foundation (Phase 0).
+  // A stable client identity that aggregates a customer's estimates/properties,
+  // and passwordless (magic-link) auth tokens. estimates.client_id links each
+  // estimate to its owner. See docs/client-portal.md.
+  function addClientPortalFoundation(db) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS clients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE,
+        phone TEXT,
+        name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS client_auth_tokens (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id INTEGER NOT NULL REFERENCES clients(id),
+        token_hash TEXT NOT NULL,
+        kind TEXT NOT NULL DEFAULT 'login',
+        channel TEXT,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    db.exec('CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)');
+    try { db.exec('ALTER TABLE estimates ADD COLUMN client_id INTEGER REFERENCES clients(id)'); } catch (e) { /* exists */ }
+    db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)');
+
+    // Backfill client identities from existing estimates (idempotent).
+    try {
+      const { backfillClients } = require('../utils/clients');
+      const r = backfillClients(db);
+      console.log(`[portal] Backfilled clients: ${r.clientsCreated} created, ${r.estimatesLinked} estimates linked, ${r.skippedNoEmail} skipped (no email)`);
+    } catch (e) {
+      console.error('[portal] Client backfill failed (non-fatal):', e.message);
+    }
   }
 ];
 

@@ -352,6 +352,7 @@ CREATE TABLE IF NOT EXISTS estimates (
   payment_method_preference TEXT DEFAULT 'card',
   sms_opt_in_at DATETIME,
   first_due_date DATE,
+  client_id INTEGER REFERENCES clients(id),
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -359,8 +360,33 @@ CREATE TABLE IF NOT EXISTS estimates (
 
 CREATE INDEX IF NOT EXISTS idx_estimates_property ON estimates(property_id);
 CREATE INDEX IF NOT EXISTS idx_estimates_status ON estimates(status);
+CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id);
 -- Note: idx_estimates_token is created by migration 13 for existing DBs;
 -- for fresh installs, the UNIQUE constraint on the column handles it
+
+-- Client portal: stable customer identity (one email = one client, may own
+-- several estimates/properties) and passwordless magic-link auth tokens.
+CREATE TABLE IF NOT EXISTS clients (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  email TEXT UNIQUE,
+  phone TEXT,
+  name TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email);
+
+CREATE TABLE IF NOT EXISTS client_auth_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  token_hash TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'login',
+  channel TEXT,
+  expires_at DATETIME NOT NULL,
+  used_at DATETIME,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash);
 
 -- Estimate line items (services included in a proposal)
 CREATE TABLE IF NOT EXISTS estimate_items (
