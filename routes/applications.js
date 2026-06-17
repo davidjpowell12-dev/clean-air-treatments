@@ -241,59 +241,11 @@ router.post('/', requireAuth, (req, res) => {
     ).run(b.schedule_id);
 
     // ─── Billing: activate monthly invoices OR create per-service invoice ───
-    try {
-      const schedule = db.prepare('SELECT * FROM schedules WHERE id = ?').get(b.schedule_id);
-      if (schedule && schedule.estimate_id) {
-        const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(schedule.estimate_id);
-
-        if (estimate && estimate.payment_plan === 'monthly') {
-          // Monthly plan: activate scheduled invoices on first visit
-          const { activateBillingForEstimate } = require('../utils/billing');
-          activateBillingForEstimate(db, schedule.estimate_id);
-
-        } else if (estimate && estimate.payment_plan === 'per_service') {
-          // Per-service plan: create an invoice for this completed visit
-          const { createPerServiceInvoice } = require('../utils/stripe');
-          const serviceType = schedule.service_type || 'Service';
-
-          // Look up the price from estimate items
-          const item = db.prepare(
-            "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
-          ).get(schedule.estimate_id, serviceType);
-
-          if (item) {
-            // For recurring items, price is per-round; for one-time, it's the full price
-            const amountCents = Math.round(item.price * 100);
-            const roundInfo = schedule.round_number ? ` (Round ${schedule.round_number}/${schedule.total_rounds})` : '';
-            const description = `${serviceType}${roundInfo} — ${estimate.customer_name}`;
-
-            const invoice = createPerServiceInvoice(db, schedule.estimate_id, amountCents, description);
-            console.log(`[per-service] Invoice ${invoice.invoice_number} created: $${(amountCents / 100).toFixed(2)} for ${description}`);
-          } else {
-            // Bundled one-time services (e.g., "Aeration, Seeding, Compost")
-            // Sum up prices for all services in the bundle
-            const serviceNames = serviceType.split(', ').map(s => s.trim());
-            let totalCents = 0;
-            for (const name of serviceNames) {
-              const bundledItem = db.prepare(
-                "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
-              ).get(schedule.estimate_id, name);
-              if (bundledItem) {
-                totalCents += Math.round(bundledItem.price * 100);
-              }
-            }
-            if (totalCents > 0) {
-              const description = `${serviceType} — ${estimate.customer_name}`;
-              const invoice = createPerServiceInvoice(db, schedule.estimate_id, totalCents, description);
-              console.log(`[per-service] Invoice ${invoice.invoice_number} created: $${(totalCents / 100).toFixed(2)} for ${description}`);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[billing] Error:', err.message);
-      // Non-fatal — don't fail the application creation
-    }
+    // Shared logic in utils/billing.js (see routes/schedules.js for the twin
+    // path). De-duplicated to prevent the double-billing class of bug.
+    const { billForCompletedVisit } = require('../utils/billing');
+    const schedule = db.prepare('SELECT * FROM schedules WHERE id = ?').get(b.schedule_id);
+    billForCompletedVisit(db, schedule);
   }
 
   // Backfill property.sqft from the application if the property doesn't

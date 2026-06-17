@@ -59,4 +59,76 @@ function activateBillingForEstimate(db, estimateId) {
   return true;
 }
 
-module.exports = { activateBillingForEstimate };
+/**
+ * Handle billing when a scheduled visit is marked completed.
+ *
+ * This is the single source of truth for "a visit was completed, do the
+ * billing." It was previously duplicated verbatim in routes/schedules.js and
+ * routes/applications.js — the copy-paste that caused the Amanda Boman
+ * double-billing bug. Both call sites now delegate here.
+ *
+ * - monthly plan  → activate the scheduled installments (idempotent)
+ * - per_service   → create one invoice for this visit, priced from the
+ *                   estimate's matching line item (or the sum of a bundled
+ *                   service label like "Aeration, Seeding, Compost")
+ * - full / other  → no-op
+ *
+ * `schedule` is a row from the schedules table (must have estimate_id,
+ * service_type, round_number, total_rounds). Errors are non-fatal: they are
+ * logged and swallowed so they never fail the caller's main operation.
+ *
+ * @returns {object} a small result for logging/tests, e.g.
+ *   { action: 'activated' | 'per_service_invoice' | 'none', invoice_number?, amount? }
+ */
+function billForCompletedVisit(db, schedule) {
+  try {
+    if (!schedule || !schedule.estimate_id) return { action: 'none', reason: 'no_estimate' };
+
+    const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(schedule.estimate_id);
+    if (!estimate) return { action: 'none', reason: 'estimate_not_found' };
+
+    if (estimate.payment_plan === 'monthly') {
+      const activated = activateBillingForEstimate(db, schedule.estimate_id);
+      return { action: activated ? 'activated' : 'none', reason: activated ? undefined : 'not_first_visit' };
+    }
+
+    if (estimate.payment_plan === 'per_service') {
+      const { createPerServiceInvoice } = require('./stripe');
+      const serviceType = schedule.service_type || 'Service';
+      const roundInfo = schedule.round_number ? ` (Round ${schedule.round_number}/${schedule.total_rounds})` : '';
+
+      // Exact line-item match first.
+      const item = db.prepare(
+        "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
+      ).get(schedule.estimate_id, serviceType);
+
+      let amountCents = 0;
+      if (item) {
+        amountCents = Math.round(item.price * 100);
+      } else {
+        // Bundled label (e.g. "Aeration, Seeding, Compost") → sum the parts.
+        for (const name of serviceType.split(',').map(s => s.trim())) {
+          const bundledItem = db.prepare(
+            "SELECT * FROM estimate_items WHERE estimate_id = ? AND service_name = ? AND is_included = 1"
+          ).get(schedule.estimate_id, name);
+          if (bundledItem) amountCents += Math.round(bundledItem.price * 100);
+        }
+      }
+
+      if (amountCents > 0) {
+        const description = `${serviceType}${item ? roundInfo : ''} — ${estimate.customer_name}`;
+        const invoice = createPerServiceInvoice(db, schedule.estimate_id, amountCents, description);
+        console.log(`[per-service] Invoice ${invoice.invoice_number} created: $${(amountCents / 100).toFixed(2)} for ${description}`);
+        return { action: 'per_service_invoice', invoice_number: invoice.invoice_number, amount: amountCents / 100 };
+      }
+      return { action: 'none', reason: 'no_priced_items' };
+    }
+
+    return { action: 'none', reason: `plan_${estimate.payment_plan}` };
+  } catch (err) {
+    console.error('[billing] Error:', err.message);
+    return { action: 'error', error: err.message };
+  }
+}
+
+module.exports = { activateBillingForEstimate, billForCompletedVisit };
