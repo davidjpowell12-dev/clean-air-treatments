@@ -414,5 +414,7 @@ module.exports = {
   createInvoicesForEstimate,
   createPerServiceInvoice,
   constructWebhookEvent,
-  chargeCustomer
+  chargeCustomer,
+  applyCardFee,
+  CARD_FEE_RATE
 };
