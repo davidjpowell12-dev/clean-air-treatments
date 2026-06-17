@@ -252,9 +252,51 @@ async function sendPaymentConfirmationEmail({ to, customerName, invoiceNumber, a
   });
 }
 
+async function sendMagicLinkEmail({ to, customerName, magicUrl }) {
+  if (!init()) throw new Error('Email not configured.');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f5f7;">
+  <div style="max-width:560px;margin:0 auto;padding:24px 16px;">
+    <div style="background:linear-gradient(135deg,#4a7c2e 0%,#3a6324 100%);border-radius:12px 12px 0 0;padding:24px;text-align:center;">
+      <h1 style="color:white;font-size:20px;margin:0;">Clean Air Lawn Care</h1>
+      <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:4px 0 0;">Sign in to your account</p>
+    </div>
+    <div style="background:white;padding:32px 24px;border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+      <p style="font-size:16px;color:#374151;margin:0 0 16px;">Hi ${escHtml(customerName || 'there')},</p>
+      <p style="font-size:15px;color:#6b7280;line-height:1.6;margin:0 0 24px;">
+        Tap the button below to securely sign in to your customer portal. This link expires in 15 minutes and can only be used once.
+      </p>
+      <div style="text-align:center;margin:0 0 24px;">
+        <a href="${magicUrl}" style="display:inline-block;padding:16px 48px;background:linear-gradient(135deg,#4a7c2e 0%,#6b9e47 100%);color:white;text-decoration:none;border-radius:10px;font-size:17px;font-weight:700;">
+          Sign In
+        </a>
+      </div>
+      <p style="font-size:13px;color:#9ca3af;text-align:center;margin:0;">
+        If you didn't request this, you can safely ignore this email.
+      </p>
+    </div>
+    <div style="text-align:center;padding:16px 0;font-size:12px;color:#9ca3af;">
+      <p style="margin:0;">Clean Air Lawn Care</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sgMail.send({
+    to,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
+    subject: 'Your sign-in link for Clean Air Lawn Care',
+    html
+  });
+}
+
 function escHtml(str) {
   if (!str) return '';
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, isEnabled };
+module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, sendMagicLinkEmail, isEnabled };

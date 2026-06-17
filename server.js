@@ -160,6 +160,7 @@ try {
   app.use('/api/follow-ups', require('./routes/follow-ups'));
   app.use('/api/messaging', require('./routes/messaging'));
   app.use('/api/quickbooks', require('./routes/quickbooks'));
+  app.use('/portal', require('./routes/portal'));
   console.log('[startup] All routes loaded');
 } catch (err) {
   console.error('[startup] ERROR loading routes:', err.message);
