@@ -158,6 +158,34 @@ CREATE TABLE portal_announcements (
 
 Authoring happens in the **staff app** (new admin screen); clients only read.
 
+### 4.4 Client notes (observations & recommendations)
+
+A deliberate, staff-authored channel for sharing what we observed on a visit and
+what we recommend. **Distinct from the existing internal `schedules.notes` /
+`applications.notes`**, which are operational/private (gate codes, access
+warnings) and must NEVER be shown to clients. A client note is visible only when
+staff explicitly publish it.
+
+```sql
+CREATE TABLE client_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id INTEGER NOT NULL REFERENCES clients(id),
+  property_id INTEGER REFERENCES properties(id),
+  visit_id INTEGER,                 -- nullable: ties the note to a schedule/visit
+  title TEXT,
+  body TEXT NOT NULL,               -- what we observed
+  recommendation TEXT,              -- optional: what we recommend
+  published INTEGER DEFAULT 0,      -- 0 = draft (hidden), 1 = visible to client
+  author INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Notes can be **general** (property-level, `visit_id` null) or **visit-specific**
+(shown under that visit in history). Staff author them in the CRM; the portal
+shows only `published = 1` notes scoped to the client.
+
 ---
 
 ## 5. Security model (highest-stakes — review required)
@@ -177,6 +205,9 @@ Rules:
   target invoice/estimate before creating any Stripe session.
 - Never expose raw card data — only Stripe-derived status (last4/brand is OK via
   Stripe, but not stored).
+- **Never expose internal notes.** `schedules.notes` and `applications.notes` are
+  staff-only and must never reach the portal. Client-facing observations live in
+  the separate `client_notes` table and only when `published = 1`.
 - Magic-link tokens: single-use, hashed at rest, short expiry, rate-limited.
 - A dedicated **security review** (`/security-review`) before launch, focused on
   cross-client data access.
@@ -197,12 +228,17 @@ Rules:
   becomes default PM (`attachSetupIntentToCustomer` already does this).
 - **Receipts / history**: paid invoices with dates and methods.
 
-### 6.2 Service visibility (Phase 2)
-- **Upcoming visits**: next scheduled dates + service type from `schedules`.
-- **Service history**: completed `applications` — date, service, notes the
-  client should see (filtered to client-safe fields).
-- **Profile**: update phone, email, address, gate code / pet notes (writes back
-  to property/estimate; sensitive changes may notify staff).
+### 6.2 Service visibility & notes (Phase 2)
+- **Upcoming visits**: next scheduled dates + service type from `schedules`
+  (scoped to the client's properties). Internal `schedules.notes` is NOT shown.
+- **Service history**: completed `applications` — date + service. Internal
+  `applications.notes` is NOT shown.
+- **Client notes**: published `client_notes` for the client — observations and
+  recommendations, either property-level or shown under a specific visit. This
+  is the "here's what we saw / what we recommend" channel. Staff author and
+  publish these in the CRM (new authoring UI); clients read only `published = 1`.
+- **Profile**: update phone, email, address (writes back to property/estimate;
+  sensitive changes may notify staff).
 
 ### 6.3 Education & communication hub (Phase 3)
 - **Library**: published `portal_resources`, browsable by category.
