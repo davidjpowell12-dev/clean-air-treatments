@@ -5,10 +5,12 @@
 //   POST /portal/logout        → clear session
 //   GET  /portal/session       → current client (behind requireClient)
 const express = require('express');
+const path = require('path');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const clientAuth = require('../utils/client-auth');
 const clients = require('../utils/clients');
+const portalData = require('../utils/portal-data');
 const email = require('../utils/email');
 
 const COOKIE = 'cat_portal_session';
@@ -91,12 +93,30 @@ router.get('/auth', (req, res) => {
     }
     const session = clientAuth.createSession(db, clientId);
     res.cookie(COOKIE, session, COOKIE_OPTS);
-    // Phase 1 will render the real dashboard; for now confirm success.
-    res.send(authPage("You're signed in. Your customer portal is coming soon.", true));
+    res.redirect('/portal/home');
   } catch (err) {
     console.error('[portal] /auth error:', err.message);
     res.status(400).send(authPage('This sign-in link is invalid or has expired. Please request a new one.'));
   }
+});
+
+// ─── Customer-facing page (login + dashboard SPA) ────────────
+const PAGE = path.join(__dirname, '..', 'public', 'portal.html');
+router.get('/', (req, res) => res.sendFile(PAGE));
+router.get('/home', (req, res) => res.sendFile(PAGE));
+
+// ─── Portal data API (all behind requireClient, all scoped) ──
+router.get('/me', requireClient, (req, res) => {
+  const client = getDb().prepare('SELECT id, email, name FROM clients WHERE id = ?').get(req.clientId);
+  res.json({ ok: true, client });
+});
+
+router.get('/invoices', requireClient, (req, res) => {
+  res.json({ ok: true, ...portalData.getClientInvoices(getDb(), req.clientId) });
+});
+
+router.get('/visits', requireClient, (req, res) => {
+  res.json({ ok: true, ...portalData.getClientVisits(getDb(), req.clientId) });
 });
 
 router.post('/logout', (req, res) => {

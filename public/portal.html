@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clean Air Lawn Care — My Account</title>
+  <style>
+    :root { --green:#3a6324; --green2:#4a7c2e; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f4f5f7; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--ink); }
+    .wrap { max-width:640px; margin:0 auto; padding:20px 16px 48px; }
+    header { background:linear-gradient(135deg,var(--green2),var(--green)); color:#fff; padding:22px 16px; }
+    header .wrap { padding:0; display:flex; justify-content:space-between; align-items:center; }
+    header h1 { font-size:18px; font-weight:700; }
+    header .who { font-size:13px; opacity:.9; }
+    .btn { display:inline-block; border:0; border-radius:10px; padding:14px 20px; font-size:15px; font-weight:700; cursor:pointer; }
+    .btn-primary { background:linear-gradient(135deg,var(--green2),#6b9e47); color:#fff; }
+    .btn-ghost { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); padding:7px 12px; font-size:13px; }
+    .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.06); margin:16px 0; overflow:hidden; }
+    .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); padding:14px 16px 0; }
+    .row { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-top:1px solid var(--line); }
+    .row:first-of-type { border-top:0; }
+    .row .main { font-weight:600; font-size:15px; }
+    .row .sub { font-size:13px; color:var(--muted); margin-top:2px; }
+    .amt { font-weight:700; font-size:16px; }
+    .pill { font-size:11px; font-weight:700; padding:3px 9px; border-radius:10px; text-transform:uppercase; letter-spacing:.3px; }
+    .pill.paid { background:#e8f5e9; color:#256029; }
+    .pill.overdue { background:#fdeef0; color:#9a3540; }
+    .pill.due, .pill.upcoming { background:#fff4e0; color:#9a6b1a; }
+    .summary { text-align:center; padding:22px 16px; }
+    .summary .label { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); }
+    .summary .big { font-size:40px; font-weight:800; margin-top:4px; }
+    .empty { padding:18px 16px; color:var(--muted); font-size:14px; text-align:center; }
+    /* login */
+    .login { max-width:420px; margin:48px auto; text-align:center; }
+    .login h1 { color:var(--green); font-size:24px; margin-bottom:8px; }
+    .login p { color:var(--muted); font-size:15px; margin-bottom:24px; line-height:1.5; }
+    .login input { width:100%; padding:14px; font-size:16px; border:1px solid var(--line); border-radius:10px; margin-bottom:12px; }
+    .login .btn-primary { width:100%; }
+    .note { font-size:13px; color:var(--muted); margin-top:16px; }
+    .hide { display:none; }
+    .msg { padding:14px; border-radius:10px; font-size:14px; margin-top:8px; }
+    .msg.ok { background:#e8f5e9; color:#256029; }
+  </style>
+</head>
+<body>
+  <!-- LOGIN VIEW -->
+  <div id="loginView" class="hide">
+    <div class="login">
+      <h1>Clean Air Lawn Care</h1>
+      <p>Sign in to view your invoices and upcoming visits. Enter your email and we'll send you a secure sign-in link — no password needed.</p>
+      <form id="loginForm">
+        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
+        <button class="btn btn-primary" type="submit">Send me a sign-in link</button>
+      </form>
+      <div id="loginMsg" class="msg ok hide"></div>
+      <p class="note">Trouble signing in? Just reply to any email from us.</p>
+    </div>
+  </div>
+
+  <!-- DASHBOARD VIEW -->
+  <div id="dashView" class="hide">
+    <header>
+      <div class="wrap">
+        <div>
+          <h1>My Account</h1>
+          <div class="who" id="who"></div>
+        </div>
+        <button class="btn btn-ghost" id="logoutBtn">Sign out</button>
+      </div>
+    </header>
+    <div class="wrap">
+      <div class="card">
+        <div class="summary">
+          <div class="label">Balance due</div>
+          <div class="big" id="balance">—</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Upcoming visits</h2>
+        <div id="visits"></div>
+      </div>
+
+      <div class="card">
+        <h2>Invoices</h2>
+        <div id="invoices"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const money = (n) => '$' + Number(n || 0).toFixed(2);
+    const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+
+    async function api(path) {
+      const r = await fetch('/portal' + path, { headers: { 'Accept': 'application/json' } });
+      if (r.status === 401) return null;
+      return r.json();
+    }
+
+    function show(view) {
+      $('loginView').classList.toggle('hide', view !== 'login');
+      $('dashView').classList.toggle('hide', view !== 'dash');
+    }
+
+    // Login
+    $('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const email = $('email').value.trim();
+      await fetch('/portal/request-link', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      const m = $('loginMsg');
+      m.textContent = "If that email is on file, we've sent you a sign-in link. Check your inbox.";
+      m.classList.remove('hide');
+      $('loginForm').reset();
+    });
+
+    $('logoutBtn').addEventListener('click', async () => {
+      await fetch('/portal/logout', { method: 'POST' });
+      location.href = '/portal';
+    });
+
+    function rowHtml(main, sub, right) {
+      return `<div class="row"><div><div class="main">${main}</div>${sub ? `<div class="sub">${sub}</div>` : ''}</div><div>${right || ''}</div></div>`;
+    }
+
+    async function loadDashboard(me) {
+      $('who').textContent = me.client.name || me.client.email || '';
+      show('dash');
+
+      const [inv, vis] = await Promise.all([api('/invoices'), api('/visits')]);
+
+      // Balance
+      $('balance').textContent = money(inv ? inv.outstanding : 0);
+
+      // Visits
+      const vbox = $('visits');
+      const upcoming = (vis && vis.upcoming) || [];
+      vbox.innerHTML = upcoming.length
+        ? upcoming.map(v => rowHtml(
+            v.service,
+            (v.round ? 'Round ' + v.round + ' · ' : '') + (v.address || ''),
+            `<span class="sub">${fmtDate(v.date)}</span>`)).join('')
+        : '<div class="empty">No upcoming visits scheduled.</div>';
+
+      // Invoices
+      const ibox = $('invoices');
+      const invoices = (inv && inv.invoices) || [];
+      ibox.innerHTML = invoices.length
+        ? invoices.map(i => rowHtml(
+            i.invoice_number + (i.installment ? ` · Installment ${i.installment}` : ''),
+            i.status === 'paid' ? ('Paid ' + fmtDate((i.paid_at || '').slice(0,10))) : ('Due ' + fmtDate(i.due_date)),
+            `<span class="amt">${money(i.amount)}</span> <span class="pill ${i.status}">${i.status}</span>`)).join('')
+        : '<div class="empty">No invoices yet.</div>';
+    }
+
+    (async function init() {
+      const me = await api('/me');
+      if (me && me.ok) loadDashboard(me);
+      else show('login');
+    })();
+  </script>
+</body>
+</html>
