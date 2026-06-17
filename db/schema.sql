@@ -27,10 +27,13 @@ CREATE TABLE IF NOT EXISTS products (
   signal_word TEXT,
   rei_hours REAL,
   data_sheet_url TEXT,
+  barcode TEXT,
   notes TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_products_barcode ON products(barcode);
 
 CREATE TABLE IF NOT EXISTS inventory (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -87,9 +90,13 @@ CREATE TABLE IF NOT EXISTS applications (
   material_cost REAL,
   revenue REAL,
   schedule_id INTEGER REFERENCES schedules(id),
+  property_id INTEGER REFERENCES properties(id),
+  retention_years INTEGER DEFAULT 3,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   synced INTEGER DEFAULT 1
 );
+
+CREATE INDEX IF NOT EXISTS idx_applications_schedule ON applications(schedule_id);
 
 -- App-wide settings (key-value)
 CREATE TABLE IF NOT EXISTS app_settings (
@@ -113,6 +120,9 @@ CREATE TABLE IF NOT EXISTS properties (
   notes TEXT,
   lat REAL,
   lng REAL,
+  qbo_customer_id TEXT,
+  sms_opted_in INTEGER DEFAULT 1,
+  is_active INTEGER DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -182,6 +192,8 @@ CREATE TABLE IF NOT EXISTS purchases (
   purchase_date DATE NOT NULL,
   received_date DATE,
   notes TEXT,
+  sales_order_path TEXT,
+  sales_order_original_name TEXT,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -287,6 +299,11 @@ CREATE TABLE IF NOT EXISTS services (
   rounds INTEGER DEFAULT 1,
   display_order INTEGER DEFAULT 0,
   is_active INTEGER DEFAULT 1,
+  qbo_item_id TEXT,
+  heads_up_text TEXT,
+  completion_text TEXT,
+  client_action TEXT,
+  requires_application INTEGER DEFAULT 1,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -332,6 +349,9 @@ CREATE TABLE IF NOT EXISTS estimates (
   max_reminders INTEGER DEFAULT 3,
   payment_plan TEXT,
   stripe_customer_id TEXT,
+  payment_method_preference TEXT DEFAULT 'card',
+  sms_opt_in_at DATETIME,
+  first_due_date DATE,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -383,6 +403,13 @@ CREATE TABLE IF NOT EXISTS invoices (
   check_number TEXT,
   check_date DATE,
   notes TEXT,
+  qbo_invoice_id TEXT,
+  qbo_synced_at DATETIME,
+  qbo_sync_error TEXT,
+  token TEXT,
+  sms_sent_at DATETIME,
+  qbo_payment_id TEXT,
+  qbo_payment_synced_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -391,6 +418,67 @@ CREATE INDEX IF NOT EXISTS idx_invoices_estimate ON invoices(estimate_id);
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON invoices(status);
 CREATE INDEX IF NOT EXISTS idx_invoices_due_date ON invoices(due_date);
 CREATE INDEX IF NOT EXISTS idx_invoices_stripe_session ON invoices(stripe_checkout_session_id);
+
+-- Follow-ups (client request / task tracking)
+CREATE TABLE IF NOT EXISTS follow_ups (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER REFERENCES properties(id) ON DELETE SET NULL,
+  title TEXT NOT NULL,
+  notes TEXT,
+  bucket TEXT NOT NULL DEFAULT 'today',
+  waiting_on TEXT NOT NULL DEFAULT 'me',
+  pinned INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'open',
+  linked_estimate_id INTEGER REFERENCES estimates(id) ON DELETE SET NULL,
+  created_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  completed_at DATETIME,
+  snoozed_until DATETIME
+);
+
+CREATE INDEX IF NOT EXISTS idx_followups_status ON follow_ups(status);
+CREATE INDEX IF NOT EXISTS idx_followups_property ON follow_ups(property_id);
+CREATE INDEX IF NOT EXISTS idx_followups_bucket ON follow_ups(bucket);
+
+-- QuickBooks Online OAuth connection (single-row table for the whole business)
+CREATE TABLE IF NOT EXISTS quickbooks_connection (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  realm_id TEXT NOT NULL,
+  access_token TEXT NOT NULL,
+  refresh_token TEXT NOT NULL,
+  access_expires_at DATETIME NOT NULL,
+  refresh_expires_at DATETIME NOT NULL,
+  environment TEXT DEFAULT 'sandbox',
+  connected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  last_refreshed_at DATETIME
+);
+
+-- Message drafts (auto-composed outbound SMS, edited before send)
+CREATE TABLE IF NOT EXISTS message_drafts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
+  schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+  application_id INTEGER REFERENCES applications(id) ON DELETE SET NULL,
+  type TEXT NOT NULL,
+  service_date DATE,
+  service_summary TEXT,
+  composed_text TEXT NOT NULL,
+  edited_text TEXT,
+  to_phone TEXT,
+  status TEXT NOT NULL DEFAULT 'draft',
+  send_result TEXT,
+  scheduled_for DATETIME,
+  sent_at DATETIME,
+  sent_by INTEGER REFERENCES users(id),
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_drafts_status ON message_drafts(status);
+CREATE INDEX IF NOT EXISTS idx_drafts_type ON message_drafts(type);
+CREATE INDEX IF NOT EXISTS idx_drafts_property ON message_drafts(property_id);
+CREATE INDEX IF NOT EXISTS idx_drafts_schedule ON message_drafts(schedule_id);
 
 -- Trigger to auto-create inventory row when a product is inserted
 CREATE TRIGGER IF NOT EXISTS create_inventory_on_product_insert
