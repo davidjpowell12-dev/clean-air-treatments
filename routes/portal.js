@@ -119,6 +119,10 @@ router.get('/visits', requireClient, (req, res) => {
   res.json({ ok: true, ...portalData.getClientVisits(getDb(), req.clientId) });
 });
 
+router.get('/payments', requireClient, (req, res) => {
+  res.json({ ok: true, ...portalData.getClientPayments(getDb(), req.clientId) });
+});
+
 router.post('/logout', (req, res) => {
   clientAuth.destroySession(getDb(), readCookie(req, COOKIE));
   res.clearCookie(COOKIE, { path: '/portal' });

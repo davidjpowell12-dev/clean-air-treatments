@@ -74,4 +74,28 @@ function getClientVisits(db, clientId) {
   return { upcoming, recent };
 }
 
-module.exports = { getClientInvoices, getClientVisits };
+/** Paid invoices for the client — payment history, newest first, with a
+ *  receipt link to the existing public receipt page when a token exists. */
+function getClientPayments(db, clientId) {
+  const rows = db.prepare(`
+    SELECT i.invoice_number, i.amount_cents, i.paid_at, i.payment_method, i.token
+      FROM invoices i JOIN estimates e ON e.id = i.estimate_id
+     WHERE e.client_id = ? AND i.status = 'paid'
+     ORDER BY i.paid_at DESC, i.id DESC
+  `).all(clientId);
+
+  const methodLabel = (m) => ({ card: 'Card', ach: 'Bank transfer', check: 'Check' }[m] || (m ? m : '—'));
+
+  const payments = rows.map(i => ({
+    invoice_number: i.invoice_number,
+    amount: (i.amount_cents || 0) / 100,
+    paid_at: i.paid_at ? i.paid_at.slice(0, 10) : null,
+    method: methodLabel(i.payment_method),
+    receipt_url: i.token ? `/receipt/${i.token}` : null,
+  }));
+
+  const totalPaid = rows.reduce((s, i) => s + (i.amount_cents || 0), 0) / 100;
+  return { payments, totalPaid };
+}
+
+module.exports = { getClientInvoices, getClientVisits, getClientPayments };

@@ -5,7 +5,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeDb, addProperty, addEstimate } = require('./helpers');
 const { backfillClients } = require('../utils/clients');
-const { getClientInvoices, getClientVisits } = require('../utils/portal-data');
+const { getClientInvoices, getClientVisits, getClientPayments } = require('../utils/portal-data');
 
 function setupTwoClients(db) {
   const pa = addProperty(db, 'Alice', '1 A St');
@@ -72,6 +72,27 @@ test('getClientVisits is scoped and NEVER exposes internal notes', () => {
   const serialized = JSON.stringify({ upcoming, recent });
   assert.ok(!serialized.includes('GATE CODE'), 'internal notes must never leak to the portal');
   assert.ok(!serialized.includes('Bob Visit'), 'must not see another client\'s visit');
+});
+
+test('getClientPayments returns only the client\'s paid invoices, with receipt links', () => {
+  const db = makeDb();
+  const { ea, aId, eb } = setupTwoClients(db);
+  // Alice: one paid (with token → receipt), one unpaid (excluded)
+  db.prepare(`INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, payment_method, paid_at, token)
+              VALUES ('A-PAID', ?, 12950, 'paid', 'monthly', 'card', '2026-05-01T12:00:00Z', 'tok-abc')`).run(ea);
+  db.prepare(`INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, due_date)
+              VALUES ('A-DUE', ?, 12950, 'pending', 'monthly', '2026-06-01')`).run(ea);
+  // Bob: paid — must NOT appear for Alice
+  db.prepare(`INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, payment_method, paid_at)
+              VALUES ('B-PAID', ?, 9999, 'paid', 'monthly', 'check', '2026-05-02T12:00:00Z')`).run(eb);
+
+  const { payments, totalPaid } = getClientPayments(db, aId);
+  assert.equal(payments.length, 1, 'only the one paid invoice');
+  assert.equal(payments[0].invoice_number, 'A-PAID');
+  assert.equal(payments[0].method, 'Card');
+  assert.equal(payments[0].receipt_url, '/receipt/tok-abc');
+  assert.equal(totalPaid, 129.5);
+  assert.ok(!payments.some(p => p.invoice_number === 'B-PAID'), 'must not see other client payment');
 });
 
 test('a client with no records gets empty, not an error', () => {
