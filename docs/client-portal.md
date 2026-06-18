@@ -216,17 +216,22 @@ Rules:
 
 ## 6. Feature spec by area
 
-### 6.1 Billing & payments (MVP)
-- **My Invoices**: list all invoices for the client across their estimates —
-  status (paid / pending / overdue / upcoming / scheduled), amount, due date.
-- **Pay invoice**: launches existing Stripe checkout for that invoice.
-- **Pay off season in full**: sums the client's outstanding monthly installments,
-  voids them, and creates one combined invoice — then pays it. (Automates the
-  current manual void-and-recombine. Must be server-side, ownership-checked, and
-  idempotent.)
-- **Switch card on file**: exposes the existing Stripe setup flow; new card
-  becomes default PM (`attachSetupIntentToCustomer` already does this).
-- **Receipts / history**: paid invoices with dates and methods.
+### 6.1 Billing & payments
+
+Priority is **visibility first** — clients want to *see* their bills and history
+every time; transacting is secondary. (Decision, owner: pay-off-in-full was a
+rare one-off request and is deliberately deferred — not worth the
+void-and-combine machinery in the portal.)
+
+- **My Invoices** (done, 1a): all invoices — status (paid / overdue / upcoming),
+  amount, due date.
+- **Payment history / receipts**: paid invoices with date, method, and a link to
+  the existing branded receipt page (`/receipt/:token`).
+- **Pay invoice** (later, optional): a simple "Pay" button on a single
+  outstanding invoice that launches the existing Stripe checkout. The common,
+  simple case — no installment surgery.
+- **Switch card on file** (later): exposes the existing Stripe setup flow.
+- ~~**Pay off season in full**~~ — *deferred (rare; do manually in the CRM).*
 
 ### 6.2 Service visibility & notes (Phase 2)
 - **Upcoming visits**: next scheduled dates + service type from `schedules`
