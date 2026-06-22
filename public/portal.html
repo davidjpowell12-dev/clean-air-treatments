@@ -42,6 +42,14 @@
     .summary .big { font-size:40px; font-weight:800; margin-top:4px; }
     .empty { padding:18px 16px; color:var(--muted); font-size:14px; text-align:center; }
     .link { font-size:13px; font-weight:600; color:var(--green-dark); text-decoration:none; margin-left:8px; }
+    .note-item { padding:14px 16px; border-top:1px solid var(--line); }
+    .note-item:first-child { border-top:0; }
+    .note-item .nt-head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+    .note-item .nt-title { font-weight:700; font-size:15px; }
+    .note-item .nt-date { font-size:12px; color:var(--muted); white-space:nowrap; }
+    .note-item .nt-body { font-size:14px; color:var(--ink); line-height:1.5; margin-top:4px; }
+    .note-item .nt-rec { font-size:14px; line-height:1.5; margin-top:8px; padding:10px 12px; background:var(--green-light); border-radius:8px; }
+    .note-item .nt-rec b { color:var(--green-dark); }
     /* login */
     .login { max-width:420px; margin:48px auto; text-align:center; }
     .login h1 { color:var(--green-dark); font-size:24px; margin-bottom:8px; }
@@ -96,6 +104,11 @@
       <div class="card">
         <h2>Upcoming visits</h2>
         <div id="visits"></div>
+      </div>
+
+      <div class="card" id="notesCard">
+        <h2>Notes from your team</h2>
+        <div id="notes"></div>
       </div>
 
       <div class="card">
@@ -157,7 +170,7 @@
       $('who').textContent = me.client.name || me.client.email || '';
       show('dash');
 
-      const [inv, vis, pay] = await Promise.all([api('/invoices'), api('/visits'), api('/payments')]);
+      const [inv, vis, pay, nt] = await Promise.all([api('/invoices'), api('/visits'), api('/payments'), api('/notes')]);
 
       // Balance
       $('balance').textContent = money(inv ? inv.outstanding : 0);
@@ -192,6 +205,23 @@
             `<span class="amt">${money(p.amount)}</span>` +
             (p.receipt_url ? ` <a class="link" href="${p.receipt_url}" target="_blank" rel="noopener">Receipt</a>` : ''))).join('')
         : '<div class="empty">No payments yet.</div>';
+
+      // Notes from your team — observations & recommendations (hide card if none)
+      const notes = (nt && nt.notes) || [];
+      const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
+      if (notes.length) {
+        $('notes').innerHTML = notes.map(n => `
+          <div class="note-item">
+            <div class="nt-head">
+              <span class="nt-title">${n.title ? esc(n.title) : 'Visit note'}</span>
+              <span class="nt-date">${fmtDate(n.date)}</span>
+            </div>
+            <div class="nt-body">${esc(n.body)}</div>
+            ${n.recommendation ? `<div class="nt-rec"><b>Our recommendation:</b> ${esc(n.recommendation)}</div>` : ''}
+          </div>`).join('');
+      } else {
+        $('notesCard').style.display = 'none';
+      }
 
       // Service history — completed visits
       const hbox = $('history');

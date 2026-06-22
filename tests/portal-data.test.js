@@ -5,7 +5,7 @@ const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { makeDb, addProperty, addEstimate } = require('./helpers');
 const { backfillClients } = require('../utils/clients');
-const { getClientInvoices, getClientVisits, getClientPayments } = require('../utils/portal-data');
+const { getClientInvoices, getClientVisits, getClientPayments, getClientNotes } = require('../utils/portal-data');
 
 function setupTwoClients(db) {
   const pa = addProperty(db, 'Alice', '1 A St');
@@ -93,6 +93,25 @@ test('getClientPayments returns only the client\'s paid invoices, with receipt l
   assert.equal(payments[0].receipt_url, '/receipt/tok-abc');
   assert.equal(totalPaid, 129.5);
   assert.ok(!payments.some(p => p.invoice_number === 'B-PAID'), 'must not see other client payment');
+});
+
+test('getClientNotes returns only this client\'s PUBLISHED notes', () => {
+  const db = makeDb();
+  const { pa, aId, pb, bId } = setupTwoClients(db);
+  const note = (cid, pid, body, published) => db.prepare(
+    "INSERT INTO client_notes (client_id, property_id, body, recommendation, published) VALUES (?,?,?,?,?)"
+  ).run(cid, pid, body, 'Recommend pre-emergent next round', published);
+  note(aId, pa, 'Crabgrass pressure on south edge', 1);  // Alice published
+  note(aId, pa, 'DRAFT - not ready', 0);                  // Alice draft (hidden)
+  note(bId, pb, 'Bob private note', 1);                   // Bob's (must not appear)
+
+  const { notes } = getClientNotes(db, aId);
+  assert.equal(notes.length, 1, 'only the one published note for Alice');
+  assert.equal(notes[0].body, 'Crabgrass pressure on south edge');
+  assert.equal(notes[0].recommendation, 'Recommend pre-emergent next round');
+  const blob = JSON.stringify(notes);
+  assert.ok(!blob.includes('DRAFT'), 'drafts must never be returned');
+  assert.ok(!blob.includes('Bob private'), 'must not see another client\'s note');
 });
 
 test('a client with no records gets empty, not an error', () => {

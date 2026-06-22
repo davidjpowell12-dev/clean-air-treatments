@@ -98,4 +98,24 @@ function getClientPayments(db, clientId) {
   return { payments, totalPaid };
 }
 
-module.exports = { getClientInvoices, getClientVisits, getClientPayments };
+/** Published observation/recommendation notes for the client, newest first.
+ *  Only published = 1 notes are ever returned (drafts stay staff-only). */
+function getClientNotes(db, clientId) {
+  const rows = db.prepare(`
+    SELECT title, body, recommendation, created_at
+      FROM client_notes
+     WHERE client_id = ? AND published = 1
+     ORDER BY created_at DESC, id DESC
+  `).all(clientId);
+
+  return {
+    notes: rows.map(n => ({
+      title: n.title || null,
+      body: n.body,
+      recommendation: n.recommendation || null,
+      date: n.created_at ? n.created_at.slice(0, 10) : null,
+    })),
+  };
+}
+
+module.exports = { getClientInvoices, getClientVisits, getClientPayments, getClientNotes };

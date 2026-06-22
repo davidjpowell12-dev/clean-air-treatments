@@ -525,6 +525,20 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)');
   ensureColumn(db, 'estimates', 'client_id', 'INTEGER REFERENCES clients(id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)');
+  // Client notes — staff-authored observations & recommendations, shown in the
+  // portal only when published. Distinct from internal schedules/applications notes.
+  db.exec(`CREATE TABLE IF NOT EXISTS client_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_id INTEGER NOT NULL REFERENCES clients(id),
+    property_id INTEGER REFERENCES properties(id),
+    visit_id INTEGER,
+    title TEXT, body TEXT NOT NULL, recommendation TEXT,
+    published INTEGER DEFAULT 0,
+    author INTEGER REFERENCES users(id),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )`);
+  db.exec('CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes(client_id)');
   try {
     const { backfillClients } = require('../utils/clients');
     const r = backfillClients(db);
