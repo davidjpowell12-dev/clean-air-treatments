@@ -139,8 +139,8 @@ function authPage(message, ok = false) {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Clean Air Lawn Care</title></head>
   <body style="font-family:system-ui,sans-serif;max-width:480px;margin:64px auto;padding:0 20px;text-align:center;color:#1f2937">
-    <h1 style="color:#3a6324;font-size:22px">Clean Air Lawn Care</h1>
-    <p style="font-size:16px;color:${ok ? '#256029' : '#9a3540'};margin-top:24px">${ok ? '✓ ' : ''}${message}</p>
+    <h1 style="color:#5a9616;font-size:22px">Clean Air Lawn Care</h1>
+    <p style="font-size:16px;color:${ok ? '#5a9616' : '#e74c3c'};margin-top:24px">${ok ? '✓ ' : ''}${message}</p>
   </body></html>`;
 }
 

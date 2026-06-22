@@ -5,18 +5,28 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Clean Air Lawn Care — My Account</title>
   <style>
-    :root { --green:#3a6324; --green2:#4a7c2e; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f4f5f7; }
+    /* Aligned to the app's design tokens (public/css/styles.css) */
+    :root {
+      --green:#78be20; --green-dark:#5a9616; --green-light:#e8f5d8;
+      --navy:#1d428a;
+      --red:#e74c3c; --red-light:#fde8e8;
+      --orange-dark:#9a6b1a; --orange-light:#fef3cd;
+      --ink:#333; --muted:#888; --line:#e0e0e0; --bg:#f8f9fa;
+      --grad-green:linear-gradient(135deg,#78be20 0%,#5a9616 100%);
+      --radius:12px;
+      --shadow:0 1px 3px rgba(0,0,0,0.08),0 1px 2px rgba(0,0,0,0.06);
+    }
     * { box-sizing:border-box; margin:0; padding:0; }
     body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif; background:var(--bg); color:var(--ink); }
     .wrap { max-width:640px; margin:0 auto; padding:20px 16px 48px; }
-    header { background:linear-gradient(135deg,var(--green2),var(--green)); color:#fff; padding:22px 16px; }
+    header { background:var(--grad-green); color:#fff; padding:22px 16px; }
     header .wrap { padding:0; display:flex; justify-content:space-between; align-items:center; }
     header h1 { font-size:18px; font-weight:700; }
     header .who { font-size:13px; opacity:.9; }
     .btn { display:inline-block; border:0; border-radius:10px; padding:14px 20px; font-size:15px; font-weight:700; cursor:pointer; }
-    .btn-primary { background:linear-gradient(135deg,var(--green2),#6b9e47); color:#fff; }
+    .btn-primary { background:var(--grad-green); color:#fff; }
     .btn-ghost { background:transparent; color:#fff; border:1px solid rgba(255,255,255,.5); padding:7px 12px; font-size:13px; }
-    .card { background:#fff; border-radius:12px; box-shadow:0 1px 4px rgba(0,0,0,.06); margin:16px 0; overflow:hidden; }
+    .card { background:#fff; border-radius:var(--radius); box-shadow:var(--shadow); margin:16px 0; overflow:hidden; }
     .card h2 { font-size:14px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); padding:14px 16px 0; }
     .row { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-top:1px solid var(--line); }
     .row:first-of-type { border-top:0; }
@@ -24,24 +34,24 @@
     .row .sub { font-size:13px; color:var(--muted); margin-top:2px; }
     .amt { font-weight:700; font-size:16px; }
     .pill { font-size:11px; font-weight:700; padding:3px 9px; border-radius:10px; text-transform:uppercase; letter-spacing:.3px; }
-    .pill.paid { background:#e8f5e9; color:#256029; }
-    .pill.overdue { background:#fdeef0; color:#9a3540; }
-    .pill.due, .pill.upcoming { background:#fff4e0; color:#9a6b1a; }
+    .pill.paid { background:var(--green-light); color:var(--green-dark); }
+    .pill.overdue { background:var(--red-light); color:var(--red); }
+    .pill.due, .pill.upcoming { background:var(--orange-light); color:var(--orange-dark); }
     .summary { text-align:center; padding:22px 16px; }
     .summary .label { font-size:12px; text-transform:uppercase; letter-spacing:1px; color:var(--muted); }
     .summary .big { font-size:40px; font-weight:800; margin-top:4px; }
     .empty { padding:18px 16px; color:var(--muted); font-size:14px; text-align:center; }
-    .link { font-size:13px; font-weight:600; color:var(--green2); text-decoration:none; margin-left:8px; }
+    .link { font-size:13px; font-weight:600; color:var(--green-dark); text-decoration:none; margin-left:8px; }
     /* login */
     .login { max-width:420px; margin:48px auto; text-align:center; }
-    .login h1 { color:var(--green); font-size:24px; margin-bottom:8px; }
+    .login h1 { color:var(--green-dark); font-size:24px; margin-bottom:8px; }
     .login p { color:var(--muted); font-size:15px; margin-bottom:24px; line-height:1.5; }
     .login input { width:100%; padding:14px; font-size:16px; border:1px solid var(--line); border-radius:10px; margin-bottom:12px; }
     .login .btn-primary { width:100%; }
     .note { font-size:13px; color:var(--muted); margin-top:16px; }
     .hide { display:none; }
     .msg { padding:14px; border-radius:10px; font-size:14px; margin-top:8px; }
-    .msg.ok { background:#e8f5e9; color:#256029; }
+    .msg.ok { background:var(--green-light); color:var(--green-dark); }
   </style>
 </head>
 <body>
