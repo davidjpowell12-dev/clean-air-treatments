@@ -6,6 +6,18 @@ const { getDb } = require('../db/database');
 const { requireAuth } = require('../middleware/auth');
 const { logAudit } = require('../db/audit');
 
+// List clients for the dedicated Notes screen picker (name/email search).
+router.get('/clients', requireAuth, (req, res) => {
+  const db = getDb();
+  const search = String(req.query.search || '').trim();
+  const rows = search
+    ? db.prepare("SELECT id, name, email, phone FROM clients WHERE name LIKE ? OR email LIKE ? ORDER BY name LIMIT 200").all('%' + search + '%', '%' + search + '%')
+    : db.prepare("SELECT id, name, email, phone FROM clients ORDER BY name LIMIT 200").all();
+  const cnt = db.prepare("SELECT COUNT(*) AS c, COALESCE(SUM(published),0) AS p FROM client_notes WHERE client_id = ?");
+  const clients = rows.map(r => { const x = cnt.get(r.id); return { ...r, note_count: x.c, published_count: x.p }; });
+  res.json({ ok: true, clients });
+});
+
 // List notes for a client (by client_id, or resolved from an estimate_id).
 // Returns drafts too — this is the staff view.
 router.get('/', requireAuth, (req, res) => {

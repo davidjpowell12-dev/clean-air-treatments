@@ -138,6 +138,9 @@ const App = {
       case 'messaging':
         MessagingPage.render();
         break;
+      case 'notes':
+        ClientNotesPage.render();
+        break;
       case 'activate':
         ActivatePage.render();
         break;
