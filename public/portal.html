@@ -127,6 +127,8 @@
     const $ = (id) => document.getElementById(id);
     const money = (n) => '$' + Number(n || 0).toFixed(2);
     const fmtDate = (d) => d ? new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' }) : '';
+    // Escape all DB-sourced strings before inserting as HTML (defense-in-depth).
+    const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
     async function api(path) {
       try {
@@ -180,9 +182,9 @@
       const outstanding = ((inv && inv.invoices) || []).filter(i => i.status !== 'paid');
       ibox.innerHTML = outstanding.length
         ? outstanding.map(i => rowHtml(
-            i.invoice_number + (i.installment ? ` · Installment ${i.installment}` : ''),
+            esc(i.invoice_number) + (i.installment ? ` · Installment ${esc(i.installment)}` : ''),
             'Due ' + fmtDate(i.due_date),
-            `<span class="amt">${money(i.amount)}</span> <span class="pill ${i.status}">${i.status}</span>`)).join('')
+            `<span class="amt">${money(i.amount)}</span> <span class="pill ${esc(i.status)}">${esc(i.status)}</span>`)).join('')
         : '<div class="empty">You’re all paid up — nothing due.</div>';
 
       // Upcoming visits
@@ -190,8 +192,8 @@
       const upcoming = (vis && vis.upcoming) || [];
       vbox.innerHTML = upcoming.length
         ? upcoming.map(v => rowHtml(
-            v.service,
-            (v.round ? 'Round ' + v.round + ' · ' : '') + (v.address || ''),
+            esc(v.service),
+            (v.round ? 'Round ' + esc(v.round) + ' · ' : '') + esc(v.address || ''),
             `<span class="sub">${fmtDate(v.date)}</span>`)).join('')
         : '<div class="empty">No upcoming visits scheduled.</div>';
 
@@ -200,15 +202,14 @@
       const payments = (pay && pay.payments) || [];
       pbox.innerHTML = payments.length
         ? payments.map(p => rowHtml(
-            p.invoice_number,
-            'Paid ' + fmtDate(p.paid_at) + ' · ' + p.method,
+            esc(p.invoice_number),
+            'Paid ' + fmtDate(p.paid_at) + ' · ' + esc(p.method),
             `<span class="amt">${money(p.amount)}</span>` +
-            (p.receipt_url ? ` <a class="link" href="${p.receipt_url}" target="_blank" rel="noopener">Receipt</a>` : ''))).join('')
+            (p.receipt_url ? ` <a class="link" href="${encodeURI(p.receipt_url)}" target="_blank" rel="noopener">Receipt</a>` : ''))).join('')
         : '<div class="empty">No payments yet.</div>';
 
       // Notes from your team — observations & recommendations (hide card if none)
       const notes = (nt && nt.notes) || [];
-      const esc = (s) => String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;' }[c]));
       if (notes.length) {
         $('notes').innerHTML = notes.map(n => `
           <div class="note-item">
@@ -228,8 +229,8 @@
       const recent = (vis && vis.recent) || [];
       hbox.innerHTML = recent.length
         ? recent.map(v => rowHtml(
-            v.service,
-            v.address || '',
+            esc(v.service),
+            esc(v.address || ''),
             `<span class="sub">${fmtDate(v.date)}</span>`)).join('')
         : '<div class="empty">No completed visits yet.</div>';
     }

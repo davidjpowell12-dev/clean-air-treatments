@@ -41,6 +41,18 @@ function requireClient(req, res, next) {
   next();
 }
 
+// In-memory rate limiter for the unauthenticated request-link endpoint.
+// Single-instance app, so a Map suffices. Caps abuse (spamming a customer's
+// inbox/phone, flooding login tokens) without revealing account existence.
+const _rl = new Map(); // ip -> [timestamps]
+function rateLimited(ip, max = 5, windowMs = 15 * 60 * 1000) {
+  const now = Date.now();
+  const arr = (_rl.get(ip) || []).filter(t => now - t < windowMs);
+  arr.push(now);
+  _rl.set(ip, arr);
+  return arr.length > max;
+}
+
 // Find a client by email or phone (last-10-digits match), or null.
 function findClient(db, { email: emailInput, phone }) {
   if (emailInput) {
@@ -61,6 +73,10 @@ function findClient(db, { email: emailInput, phone }) {
 router.post('/request-link', async (req, res) => {
   const SAME = { ok: true, message: "If that account exists, we've sent a sign-in link." };
   try {
+    const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+    if (rateLimited(ip)) {
+      return res.status(429).json({ ok: false, message: 'Too many requests. Please wait a few minutes and try again.' });
+    }
     const db = getDb();
     const client = findClient(db, req.body || {});
     if (client) {
