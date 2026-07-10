@@ -39,7 +39,7 @@ const InvoicingPage = {
       const today = new Date().toISOString().split('T')[0];
       this._allInvoices = invoices;
       this._today = today;
-      this._currentView = this._currentView || 'first';
+      this._currentView = this._currentView || 'round';
 
       main.innerHTML = `
         <div class="page-header">
@@ -78,14 +78,10 @@ const InvoicingPage = {
 
         <!-- View tabs -->
         <div class="est-status-tabs">
-          <button class="est-tab ${this._currentView === 'first' ? 'active' : ''}" data-view="first" title="First invoice from every estimate — the migration kickoff queue">
-            🚀 First Round <span class="est-tab-count" id="countFirst">0</span>
-          </button>
-          <button class="est-tab ${this._currentView === 'second' ? 'active' : ''}" data-view="second" title="Second monthly installment — Round 2 work queue">
-            🔁 Second Round <span class="est-tab-count" id="countSecond">0</span>
-          </button>
-          <button class="est-tab ${this._currentView === 'third' ? 'active' : ''}" data-view="third" title="Third monthly installment — Round 3 work queue">
-            🔂 Third Round <span class="est-tab-count" id="countThird">0</span>
+          <button class="est-tab ${this._currentView === 'round' ? 'active' : ''}" data-view="round" title="Monthly installment work queue — use the arrows to switch rounds">
+            <span onclick="event.stopPropagation();InvoicingPage.stepRound(-1)" style="padding:0 6px;cursor:pointer;user-select:none;" title="Previous round">◀</span>
+            🚀 Round <span id="roundNum">${this._currentRound || 1}</span> <span class="est-tab-count" id="countRound">0</span>
+            <span onclick="event.stopPropagation();InvoicingPage.stepRound(1)" style="padding:0 6px;cursor:pointer;user-select:none;" title="Next round">▶</span>
           </button>
           <button class="est-tab ${this._currentView === 'attention' ? 'active' : ''}" data-view="attention">
             Needs Attention <span class="est-tab-count" id="countAttention">0</span>
@@ -180,49 +176,48 @@ const InvoicingPage = {
     const in30Str = in30.toISOString().slice(0, 10);
 
     // Count each view (so the tab numbers are always accurate)
-    let cAttention = 0, cUpcoming = 0, cHistory = 0, cFirst = 0, cSecond = 0, cThird = 0;
+    let cAttention = 0, cUpcoming = 0, cHistory = 0;
+    // Unpaid invoices per installment round. Round 1 also includes
+    // single-payment invoices (pay-in-full / per-service) — the original
+    // kickoff-queue behavior.
+    const roundCounts = {};
+    let maxRound = 1;
     for (const i of invoices) {
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
                       i.due_date && i.due_date < today;
       if (i.status === 'failed' || overdue) cAttention++;
       else if (i.status === 'scheduled' || (i.status === 'pending' && i.due_date && i.due_date <= in30Str)) cUpcoming++;
       else if (i.status === 'paid' || i.status === 'void') cHistory++;
-      // "First round": installment #1 of any monthly plan, OR a single-payment
-      // (full / per-service) invoice — and not yet paid/void. These are the
-      // actionable migration items.
-      if (this._isFirstRound(i) && i.status !== 'paid' && i.status !== 'void') cFirst++;
-      // "Second round": installment #2, not yet paid/void.
-      if (this._isSecondRound(i) && i.status !== 'paid' && i.status !== 'void') cSecond++;
-      if (this._isThirdRound(i) && i.status !== 'paid' && i.status !== 'void') cThird++;
+      maxRound = Math.max(maxRound, i.total_installments || i.installment_number || 1);
+      if (i.status !== 'paid' && i.status !== 'void') {
+        if (this._isFirstRound(i)) roundCounts[1] = (roundCounts[1] || 0) + 1;
+        else if (i.installment_number >= 2) roundCounts[i.installment_number] = (roundCounts[i.installment_number] || 0) + 1;
+      }
+    }
+    this._maxRound = maxRound;
+    // Default to the lowest round that still has unpaid invoices — that's the
+    // round currently being worked. Once the user steps manually, keep theirs.
+    if (!this._currentRound) {
+      let def = 1;
+      for (let r = 1; r <= maxRound; r++) { if (roundCounts[r] > 0) { def = r; break; } }
+      this._currentRound = def;
     }
     const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
     setCount('countAttention', cAttention);
     setCount('countUpcoming', cUpcoming);
     setCount('countHistory', cHistory);
-    setCount('countFirst', cFirst);
-    setCount('countSecond', cSecond);
-    setCount('countThird', cThird);
+    setCount('countRound', roundCounts[this._currentRound] || 0);
+    setCount('roundNum', this._currentRound);
     setCount('countAll', invoices.length);
 
     // Filter to current view
     const view = this._currentView;
     let filtered = invoices.filter(i => {
       if (view === 'all') return true;
-      // First Round = the kickoff queue. Show ONLY unpaid first invoices —
-      // paid ones don't need attention so they belong in History.
-      if (view === 'first') {
-        return this._isFirstRound(i) &&
-               i.status !== 'paid' && i.status !== 'void';
-      }
-      // Second Round = monthly installment #2 work queue. Same logic as
-      // First Round: show only the unpaid ones that still need working.
-      if (view === 'second') {
-        return this._isSecondRound(i) &&
-               i.status !== 'paid' && i.status !== 'void';
-      }
-      // Third Round = monthly installment #3 work queue.
-      if (view === 'third') {
-        return this._isThirdRound(i) &&
+      // Round N work queue: unpaid invoices for the selected installment
+      // round. Paid ones don't need attention so they belong in History.
+      if (view === 'round') {
+        return this._isRound(i, this._currentRound || 1) &&
                i.status !== 'paid' && i.status !== 'void';
       }
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
@@ -266,7 +261,7 @@ const InvoicingPage = {
 
     const list = document.getElementById('invoicesList');
     if (list) {
-      list.innerHTML = (view === 'first' || view === 'second' || view === 'third')
+      list.innerHTML = view === 'round'
         ? this._renderFirstRound(filtered, query)
         : this._renderCustomerGroups(filtered, query);
     }
@@ -283,16 +278,23 @@ const InvoicingPage = {
     return false;
   },
 
-  // True for installment #2 of a monthly plan — the Round 2 work queue.
-  // Only monthly plans have installment numbers, so this naturally excludes
-  // pay-in-full and per-service (single-payment) invoices.
-  _isSecondRound(i) {
-    return i.installment_number === 2;
+  // True if the invoice belongs to installment round n. Round 1 uses the
+  // broader kickoff-queue rule (installment #1 OR single-payment); rounds
+  // 2+ are exact installment matches, which naturally excludes pay-in-full
+  // and per-service invoices.
+  _isRound(i, n) {
+    if (n === 1) return this._isFirstRound(i);
+    return i.installment_number === n;
   },
 
-  // True for installment #3 of a monthly plan — the Round 3 work queue.
-  _isThirdRound(i) {
-    return i.installment_number === 3;
+  // ◀ ▶ stepper on the Round tab. Clamps to [1, max installments seen],
+  // activates the round view, and refreshes the list + count badge.
+  stepRound(delta) {
+    const max = this._maxRound || 8;
+    this._currentRound = Math.min(max, Math.max(1, (this._currentRound || 1) + delta));
+    this._currentView = 'round';
+    document.querySelectorAll('.est-tab').forEach(t => t.classList.toggle('active', t.dataset.view === 'round'));
+    this._refreshInvoiceList();
   },
 
   // Flat actionable list: one row per first-round invoice, sorted by what
@@ -304,8 +306,8 @@ const InvoicingPage = {
       return `
         <div class="empty-state" style="padding:40px 16px;text-align:center;">
           <div style="font-size:40px;margin-bottom:10px;">🎉</div>
-          <h3 style="margin-bottom:6px;">${query ? 'No matches' : 'Queue is clear'}</h3>
-          <p style="color:var(--gray-500);font-size:14px;">${query ? 'No unpaid first invoices match your search.' : 'Every customer\'s first invoice has been paid. Switch to All to see history.'}</p>
+          <h3 style="margin-bottom:6px;">${query ? 'No matches' : `Round ${this._currentRound || 1} is clear`}</h3>
+          <p style="color:var(--gray-500);font-size:14px;">${query ? `No unpaid Round ${this._currentRound || 1} invoices match your search.` : 'Nothing unpaid in this round. Use the ◀ ▶ arrows to work another round, or All for history.'}</p>
         </div>
       `;
     }
