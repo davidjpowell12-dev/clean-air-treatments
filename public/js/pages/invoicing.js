@@ -84,6 +84,9 @@ const InvoicingPage = {
           <button class="est-tab ${this._currentView === 'second' ? 'active' : ''}" data-view="second" title="Second monthly installment — Round 2 work queue">
             🔁 Second Round <span class="est-tab-count" id="countSecond">0</span>
           </button>
+          <button class="est-tab ${this._currentView === 'third' ? 'active' : ''}" data-view="third" title="Third monthly installment — Round 3 work queue">
+            🔂 Third Round <span class="est-tab-count" id="countThird">0</span>
+          </button>
           <button class="est-tab ${this._currentView === 'attention' ? 'active' : ''}" data-view="attention">
             Needs Attention <span class="est-tab-count" id="countAttention">0</span>
           </button>
@@ -177,7 +180,7 @@ const InvoicingPage = {
     const in30Str = in30.toISOString().slice(0, 10);
 
     // Count each view (so the tab numbers are always accurate)
-    let cAttention = 0, cUpcoming = 0, cHistory = 0, cFirst = 0, cSecond = 0;
+    let cAttention = 0, cUpcoming = 0, cHistory = 0, cFirst = 0, cSecond = 0, cThird = 0;
     for (const i of invoices) {
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
                       i.due_date && i.due_date < today;
@@ -190,6 +193,7 @@ const InvoicingPage = {
       if (this._isFirstRound(i) && i.status !== 'paid' && i.status !== 'void') cFirst++;
       // "Second round": installment #2, not yet paid/void.
       if (this._isSecondRound(i) && i.status !== 'paid' && i.status !== 'void') cSecond++;
+      if (this._isThirdRound(i) && i.status !== 'paid' && i.status !== 'void') cThird++;
     }
     const setCount = (id, n) => { const el = document.getElementById(id); if (el) el.textContent = n; };
     setCount('countAttention', cAttention);
@@ -197,6 +201,7 @@ const InvoicingPage = {
     setCount('countHistory', cHistory);
     setCount('countFirst', cFirst);
     setCount('countSecond', cSecond);
+    setCount('countThird', cThird);
     setCount('countAll', invoices.length);
 
     // Filter to current view
@@ -213,6 +218,11 @@ const InvoicingPage = {
       // First Round: show only the unpaid ones that still need working.
       if (view === 'second') {
         return this._isSecondRound(i) &&
+               i.status !== 'paid' && i.status !== 'void';
+      }
+      // Third Round = monthly installment #3 work queue.
+      if (view === 'third') {
+        return this._isThirdRound(i) &&
                i.status !== 'paid' && i.status !== 'void';
       }
       const overdue = (i.status === 'pending' || i.status === 'failed') &&
@@ -256,7 +266,7 @@ const InvoicingPage = {
 
     const list = document.getElementById('invoicesList');
     if (list) {
-      list.innerHTML = (view === 'first' || view === 'second')
+      list.innerHTML = (view === 'first' || view === 'second' || view === 'third')
         ? this._renderFirstRound(filtered, query)
         : this._renderCustomerGroups(filtered, query);
     }
@@ -278,6 +288,11 @@ const InvoicingPage = {
   // pay-in-full and per-service (single-payment) invoices.
   _isSecondRound(i) {
     return i.installment_number === 2;
+  },
+
+  // True for installment #3 of a monthly plan — the Round 3 work queue.
+  _isThirdRound(i) {
+    return i.installment_number === 3;
   },
 
   // Flat actionable list: one row per first-round invoice, sorted by what
