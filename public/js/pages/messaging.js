@@ -29,21 +29,13 @@ const MessagingPage = {
           <h2>Messaging</h2>
         </div>
 
-        ${!status.twilio_configured ? `
-          <div class="card" style="border-left:4px solid var(--orange);margin-bottom:12px;">
-            <div class="card-body" style="padding:10px 14px;font-size:13px;">
-              <strong style="color:var(--orange);">DRY-RUN MODE</strong> — Twilio isn't configured yet.
-              Drafts can be created, edited, and "sent" to test the flow, but nothing will actually leave the building.
-              Add <code>TWILIO_ACCOUNT_SID</code>, <code>TWILIO_AUTH_TOKEN</code>, and <code>TWILIO_PHONE_NUMBER</code> to Railway once A2P is approved.
-            </div>
+        <div class="card" style="border-left:4px solid var(--green);margin-bottom:12px;">
+          <div class="card-body" style="padding:10px 14px;font-size:13px;">
+            <strong style="color:var(--green-dark,#2d6a1e);">📱 SENDS FROM YOUR PHONE</strong> —
+            tapping Send opens your Messages app with the text and number pre-filled (same as sending
+            an estimate or invoice link). Hit send there, and the draft is marked sent here.
           </div>
-        ` : `
-          <div class="card" style="border-left:4px solid var(--green);margin-bottom:12px;">
-            <div class="card-body" style="padding:10px 14px;font-size:13px;">
-              <strong style="color:var(--green-dark,#2d6a1e);">LIVE</strong> — Twilio is configured. Messages will be sent for real.
-            </div>
-          </div>
-        `}
+        </div>
 
         <div class="fu-tabs">
           <button class="fu-tab ${this.currentTab === 'heads_up' ? 'active' : ''}" data-tab="heads_up">
@@ -85,7 +77,7 @@ const MessagingPage = {
           ${this.currentTab !== 'sent' && drafts.length > 1 ? `
             <div class="card" style="margin-bottom:12px;padding:12px 16px;background:var(--gray-50);display:flex;justify-content:space-between;align-items:center;">
               <span style="font-size:14px;font-weight:600;">${drafts.length} drafts ready</span>
-              <button class="btn btn-primary btn-sm" onclick="MessagingPage.sendAll('${this.currentTab}')">Send All ${drafts.length}</button>
+              <span style="font-size:12px;color:var(--gray-500);">Send each below — your Messages app opens one at a time</span>
             </div>
           ` : ''}
           <div>
@@ -188,40 +180,49 @@ const MessagingPage = {
     } catch (e) { /* silent autosave */ }
   },
 
+  // Mirrors EstimatesPage._openSMS / InvoicingPage._openSMS — keep in sync.
+  _openSMS(phone, message) {
+    const ua = navigator.userAgent || '';
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const sep = isIOS ? '&' : '?';
+    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(message)}`;
+    const a = document.createElement('a');
+    a.href = smsUrl;
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => a.remove(), 100);
+  },
+
+  // Device-SMS flow: open the user's own Messages app with the text
+  // pre-filled (sends from their personal number — no Twilio/A2P needed),
+  // then record the draft as sent.
   async sendOne(id) {
     const textarea = document.querySelector(`.msg-draft-text[data-draft-id="${id}"]`);
-    const phone = document.querySelector(`.msg-draft-phone[data-draft-id="${id}"]`);
+    const phoneInput = document.querySelector(`.msg-draft-phone[data-draft-id="${id}"]`);
     if (textarea) {
       await this.autoSaveDraft(textarea);
     }
-    try {
-      const r = await Api.post(`/api/messaging/drafts/${id}/send`, {});
-      if (r.success) {
-        App.toast(r.dry_run ? 'Dry-run sent (no actual SMS)' : 'Sent ✓', 'success');
-        this.render();
-      } else {
-        App.toast('Send failed: ' + (r.error || 'unknown'), 'error');
-      }
-    } catch (err) {
-      App.toast('Send failed: ' + err.message, 'error');
+
+    const message = textarea ? textarea.value : '';
+    const cleanPhone = ((phoneInput && phoneInput.value) || '').replace(/\D/g, '');
+    if (cleanPhone.length < 10) {
+      App.toast('Invalid phone number on this draft', 'error');
+      return;
     }
-  },
+    if (!message.trim()) {
+      App.toast('Message is empty', 'error');
+      return;
+    }
 
-  async sendAll(type) {
-    const drafts = document.querySelectorAll('.msg-draft-text');
-    // Save any pending edits first
-    await Promise.all(Array.from(drafts).map(ta => this.autoSaveDraft(ta)));
-
-    const confirmed = confirm(`Send ${drafts.length} message${drafts.length === 1 ? '' : 's'} now?`);
-    if (!confirmed) return;
+    this._openSMS(cleanPhone, message);
 
     try {
-      const r = await Api.post('/api/messaging/drafts/send-all', { type });
-      const msg = `${r.sent} sent${r.failed ? ', ' + r.failed + ' failed' : ''}${r.dry_run ? ' (dry-run)' : ''}`;
-      App.toast(msg, r.failed ? 'error' : 'success');
+      await Api.post(`/api/messaging/drafts/${id}/mark-sent`, {});
+      App.toast('Opened in Messages — marked sent ✓', 'success');
       this.render();
     } catch (err) {
-      App.toast('Batch send failed: ' + err.message, 'error');
+      App.toast('Could not mark sent: ' + err.message, 'error');
     }
   },
 

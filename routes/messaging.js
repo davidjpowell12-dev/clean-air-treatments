@@ -167,6 +167,27 @@ router.put('/drafts/:id', requireAuth, (req, res) => {
 });
 
 // Send a draft (live Twilio if configured, dry-run otherwise)
+// Mark a draft sent WITHOUT Twilio — used by the device-SMS flow where
+// tapping Send opens the user's own Messages app (texts come from their
+// personal number, same as estimates/invoices). We record it as sent so
+// the queue stays accurate.
+router.post('/drafts/:id/mark-sent', requireAuth, (req, res) => {
+  const db = getDb();
+  const draft = db.prepare('SELECT * FROM message_drafts WHERE id = ?').get(req.params.id);
+  if (!draft) return res.status(404).json({ error: 'Draft not found' });
+  if (draft.status === 'sent') return res.status(400).json({ error: 'Already sent' });
+
+  db.prepare(`
+    UPDATE message_drafts SET
+      status = 'sent', sent_at = CURRENT_TIMESTAMP, sent_by = ?,
+      send_result = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(req.session.userId, JSON.stringify({ success: true, via: 'device_sms' }), draft.id);
+
+  logAudit(db, 'message_draft', draft.id, req.session.userId, 'send', { via: 'device_sms' });
+  res.json({ success: true, via: 'device_sms', draft_id: draft.id });
+});
+
 router.post('/drafts/:id/send', requireAuth, async (req, res) => {
   const db = getDb();
   const draft = db.prepare('SELECT * FROM message_drafts WHERE id = ?').get(req.params.id);
