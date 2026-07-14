@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS properties (
   qbo_customer_id TEXT,
   sms_opted_in INTEGER DEFAULT 1,
   is_active INTEGER DEFAULT 1,
+  heads_up_note TEXT,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -229,6 +230,7 @@ CREATE TABLE IF NOT EXISTS schedules (
   program_id TEXT,
   service_type TEXT,
   estimate_id INTEGER REFERENCES estimates(id),
+  heads_up_emailed_at DATETIME,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

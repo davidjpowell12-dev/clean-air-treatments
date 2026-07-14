@@ -124,6 +124,7 @@ const PropertiesPage = {
             <div class="detail-row"><span class="detail-label">Soil Type</span><span class="detail-value">${this.esc(prop.soil_type || 'N/A')}</span></div>
             <div class="detail-row"><span class="detail-label">Last Treatment</span><span class="detail-value">${prop.last_application_date || 'Never'}</span></div>
             ${prop.notes ? `<div class="detail-row"><span class="detail-label">Notes</span><span class="detail-value">${this.esc(prop.notes)}</span></div>` : ''}
+            ${prop.heads_up_note ? `<div class="detail-row"><span class="detail-label">🔔 Heads-up</span><span class="detail-value">${this.esc(prop.heads_up_note)}</span></div>` : ''}
             ${prop.profitability && prop.profitability.total_revenue > 0 ? `
               <div style="margin-top:16px;padding-top:16px;border-top:2px solid var(--gray-200);">
                 <h4 style="font-size:14px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:10px;">Profitability</h4>
@@ -378,6 +379,10 @@ const PropertiesPage = {
             <div class="form-group">
               <label>Notes</label>
               <textarea name="notes" rows="3">${this.esc(prop.notes || '')}</textarea>
+            </div>
+            <div class="form-group">
+              <label>Heads-up note <span style="font-weight:400;color:var(--gray-500);">(added to this client's pre-visit reminders)</span></label>
+              <textarea name="heads_up_note" rows="2" placeholder="e.g. Please have pets and kids inside before we arrive">${this.esc(prop.heads_up_note || '')}</textarea>
             </div>
             <button type="submit" class="btn btn-primary btn-full">${editId ? 'Save Changes' : 'Add Property'}</button>
           </form>

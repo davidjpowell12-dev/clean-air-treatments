@@ -290,13 +290,14 @@ router.put('/:id', requireAuth, (req, res) => {
   const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Property not found' });
 
-  const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes } = req.body;
+  const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes, heads_up_note } = req.body;
 
   db.prepare(`
     UPDATE properties SET
       customer_name = COALESCE(?, customer_name),
       address = COALESCE(?, address),
       city = ?, state = ?, zip = ?, email = ?, phone = ?, sqft = ?, soil_type = ?, notes = ?,
+      heads_up_note = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -309,6 +310,7 @@ router.put('/:id', requireAuth, (req, res) => {
     sqft !== undefined ? sqft : existing.sqft,
     soil_type !== undefined ? soil_type : existing.soil_type,
     notes !== undefined ? notes : existing.notes,
+    heads_up_note !== undefined ? heads_up_note : existing.heads_up_note,
     req.params.id
   );
 

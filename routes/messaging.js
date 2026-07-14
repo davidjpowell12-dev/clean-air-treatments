@@ -16,7 +16,7 @@ const express = require('express');
 const { getDb } = require('../db/database');
 const { logAudit } = require('../db/audit');
 const { requireAuth, requireAdmin } = require('../middleware/auth');
-const { composeHeadsUp, composeCompletion } = require('../utils/message-composer');
+const { composeCompletion } = require('../utils/message-composer');
 const { sendSms, isConfigured } = require('../utils/twilio');
 
 const router = express.Router();
@@ -38,62 +38,18 @@ router.get('/status', requireAuth, (req, res) => {
 
 // Generate heads-up drafts for visits on a given date. Default = tomorrow.
 // Idempotent: skips properties that already have an undeleted draft for that
-// date. Returns counts of created, skipped, and total.
+// date. Shared implementation with the evening cron — see utils/heads-up.js.
 router.post('/compose/heads-ups', requireAuth, (req, res) => {
   const db = getDb();
-  const date = (req.body && req.body.date) || tomorrowLocal();
-
-  // Pull all scheduled visits for that day that aren't already completed
-  const visits = db.prepare(`
-    SELECT s.*, p.customer_name, p.address, p.city, p.phone, p.sms_opted_in
-    FROM schedules s
-    JOIN properties p ON p.id = s.property_id
-    WHERE s.scheduled_date = ?
-      AND s.status != 'completed'
-      AND s.status != 'cancelled'
-    ORDER BY p.customer_name
-  `).all(date);
-
-  let created = 0, skipped_existing = 0, skipped_opted_out = 0, skipped_no_phone = 0;
-  const createdDrafts = [];
-
-  for (const v of visits) {
-    // Skip if an active draft already exists for this schedule
-    const existing = db.prepare(`
-      SELECT id FROM message_drafts
-      WHERE schedule_id = ? AND type = 'heads_up' AND status IN ('draft','sent')
-    `).get(v.id);
-    if (existing) { skipped_existing++; continue; }
-
-    if (v.sms_opted_in === 0) { skipped_opted_out++; continue; }
-    if (!v.phone || !v.phone.trim()) { skipped_no_phone++; continue; }
-
-    const composedText = composeHeadsUp(db, v, v);
-    const result = db.prepare(`
-      INSERT INTO message_drafts (
-        property_id, schedule_id, type, service_date, service_summary,
-        composed_text, to_phone, status
-      ) VALUES (?, ?, 'heads_up', ?, ?, ?, ?, 'draft')
-    `).run(
-      v.property_id, v.id, v.scheduled_date, v.service_type || '',
-      composedText, v.phone
-    );
-    createdDrafts.push(result.lastInsertRowid);
-    created++;
-  }
+  const { generateHeadsUpDrafts } = require('../utils/heads-up');
+  const result = generateHeadsUpDrafts(db, (req.body && req.body.date) || tomorrowLocal());
 
   logAudit(db, 'message_compose', 0, req.session.userId, 'compose_heads_ups', {
-    date, created, skipped_existing, skipped_opted_out, skipped_no_phone
+    date: result.date, created: result.created, skipped_existing: result.skipped_existing,
+    skipped_opted_out: result.skipped_opted_out, skipped_no_phone: result.skipped_no_phone
   });
 
-  res.json({
-    date,
-    created,
-    skipped_existing,
-    skipped_opted_out,
-    skipped_no_phone,
-    draft_ids: createdDrafts
-  });
+  res.json(result);
 });
 
 // Helper that other routes (applications.js) call to create a completion draft.

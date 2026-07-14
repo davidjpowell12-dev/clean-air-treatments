@@ -67,8 +67,9 @@ const MessagingPage = {
               <button class="btn btn-primary btn-sm" onclick="MessagingPage.composeHeadsUps('${tomorrowDate}')">+ Generate drafts</button>
             </div>
             <div class="card-body" style="font-size:13px;color:var(--gray-600);padding:10px 16px;">
-              Pulls tomorrow's scheduled visits and pre-composes a heads-up text for each opted-in customer with a phone number.
-              Already-composed drafts won't be duplicated. You can also pick a different date:
+              Drafts for tomorrow's visits are generated automatically every evening after 6 PM (customers with an
+              email also get an automatic heads-up email then). Use Generate to run it early, or pick a different date.
+              Already-composed drafts won't be duplicated:
               <input type="date" id="msgComposeDate" value="${tomorrowDate}" style="margin-left:8px;padding:6px 10px;border:1px solid var(--gray-300);border-radius:6px;">
               <button class="btn btn-outline btn-sm" onclick="MessagingPage.composeHeadsUps(document.getElementById('msgComposeDate').value)">Generate</button>
             </div>
@@ -78,7 +79,7 @@ const MessagingPage = {
         ${drafts.length === 0 ? `
           <div class="empty-state">
             <h3>No ${this.currentTab === 'heads_up' ? 'heads-up' : this.currentTab === 'completion' ? 'completion' : 'sent'} drafts</h3>
-            <p>${this.currentTab === 'heads_up' ? 'Click "Generate drafts" above to create tomorrow\'s heads-up messages.' : this.currentTab === 'completion' ? 'Completion drafts are queued automatically when a tech logs an application.' : 'Sent messages will appear here.'}</p>
+            <p>${this.currentTab === 'heads_up' ? 'Drafts appear automatically each evening for tomorrow\'s visits — or click "Generate drafts" to create them now.' : this.currentTab === 'completion' ? 'Completion drafts are queued automatically when a tech logs an application.' : 'Sent messages will appear here.'}</p>
           </div>
         ` : `
           ${this.currentTab !== 'sent' && drafts.length > 1 ? `

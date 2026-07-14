@@ -525,6 +525,12 @@ function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)');
   ensureColumn(db, 'estimates', 'client_id', 'INTEGER REFERENCES clients(id)');
   db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)');
+  // Heads-up notifications: per-property custom line included in pre-visit
+  // messages ("Please have pets and kids inside"), and an idempotency stamp on
+  // schedules so the evening auto-email never sends twice for one visit.
+  ensureColumn(db, 'properties', 'heads_up_note', 'TEXT');
+  ensureColumn(db, 'schedules', 'heads_up_emailed_at', 'DATETIME');
+
   // Client notes — staff-authored observations & recommendations, shown in the
   // portal only when published. Distinct from internal schedules/applications notes.
   db.exec(`CREATE TABLE IF NOT EXISTS client_notes (

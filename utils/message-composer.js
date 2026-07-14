@@ -50,7 +50,9 @@ function parseServiceNames(serviceType) {
 // Compose the HEADS-UP text for tomorrow's visit.
 // schedule: a row from schedules (with property_id, scheduled_date, service_type)
 // property: a row from properties (customer_name, address, phone, etc.)
-function composeHeadsUp(db, schedule, property) {
+// opts.omitOptOut: skip the SMS "Reply STOP" line (for the email version,
+// where that instruction makes no sense).
+function composeHeadsUp(db, schedule, property, opts = {}) {
   const businessName = getSetting(db, 'msg_business_name', 'Clean Air Treatments');
   const greeting = getSetting(db, 'msg_greeting', 'Hi {{first_name}},');
   const headsUpIntro = getSetting(db, 'msg_heads_up_intro', '{{business_name}} will be at {{address}} {{friendly_date}} for:');
@@ -95,10 +97,18 @@ function composeHeadsUp(db, schedule, property) {
     parts.push('');
     parts.push('After we\'re done: ' + Array.from(actions).join('; ') + '.');
   }
+  // Per-property custom request (e.g. "Please have pets and kids inside") —
+  // set on the property as heads_up_note.
+  if (property.heads_up_note && property.heads_up_note.trim()) {
+    parts.push('');
+    parts.push(property.heads_up_note.trim());
+  }
   parts.push('');
   parts.push(substitute(closing, vars));
-  parts.push('');
-  parts.push(substitute(optOut, vars));
+  if (!opts.omitOptOut) {
+    parts.push('');
+    parts.push(substitute(optOut, vars));
+  }
 
   return parts.join('\n');
 }

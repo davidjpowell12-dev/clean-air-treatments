@@ -356,4 +356,33 @@ app.listen(PORT, '0.0.0.0', () => {
     }
   }, 60 * 60 * 1000); // Check every hour
   console.log('[startup] Daily auto-charge cron scheduled (runs after 8 AM)');
+
+  // ─── Evening heads-ups for tomorrow's visits ────────────────
+  // Runs once per day after 6 PM: auto-emails every customer scheduled
+  // tomorrow (idempotent per visit) and pre-generates the SMS drafts so
+  // they're waiting for review in Messaging. Emails send automatically;
+  // SMS stays draft-first (user-controlled dispatch).
+  let lastHeadsUpDate = null;
+  setInterval(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (lastHeadsUpDate === today) return;
+
+    const hour = new Date().getHours();
+    if (hour < 18) return;
+
+    lastHeadsUpDate = today;
+    try {
+      const { runEveningHeadsUps } = require('./utils/heads-up');
+      const email = require('./utils/email');
+      const { getDb } = require('./db/database');
+      runEveningHeadsUps(getDb(), {
+        sendEmail: email.isEnabled() ? email.sendHeadsUpEmail : null
+      })
+        .then(result => console.log('[cron] Evening heads-ups:', JSON.stringify(result)))
+        .catch(err => console.error('[cron] Evening heads-ups failed:', err.message));
+    } catch (err) {
+      console.error('[cron] Could not run heads-ups:', err.message);
+    }
+  }, 60 * 60 * 1000); // Check every hour
+  console.log('[startup] Evening heads-up cron scheduled (runs after 6 PM for next day)');
 });

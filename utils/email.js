@@ -252,6 +252,45 @@ async function sendPaymentConfirmationEmail({ to, customerName, invoiceNumber, a
   });
 }
 
+// Evening-before service heads-up. bodyText is the composed plain-text
+// message from utils/message-composer (same text as the SMS, minus opt-out);
+// we escape it and preserve line breaks inside the branded shell.
+async function sendHeadsUpEmail({ to, customerName, serviceDate, serviceSummary, bodyText }) {
+  if (!init()) throw new Error('Email not configured.');
+
+  const dateStr = serviceDate
+    ? new Date(serviceDate + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
+    : 'soon';
+  const bodyHtml = escHtml(bodyText || '').replace(/\n/g, '<br>');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f5f7;">
+  <div style="max-width:560px;margin:0 auto;padding:24px 16px;">
+    <div style="background:linear-gradient(135deg,#4a7c2e 0%,#3a6324 100%);border-radius:12px 12px 0 0;padding:24px;text-align:center;">
+      <h1 style="color:white;font-size:20px;margin:0;">Clean Air Lawn Care</h1>
+      <p style="color:rgba(255,255,255,0.85);font-size:14px;margin:4px 0 0;">Service heads-up — ${escHtml(dateStr)}</p>
+    </div>
+    <div style="background:white;padding:32px 24px;border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+      <p style="font-size:15px;color:#374151;line-height:1.7;margin:0;">${bodyHtml}</p>
+    </div>
+    <div style="text-align:center;padding:16px 0;font-size:12px;color:#9ca3af;">
+      <p style="margin:0;">Clean Air Lawn Care · Questions? Just reply to this email.</p>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sgMail.send({
+    to,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
+    subject: `Heads up: we'll be out ${dateStr}${serviceSummary ? ' — ' + serviceSummary : ''}`,
+    html
+  });
+}
+
 async function sendMagicLinkEmail({ to, customerName, magicUrl }) {
   if (!init()) throw new Error('Email not configured.');
 
@@ -299,4 +338,4 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, sendMagicLinkEmail, isEnabled };
+module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, sendMagicLinkEmail, sendHeadsUpEmail, isEnabled };
