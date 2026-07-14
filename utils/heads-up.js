@@ -13,10 +13,11 @@
 // into both channels by the composer.
 const { composeHeadsUp } = require('./message-composer');
 
+// Tomorrow's date in Michigan local time (the server clock is UTC on
+// Railway; toISOString would roll a day early in the evening).
 function tomorrowLocal() {
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return new Date(Date.now() + 24 * 60 * 60 * 1000)
+    .toLocaleDateString('en-CA', { timeZone: 'America/Detroit' });
 }
 
 // Visits on `date` that are still happening, with the property fields both

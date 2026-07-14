@@ -362,12 +362,17 @@ app.listen(PORT, '0.0.0.0', () => {
   // tomorrow (idempotent per visit) and pre-generates the SMS drafts so
   // they're waiting for review in Messaging. Emails send automatically;
   // SMS stays draft-first (user-controlled dispatch).
+  // Times computed in Michigan local time — the server clock is UTC on
+  // Railway, so a plain getHours() would fire at 2 PM local, not evening.
   let lastHeadsUpDate = null;
   setInterval(() => {
-    const today = new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'America/Detroit' });
     if (lastHeadsUpDate === today) return;
 
-    const hour = new Date().getHours();
+    const hour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Detroit', hour: 'numeric', hour12: false
+    }).format(now));
     if (hour < 18) return;
 
     lastHeadsUpDate = today;
