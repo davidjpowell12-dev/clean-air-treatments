@@ -287,16 +287,20 @@ router.post('/', requireAuth, (req, res) => {
 // Update property
 router.put('/:id', requireAuth, (req, res) => {
   const db = getDb();
-  const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Property not found' });
-
-  const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes, heads_up_note } = req.body;
-
-  // Atomic: if the audit-log write (or anything else in here) throws, the
-  // property UPDATE rolls back too. Without this, a failure after a
-  // successful UPDATE would leave the change committed while reporting
-  // failure to the user — exactly the bug that misled Gale Heathcote's edit.
+  // Everything below — including the initial lookup — is inside this
+  // try/catch now. The first attempt at surfacing a specific error only
+  // wrapped the update itself, so a failure in this lookup (or anywhere
+  // else) still fell through to the generic global-handler message.
   try {
+    const existing = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Property not found' });
+
+    const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes, heads_up_note } = req.body;
+
+    // Atomic: if the audit-log write (or anything else in here) throws, the
+    // property UPDATE rolls back too. Without this, a failure after a
+    // successful UPDATE would leave the change committed while reporting
+    // failure to the user — exactly the bug that misled Gale Heathcote's edit.
     const updated = db.transaction(() => {
       db.prepare(`
         UPDATE properties SET
