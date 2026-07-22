@@ -80,10 +80,41 @@ router.get('/schema-check', requireAuth, (req, res) => {
   ];
 
   const firstFailure = checks.find(c => c.ok !== true);
+
+  // Whatever object(s), of ANY type, currently occupy these names — reveals
+  // a naming collision (e.g. a leftover view/index) that CREATE TABLE IF
+  // NOT EXISTS won't silently skip past, since that clause only suppresses
+  // "table already exists", not "a different kind of object has this name".
+  const nameCollisions = db.prepare(`
+    SELECT type, name, tbl_name, sql FROM sqlite_master
+    WHERE name IN ('clients', 'client_auth_tokens', 'client_notes')
+  `).all();
+
+  // Attempt the EXACT statement from db/migrations.js live, right here, so
+  // we get the real SQLite error text directly in the response — no server
+  // log access needed. Idempotent (IF NOT EXISTS) and self-healing: if
+  // whatever was blocking it is gone, this call fixes it on the spot.
+  let clientsTableAttempt = null;
+  if (!hasTable('clients')) {
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS clients (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT UNIQUE, phone TEXT, name TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+      clientsTableAttempt = { attempted: true, succeeded: true, now_exists: hasTable('clients') };
+    } catch (err) {
+      clientsTableAttempt = { attempted: true, succeeded: false, error: err.message, code: err.code || null };
+    }
+  }
+
   res.json({
     ok: !firstFailure,
     first_failure: firstFailure ? firstFailure.label : null,
-    checks
+    checks,
+    name_collisions: nameCollisions,
+    clients_table_live_attempt: clientsTableAttempt
   });
 });
 
