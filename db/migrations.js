@@ -507,24 +507,25 @@ function runMigrations(db) {
 
   // Client portal foundation — created here (not just in a numbered migration)
   // so the tables exist even on DBs where schema_version is ahead of when the
-  // migration was added. Idempotent.
-  db.exec(`CREATE TABLE IF NOT EXISTS clients (
+  // migration was added. Idempotent. Each statement is fault-isolated via
+  // safeExec/ensureColumn so one failure can't skip the rest of this block.
+  safeExec(db, `CREATE TABLE IF NOT EXISTS clients (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     email TEXT UNIQUE, phone TEXT, name TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  db.exec(`CREATE TABLE IF NOT EXISTS client_auth_tokens (
+  )`, 'CREATE TABLE clients');
+  safeExec(db, `CREATE TABLE IF NOT EXISTS client_auth_tokens (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER NOT NULL REFERENCES clients(id),
     token_hash TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'login', channel TEXT,
     expires_at DATETIME NOT NULL, used_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)');
+  )`, 'CREATE TABLE client_auth_tokens');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)', 'idx_clients_email');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)', 'idx_client_auth_token_hash');
   ensureColumn(db, 'estimates', 'client_id', 'INTEGER REFERENCES clients(id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)', 'idx_estimates_client');
   // Heads-up notifications: per-property custom line included in pre-visit
   // messages ("Please have pets and kids inside"), and an idempotency stamp on
   // schedules so the evening auto-email never sends twice for one visit.
@@ -533,7 +534,7 @@ function runMigrations(db) {
 
   // Client notes — staff-authored observations & recommendations, shown in the
   // portal only when published. Distinct from internal schedules/applications notes.
-  db.exec(`CREATE TABLE IF NOT EXISTS client_notes (
+  safeExec(db, `CREATE TABLE IF NOT EXISTS client_notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id INTEGER NOT NULL REFERENCES clients(id),
     property_id INTEGER REFERENCES properties(id),
@@ -543,8 +544,8 @@ function runMigrations(db) {
     author INTEGER REFERENCES users(id),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )`);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes(client_id)');
+  )`, 'CREATE TABLE client_notes');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_client_notes_client ON client_notes(client_id)', 'idx_client_notes_client');
   try {
     const { backfillClients } = require('../utils/clients');
     const r = backfillClients(db);
@@ -623,7 +624,7 @@ function runMigrations(db) {
 
   // Drafts of outbound SMS messages. Each is composed from the visit + services + templates,
   // then presented to the user for optional editing before send.
-  db.exec(`
+  safeExec(db, `
     CREATE TABLE IF NOT EXISTS message_drafts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       property_id INTEGER NOT NULL REFERENCES properties(id) ON DELETE CASCADE,
@@ -643,11 +644,11 @@ function runMigrations(db) {
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
-  `);
-  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_status ON message_drafts(status)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_type ON message_drafts(type)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_property ON message_drafts(property_id)');
-  db.exec('CREATE INDEX IF NOT EXISTS idx_drafts_schedule ON message_drafts(schedule_id)');
+  `, 'CREATE TABLE message_drafts');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_drafts_status ON message_drafts(status)', 'idx_drafts_status');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_drafts_type ON message_drafts(type)', 'idx_drafts_type');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_drafts_property ON message_drafts(property_id)', 'idx_drafts_property');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_drafts_schedule ON message_drafts(schedule_id)', 'idx_drafts_schedule');
 
   // Fix any Bundle Discount line items that were created with is_included=0
   const fixedDiscounts = db.prepare(`
@@ -744,6 +745,22 @@ function runMigrations(db) {
   if (ghostEst) {
     db.prepare(`UPDATE estimates SET status = 'cancelled', updated_at = ? WHERE id = 43`).run(new Date().toISOString());
     console.log(`[schema-repair] Cancelled ghost estimate 43 (Carol Rich duplicate)`);
+  }
+}
+
+// Run a CREATE TABLE/INDEX (or any DDL) statement, catching and logging any
+// error instead of letting it propagate. Without this, a single failure in
+// the idempotent schema-repair block (called on every startup, wrapped in a
+// try/catch in server.js that only logs) would silently abort every
+// statement AFTER it in the same block — exactly the bug that left
+// properties.heads_up_note missing on production for weeks with no visible
+// symptom until code that used the column finally threw. Each schema-repair
+// statement must be independently fault-isolated like ensureColumn already is.
+function safeExec(db, sql, label) {
+  try {
+    db.exec(sql);
+  } catch (err) {
+    console.error(`[schema-repair] Failed: ${label || sql.slice(0, 60)} —`, err.message);
   }
 }
 

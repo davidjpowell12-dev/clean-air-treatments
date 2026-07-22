@@ -36,6 +36,57 @@ router.get('/health', requireAuth, (req, res) => {
   }
 });
 
+// ── Schema Check (diagnostic) ────────────────────────────────────────
+// Reports whether the columns/tables added by recent idempotent
+// schema-repairs (db/migrations.js) actually exist on THIS database.
+// initDatabase() at server startup swallows errors silently (logs only),
+// so a failure partway through the schema-repair block can leave later
+// ensureColumn() calls never reached — with no visible symptom until code
+// that queries the missing column throws. This makes that state visible
+// without needing server log access.
+router.get('/schema-check', requireAuth, (req, res) => {
+  const db = getDb();
+  const hasColumn = (table, column) => {
+    try {
+      return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
+    } catch (e) { return `error: ${e.message}`; }
+  };
+  const hasTable = (table) => {
+    try {
+      return !!db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name = ?").get(table);
+    } catch (e) { return `error: ${e.message}`; }
+  };
+
+  // Ordered exactly as they appear in db/migrations.js's schema-repair
+  // block, so the FIRST false/error here is where execution actually
+  // stopped on a prior startup.
+  const checks = [
+    { label: 'estimates.payment_method_preference', ok: hasColumn('estimates', 'payment_method_preference') },
+    { label: 'estimates.stripe_customer_id', ok: hasColumn('estimates', 'stripe_customer_id') },
+    { label: 'purchases.sales_order_path', ok: hasColumn('purchases', 'sales_order_path') },
+    { label: 'follow_ups.linked_estimate_id', ok: hasColumn('follow_ups', 'linked_estimate_id') },
+    { label: 'invoices.token', ok: hasColumn('invoices', 'token') },
+    { label: 'invoices.sms_sent_at', ok: hasColumn('invoices', 'sms_sent_at') },
+    { label: 'invoices.qbo_payment_id', ok: hasColumn('invoices', 'qbo_payment_id') },
+    { label: 'table: clients', ok: hasTable('clients') },
+    { label: 'table: client_auth_tokens', ok: hasTable('client_auth_tokens') },
+    { label: 'estimates.client_id', ok: hasColumn('estimates', 'client_id') },
+    { label: 'properties.heads_up_note', ok: hasColumn('properties', 'heads_up_note') },
+    { label: 'schedules.heads_up_emailed_at', ok: hasColumn('schedules', 'heads_up_emailed_at') },
+    { label: 'table: client_notes', ok: hasTable('client_notes') },
+    { label: 'services.heads_up_text', ok: hasColumn('services', 'heads_up_text') },
+    { label: 'properties.sms_opted_in', ok: hasColumn('properties', 'sms_opted_in') },
+    { label: 'properties.is_active', ok: hasColumn('properties', 'is_active') },
+  ];
+
+  const firstFailure = checks.find(c => c.ok !== true);
+  res.json({
+    ok: !firstFailure,
+    first_failure: firstFailure ? firstFailure.label : null,
+    checks
+  });
+});
+
 // ── Create Backup ───────────────────────────────────────────────────
 router.post('/backup', requireAdmin, (req, res) => {
   try {
