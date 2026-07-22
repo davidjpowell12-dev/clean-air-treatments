@@ -292,30 +292,38 @@ router.put('/:id', requireAuth, (req, res) => {
 
   const { customer_name, address, city, state, zip, email, phone, sqft, soil_type, notes, heads_up_note } = req.body;
 
-  db.prepare(`
-    UPDATE properties SET
-      customer_name = COALESCE(?, customer_name),
-      address = COALESCE(?, address),
-      city = ?, state = ?, zip = ?, email = ?, phone = ?, sqft = ?, soil_type = ?, notes = ?,
-      heads_up_note = ?,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).run(
-    customer_name || null, address || null,
-    city !== undefined ? city : existing.city,
-    state || existing.state,
-    zip !== undefined ? zip : existing.zip,
-    email !== undefined ? email : existing.email,
-    phone !== undefined ? phone : existing.phone,
-    sqft !== undefined ? sqft : existing.sqft,
-    soil_type !== undefined ? soil_type : existing.soil_type,
-    notes !== undefined ? notes : existing.notes,
-    heads_up_note !== undefined ? heads_up_note : existing.heads_up_note,
-    req.params.id
-  );
+  // Atomic: if the audit-log write (or anything else in here) throws, the
+  // property UPDATE rolls back too. Without this, a failure after a
+  // successful UPDATE would leave the change committed while reporting
+  // failure to the user — exactly the bug that misled Gale Heathcote's edit.
+  const updated = db.transaction(() => {
+    db.prepare(`
+      UPDATE properties SET
+        customer_name = COALESCE(?, customer_name),
+        address = COALESCE(?, address),
+        city = ?, state = ?, zip = ?, email = ?, phone = ?, sqft = ?, soil_type = ?, notes = ?,
+        heads_up_note = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      customer_name || null, address || null,
+      city !== undefined ? city : existing.city,
+      state || existing.state,
+      zip !== undefined ? zip : existing.zip,
+      email !== undefined ? email : existing.email,
+      phone !== undefined ? phone : existing.phone,
+      sqft !== undefined ? sqft : existing.sqft,
+      soil_type !== undefined ? soil_type : existing.soil_type,
+      notes !== undefined ? notes : existing.notes,
+      heads_up_note !== undefined ? heads_up_note : existing.heads_up_note,
+      req.params.id
+    );
 
-  const updated = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
-  logAudit(db, 'property', updated.id, req.session.userId, 'update', { before: existing, after: updated });
+    const row = db.prepare('SELECT * FROM properties WHERE id = ?').get(req.params.id);
+    logAudit(db, 'property', row.id, req.session.userId, 'update', { before: existing, after: row });
+    return row;
+  })();
+
   res.json(updated);
 });
 
