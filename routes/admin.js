@@ -44,8 +44,7 @@ router.get('/health', requireAuth, (req, res) => {
 // ensureColumn() calls never reached — with no visible symptom until code
 // that queries the missing column throws. This makes that state visible
 // without needing server log access.
-router.get('/schema-check', requireAuth, (req, res) => {
-  const db = getDb();
+function runSchemaChecks(db) {
   const hasColumn = (table, column) => {
     try {
       return db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === column);
@@ -80,42 +79,36 @@ router.get('/schema-check', requireAuth, (req, res) => {
   ];
 
   const firstFailure = checks.find(c => c.ok !== true);
-
-  // Whatever object(s), of ANY type, currently occupy these names — reveals
-  // a naming collision (e.g. a leftover view/index) that CREATE TABLE IF
-  // NOT EXISTS won't silently skip past, since that clause only suppresses
-  // "table already exists", not "a different kind of object has this name".
   const nameCollisions = db.prepare(`
     SELECT type, name, tbl_name, sql FROM sqlite_master
     WHERE name IN ('clients', 'client_auth_tokens', 'client_notes')
   `).all();
 
-  // Attempt the EXACT statement from db/migrations.js live, right here, so
-  // we get the real SQLite error text directly in the response — no server
-  // log access needed. Idempotent (IF NOT EXISTS) and self-healing: if
-  // whatever was blocking it is gone, this call fixes it on the spot.
-  let clientsTableAttempt = null;
-  if (!hasTable('clients')) {
+  return { ok: !firstFailure, first_failure: firstFailure ? firstFailure.label : null, checks, name_collisions: nameCollisions };
+}
+
+router.get('/schema-check', requireAuth, (req, res) => {
+  const db = getDb();
+  const before = runSchemaChecks(db);
+
+  // Self-heal: the schema-repair block is idempotent, so re-running the
+  // exact same startup routine here is safe. Confirmed the earlier failure
+  // was a boot-time timing issue (a live retry succeeds instantly), so
+  // simply re-invoking it well after boot clears it immediately instead of
+  // waiting for the next deploy/restart.
+  let healAttempt = null;
+  if (!before.ok) {
     try {
-      db.exec(`CREATE TABLE IF NOT EXISTS clients (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        email TEXT UNIQUE, phone TEXT, name TEXT,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-      )`);
-      clientsTableAttempt = { attempted: true, succeeded: true, now_exists: hasTable('clients') };
+      const { runMigrations } = require('../db/migrations');
+      runMigrations(db);
+      healAttempt = { attempted: true, error: null };
     } catch (err) {
-      clientsTableAttempt = { attempted: true, succeeded: false, error: err.message, code: err.code || null };
+      healAttempt = { attempted: true, error: err.message };
     }
   }
 
-  res.json({
-    ok: !firstFailure,
-    first_failure: firstFailure ? firstFailure.label : null,
-    checks,
-    name_collisions: nameCollisions,
-    clients_table_live_attempt: clientsTableAttempt
-  });
+  const after = healAttempt ? runSchemaChecks(db) : before;
+  res.json({ ...after, heal_attempt: healAttempt, before_heal_ok: before.ok });
 });
 
 // ── Create Backup ───────────────────────────────────────────────────

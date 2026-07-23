@@ -756,25 +756,47 @@ function runMigrations(db) {
 // properties.heads_up_note missing on production for weeks with no visible
 // symptom until code that used the column finally threw. Each schema-repair
 // statement must be independently fault-isolated like ensureColumn already is.
-function safeExec(db, sql, label) {
-  try {
-    db.exec(sql);
-  } catch (err) {
-    console.error(`[schema-repair] Failed: ${label || sql.slice(0, 60)} —`, err.message);
+// Blocking sleep (no async available this early in a synchronous boot
+// sequence). Only used for short startup retries, a few hundred ms total.
+function sleepMs(ms) {
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (e) { /* ignore */ }
+}
+
+// Confirmed on production: these DDL statements can transiently fail during
+// the first instant of boot (observed: CREATE TABLE clients failed on every
+// startup, yet succeeded instantly when re-run moments later via a live
+// request — a boot-time timing issue, not a structural one, most likely the
+// database volume not being fully attached yet). Retry a few times with a
+// short backoff before giving up, so a normal restart self-heals instead of
+// silently leaving a table/column missing until someone notices.
+function withRetry(fn, label, attempts = 4, delayMs = 250) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      fn();
+      if (i > 0) console.log(`[schema-repair] ${label} succeeded on retry ${i + 1}`);
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (i < attempts - 1) sleepMs(delayMs);
+    }
   }
+  console.error(`[schema-repair] Failed after ${attempts} attempts: ${label} —`, lastErr.message);
+}
+
+function safeExec(db, sql, label) {
+  withRetry(() => db.exec(sql), label || sql.slice(0, 60));
 }
 
 // Add a column if it doesn't already exist. Safe to call repeatedly.
 function ensureColumn(db, table, column, type) {
-  try {
+  withRetry(() => {
     const cols = db.prepare(`PRAGMA table_info(${table})`).all();
     if (!cols.some(c => c.name === column)) {
       console.log(`[schema-repair] Adding ${table}.${column}`);
       db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
-  } catch (err) {
-    console.error(`[schema-repair] Failed to ensure ${table}.${column}:`, err.message);
-  }
+  }, `ensureColumn ${table}.${column}`);
 }
 
 module.exports = { runMigrations };
