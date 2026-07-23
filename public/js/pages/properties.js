@@ -1430,7 +1430,7 @@ const PropertiesPage = {
       <div class="card" style="margin-bottom:12px;">
         <div class="card-header">
           <h3 style="font-size:16px;">📄 Estimates ${estimates.length > 0 ? `<span style="color:var(--gray-500);font-weight:500;font-size:13px;">(${estimates.length})</span>` : ''}</h3>
-          <button class="btn btn-sm btn-outline" onclick="App.navigate('estimates', 'new');EstimatesPage._currentProperty={id:${propertyId}};" title="Start a new estimate for this customer">+ New</button>
+          <button class="btn btn-sm btn-outline" onclick="App.navigate('estimates', 'new', ${propertyId})" title="Start a new estimate for this customer">+ New</button>
         </div>
         ${estimates.length === 0 ? `
           <div style="padding:16px;text-align:center;color:var(--gray-500);font-size:14px;">
