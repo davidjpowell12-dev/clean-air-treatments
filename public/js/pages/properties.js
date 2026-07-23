@@ -623,7 +623,7 @@ const PropertiesPage = {
     }
 
     if (!r.estimate_status) {
-      action = `<a class="track-action" onclick="App.navigate('estimates', 'new')">+ Estimate</a>`;
+      action = `<a class="track-action" onclick="App.navigate('estimates', 'new', ${r.id})">+ Estimate</a>`;
     } else if (r.estimate_status !== 'accepted') {
       action = `<a class="track-action" onclick="App.navigate('estimates', 'view', ${r.estimate_id})">Review →</a>`;
     } else if (r.invoice_count === 0) {
