@@ -1,12 +1,25 @@
 const EstimatesPage = {
   // ─── SMS Helper ─────────────────────────────────────────
   // Reliably open the native SMS app across iOS and Android
+  // phone is expected pre-cleaned to digits only by the caller; we put it
+  // into E.164 (+1XXXXXXXXXX) here since a bare 10-digit number is
+  // ambiguous — iOS may fail to match it to the recipient's existing
+  // Messages/iMessage thread and route it oddly, producing "Not Delivered"
+  // even though the same text typed by hand goes through fine.
+  _toE164(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length === 10) return '+1' + digits;
+    if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;
+    return phone; // unexpected shape — pass through rather than guess
+  },
+
   _openSMS(phone, message) {
     const ua = navigator.userAgent || '';
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const e164 = this._toE164(phone);
     // iOS uses sms:NUMBER&body=  Android uses sms:NUMBER?body=
     const sep = isIOS ? '&' : '?';
-    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(message)}`;
+    const smsUrl = `sms:${e164}${sep}body=${encodeURIComponent(message)}`;
 
     // Use an anchor click — more reliable than window.location on mobile browsers
     const a = document.createElement('a');
@@ -211,13 +224,13 @@ const EstimatesPage = {
           <h2>${estimate ? 'Edit Estimate' : 'New Estimate'}</h2>
         </div>
 
-        <!-- Live Price Summary (sticky) -->
+        <!-- Live Price Summary (sticky) — text adapts to the selected payment plan -->
         <div class="est-price-summary" id="priceSummary">
           <div class="est-price-monthly">
             <span class="est-price-amount" id="monthlyAmount">$0</span>
-            <span class="est-price-label">/month</span>
+            <span class="est-price-label" id="priceLabel">/month</span>
           </div>
-          <div class="est-price-details">
+          <div class="est-price-details" id="priceDetails">
             <span id="totalAmount">$0</span> total over <span id="monthsDisplay">8</span> months
           </div>
         </div>
@@ -372,6 +385,7 @@ const EstimatesPage = {
       `;
 
       this._paymentMonths = estimate?.payment_months || 8;
+      document.getElementById('estPaymentPlan')?.addEventListener('change', () => this._recalcTotals());
       this._recalcTotals();
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
@@ -462,7 +476,6 @@ const EstimatesPage = {
     document.querySelectorAll('.est-month-btn').forEach(b => {
       b.classList.toggle('active', Number(b.dataset.months) === months);
     });
-    document.getElementById('monthsDisplay').textContent = months;
     this._recalcTotals();
   },
 
@@ -472,16 +485,41 @@ const EstimatesPage = {
     const total = included.reduce((sum, i) => {
       return sum + (i.is_recurring ? i.price * (i.rounds || 1) : i.price);
     }, 0);
-    const monthly = total / (this._paymentMonths || 8);
+    const months = this._paymentMonths || 8;
+    const monthly = total / months;
+    const plan = document.getElementById('estPaymentPlan')?.value || '';
 
-    const monthlyEl = document.getElementById('monthlyAmount');
-    const totalEl = document.getElementById('totalAmount');
-    if (monthlyEl) {
-      monthlyEl.textContent = '$' + monthly.toFixed(0);
-      monthlyEl.classList.add('est-price-pop');
-      setTimeout(() => monthlyEl.classList.remove('est-price-pop'), 300);
+    const amountEl = document.getElementById('monthlyAmount');
+    const labelEl = document.getElementById('priceLabel');
+    const detailsEl = document.getElementById('priceDetails');
+
+    // The headline number and its framing change with the plan — a "Pay in
+    // Full" or "Per Service" client was never billed monthly, so showing
+    // "$X/month" for them is actively misleading, not just imprecise.
+    let amount, label, details;
+    if (plan === 'full') {
+      amount = total;
+      label = 'one-time payment';
+      details = 'Charged in full when accepted';
+    } else if (plan === 'per_service') {
+      amount = total;
+      label = 'season value';
+      details = 'Billed per visit as services are completed — no upfront charge';
+    } else {
+      // 'monthly' or blank (unset — customer picks at acceptance): preview
+      // as monthly, the default/most common plan.
+      amount = monthly;
+      label = '/month';
+      details = `$${total.toFixed(0)} total over ${months} months`;
     }
-    if (totalEl) totalEl.textContent = '$' + total.toFixed(0);
+
+    if (amountEl) {
+      amountEl.textContent = '$' + amount.toFixed(0);
+      amountEl.classList.add('est-price-pop');
+      setTimeout(() => amountEl.classList.remove('est-price-pop'), 300);
+    }
+    if (labelEl) labelEl.textContent = label;
+    if (detailsEl) detailsEl.textContent = details;
   },
 
   async onSqftChange() {

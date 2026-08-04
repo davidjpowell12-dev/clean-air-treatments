@@ -253,7 +253,7 @@
 
             <div class="proposal-price-hero">
               <div class="price-monthly"><span class="dollar">$</span>${Math.round(est.monthly_price)}</div>
-              <div class="price-period">/month over ${est.payment_months} months</div>
+              <div class="price-period" id="pricePeriod">/month over ${est.payment_months} months</div>
               <div class="price-total">Season Total: $${Math.round(est.total_price).toLocaleString()}</div>
             </div>
 
@@ -428,6 +428,7 @@
         btn.textContent = 'Continue to Payment';
       }
 
+      recalcTotals(); // price hero framing (/month vs one-time vs per-visit) depends on the plan
       updateMethodPicker();
     }
 
@@ -723,11 +724,26 @@
       proposalData._activeTotal = activeTotal;
       proposalData._activeMonthly = activeMonthly;
 
-      // Update price hero
+      // Update price hero — framing depends on the selected plan. A "Pay in
+      // Full" or "Per Service" customer was never billed monthly, so
+      // showing "$X/month" for them is actively misleading, not just an
+      // approximation.
       const priceEl = document.querySelector('.price-monthly');
-      if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeMonthly);
+      const periodEl = document.getElementById('pricePeriod');
       const totalEl = document.querySelector('.price-total');
-      if (totalEl) totalEl.textContent = 'Season Total: $' + Math.round(activeTotal).toLocaleString();
+      if (selectedPlan === 'full') {
+        if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeTotal).toLocaleString();
+        if (periodEl) periodEl.textContent = 'one-time payment';
+        if (totalEl) totalEl.textContent = 'Charged in full when you accept';
+      } else if (selectedPlan === 'per_service') {
+        if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeTotal).toLocaleString();
+        if (periodEl) periodEl.textContent = 'season value';
+        if (totalEl) totalEl.textContent = 'Billed per visit as services are completed — no upfront charge';
+      } else {
+        if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeMonthly);
+        if (periodEl) periodEl.textContent = '/month over ' + months + ' months';
+        if (totalEl) totalEl.textContent = 'Season Total: $' + Math.round(activeTotal).toLocaleString();
+      }
 
       // Update plan picker amounts if open
       const planMonthly = document.querySelector('#plan-monthly .plan-amount');
