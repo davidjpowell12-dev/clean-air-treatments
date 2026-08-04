@@ -207,7 +207,15 @@
           return;
         }
         proposalData = await resp.json();
+        // Respect the plan already chosen on the estimate (set by staff in
+        // Admin Billing Details). Without this the page always rendered the
+        // monthly framing, so a per-service or pay-in-full customer saw a
+        // "$X/month over N months" headline they'd never actually be billed.
+        if (proposalData.payment_plan) selectedPlan = proposalData.payment_plan;
         renderProposal(proposalData);
+        // Re-apply the hero using the real plan (the template's markup is
+        // written for the monthly default).
+        updatePriceHero();
       } catch (err) {
         showError('Connection Error', 'Please check your internet connection and try again.');
       }
@@ -345,14 +353,18 @@
 
       const est = proposalData;
       const cta = document.getElementById('ctaSection');
-      selectedPlan = 'monthly';
+      // Default to the plan already set on the estimate (staff selection),
+      // falling back to monthly. Previously this always reset to 'monthly',
+      // overriding a per-service/pay-in-full estimate.
+      if (!selectedPlan) selectedPlan = est.payment_plan || 'monthly';
+      const sel = (plan) => selectedPlan === plan ? ' selected' : '';
 
       cta.innerHTML = `
         <div class="plan-picker">
           <h3>How would you like to pay?</h3>
           <p>Select a payment option below</p>
 
-          <div class="plan-option selected" id="plan-monthly" onclick="selectPlan('monthly')">
+          <div class="plan-option${sel('monthly')}" id="plan-monthly" onclick="selectPlan('monthly')">
             <div class="plan-radio"></div>
             <div class="plan-info">
               <div class="plan-title">Monthly Payments</div>
@@ -361,7 +373,7 @@
             <div class="plan-amount">$${Math.round(getActiveMonthly())}/mo</div>
           </div>
 
-          <div class="plan-option" id="plan-full" onclick="selectPlan('full')">
+          <div class="plan-option${sel('full')}" id="plan-full" onclick="selectPlan('full')">
             <div class="plan-radio"></div>
             <div class="plan-info">
               <div class="plan-title">Pay in Full</div>
@@ -370,7 +382,7 @@
             <div class="plan-amount">$${Math.round(getActiveTotal()).toLocaleString()}</div>
           </div>
 
-          <div class="plan-option" id="plan-per_service" onclick="selectPlan('per_service')">
+          <div class="plan-option${sel('per_service')}" id="plan-per_service" onclick="selectPlan('per_service')">
             <div class="plan-radio"></div>
             <div class="plan-info">
               <div class="plan-title">Pay Per Service</div>
@@ -407,8 +419,9 @@
         </div>
       `;
 
-      // Show method picker and update fee summary
-      updateMethodPicker();
+      // Sync everything to the active plan in one place: selected styling,
+      // confirm-button wording, price hero, and the method picker/fee summary.
+      selectPlan(selectedPlan);
     }
 
     let selectedMethod = 'card';
@@ -724,13 +737,31 @@
       proposalData._activeTotal = activeTotal;
       proposalData._activeMonthly = activeMonthly;
 
-      // Update price hero — framing depends on the selected plan. A "Pay in
-      // Full" or "Per Service" customer was never billed monthly, so
-      // showing "$X/month" for them is actively misleading, not just an
-      // approximation.
+      updatePriceHero();
+
+      // Update plan picker amounts if open
+      const planMonthly = document.querySelector('#plan-monthly .plan-amount');
+      if (planMonthly) planMonthly.textContent = '$' + Math.round(activeMonthly) + '/mo';
+      const planFull = document.querySelector('#plan-full .plan-amount');
+      if (planFull) planFull.textContent = '$' + Math.round(activeTotal).toLocaleString();
+
+      // Update fee summary if visible
+      updateFeeSummary();
+    }
+
+    // Price hero framing depends on the selected plan. A "Pay in Full" or
+    // "Per Service" customer is never billed monthly, so a "$X/month"
+    // headline for them is actively misleading, not just an approximation.
+    // Called on initial render AND whenever the plan or services change.
+    function updatePriceHero() {
+      const months = (proposalData && proposalData.payment_months) || 8;
+      const activeTotal = getActiveTotal();
+      const activeMonthly = getActiveMonthly();
+
       const priceEl = document.querySelector('.price-monthly');
       const periodEl = document.getElementById('pricePeriod');
       const totalEl = document.querySelector('.price-total');
+
       if (selectedPlan === 'full') {
         if (priceEl) priceEl.innerHTML = '<span class="dollar">$</span>' + Math.round(activeTotal).toLocaleString();
         if (periodEl) periodEl.textContent = 'one-time payment';
@@ -744,15 +775,6 @@
         if (periodEl) periodEl.textContent = '/month over ' + months + ' months';
         if (totalEl) totalEl.textContent = 'Season Total: $' + Math.round(activeTotal).toLocaleString();
       }
-
-      // Update plan picker amounts if open
-      const planMonthly = document.querySelector('#plan-monthly .plan-amount');
-      if (planMonthly) planMonthly.textContent = '$' + Math.round(activeMonthly) + '/mo';
-      const planFull = document.querySelector('#plan-full .plan-amount');
-      if (planFull) planFull.textContent = '$' + Math.round(activeTotal).toLocaleString();
-
-      // Update fee summary if visible
-      updateFeeSummary();
     }
 
     function getActiveTotal() {
