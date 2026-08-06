@@ -3,6 +3,23 @@ const App = {
   user: null,
   currentPage: 'dashboard',
 
+  // Where the user came from, most recent last. This app runs as an installed
+  // PWA ("display": "standalone"), so there is NO browser back button — and
+  // every per-page back link is hardcoded to that section's list (a property
+  // opened from the Schedule offered "← Properties", not "back to Schedule").
+  // This stack powers a real context-aware back button in the header.
+  _navStack: [],
+
+  // Explicit labels so the wording is predictable and short enough for the
+  // header (side-nav text is close but not always right — e.g. "Scheduling").
+  _PAGE_LABELS: {
+    dashboard: 'Dashboard', products: 'Products', inventory: 'Inventory',
+    properties: 'Properties', calculator: 'Calculator', scheduling: 'Schedule',
+    applications: 'Applications', estimates: 'Estimates', invoicing: 'Invoicing',
+    'follow-ups': 'Follow-ups', messaging: 'Messaging', notes: 'Client Notes',
+    activate: 'Activate Client', settings: 'Settings', ipm: 'IPM Cases'
+  },
+
   async init() {
     try {
       this.user = await Api.get('/api/auth/me');
@@ -37,9 +54,12 @@ const App = {
       });
     });
 
-    // Handle browser back/forward
+    // Handle browser back/forward (also Android's hardware/gesture back).
     window.addEventListener('popstate', () => {
       const hash = window.location.hash.slice(1) || 'dashboard';
+      // If they went back to exactly where our stack says they came from,
+      // consume that entry so the header button doesn't offer it twice.
+      if (this._navStack[this._navStack.length - 1] === hash) this._navStack.pop();
       const parts = hash.split('/');
       this.loadPage(parts[0], parts[1], parts[2]);
     });
@@ -81,11 +101,50 @@ const App = {
     let hash = page;
     if (action) hash += '/' + action;
     if (id) hash += '/' + id;
+
+    // Remember where we're leaving from — this is forward navigation by
+    // definition, since goBack()/popstate load pages without coming through
+    // here. Skip no-op re-navigations to the same place.
+    const from = window.location.hash.slice(1);
+    if (from && from !== hash) {
+      this._navStack.push(from);
+      if (this._navStack.length > 25) this._navStack.shift();
+    }
+
     window.location.hash = hash;
 
     // Store prefill data temporarily
     this._prefill = prefill || null;
     this.loadPage(page, action, id);
+  },
+
+  // Header back button: return to the previous page the user actually came
+  // from, rather than a section list guessed at by the current page.
+  goBack() {
+    const prev = this._navStack.pop();
+    if (!prev) return;
+    window.location.hash = prev;
+    const parts = prev.split('/');
+    this.loadPage(parts[0], parts[1], parts[2]);
+  },
+
+  _pageLabel(hash) {
+    const page = String(hash || '').split('/')[0];
+    if (this._PAGE_LABELS[page]) return this._PAGE_LABELS[page];
+    return page ? page.charAt(0).toUpperCase() + page.slice(1) : 'Back';
+  },
+
+  _updateBackButton() {
+    const btn = document.getElementById('headerBack');
+    if (!btn) return;
+    const prev = this._navStack[this._navStack.length - 1];
+    if (!prev) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = 'flex';
+    const label = document.getElementById('headerBackLabel');
+    if (label) label.textContent = this._pageLabel(prev);
   },
 
   loadPage(page, action, id) {
@@ -98,6 +157,10 @@ const App = {
 
     // Scroll to top
     window.scrollTo(0, 0);
+
+    // Single place that refreshes the header back button, so it stays correct
+    // for every entry point: navigate(), goBack(), popstate, and initial load.
+    this._updateBackButton();
 
     // Route to page
     switch (page) {
