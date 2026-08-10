@@ -139,12 +139,30 @@ router.get('/public/receipt/:token', (req, res) => {
   const db = getDb();
   const inv = db.prepare(`
     SELECT i.*, e.customer_name, e.address, e.city, e.state, e.zip,
-           e.email, e.phone, e.payment_method_preference
+           e.email, e.phone, e.payment_method_preference,
+           e.id AS est_id, e.total_price, e.payment_months
     FROM invoices i
     LEFT JOIN estimates e ON e.id = i.estimate_id
     WHERE i.token = ?
   `).get(req.params.token);
   if (!inv) return res.status(404).json({ error: 'Receipt not found' });
+
+  // Itemized services, so this doubles as a detailed invoice a customer can
+  // actually review before writing a check (previously it only showed a bare
+  // total, which is what customers were asking us to break down).
+  const lineItems = inv.est_id ? db.prepare(`
+    SELECT service_name, description, price, is_recurring, rounds
+      FROM estimate_items
+     WHERE estimate_id = ? AND is_included = 1
+     ORDER BY sort_order, id
+  `).all(inv.est_id).map(it => ({
+    service_name: it.service_name,
+    description: it.description,
+    rounds: it.is_recurring ? (it.rounds || 1) : 1,
+    is_recurring: !!it.is_recurring,
+    unit_price: Number(it.price || 0).toFixed(2),
+    season_total: (Number(it.price || 0) * (it.is_recurring ? (it.rounds || 1) : 1)).toFixed(2)
+  })) : [];
 
   // Pull business branding from app_settings (falls back to defaults)
   const settings = {};
@@ -170,6 +188,9 @@ router.get('/public/receipt/:token', (req, res) => {
     installment_number: inv.installment_number,
     total_installments: inv.total_installments,
     notes: inv.notes,
+    line_items: lineItems,
+    season_total: inv.total_price != null ? Number(inv.total_price).toFixed(2) : null,
+    payment_months: inv.payment_months,
     customer: {
       name: inv.customer_name,
       address: inv.address,

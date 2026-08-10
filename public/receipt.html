@@ -108,6 +108,29 @@
     .detail-row:last-child { border-bottom: none; }
     .detail-row .label { color: var(--gray-500); }
     .detail-row .value { color: var(--gray-900); font-weight: 600; text-align: right; }
+    /* Itemized services — turns this into a reviewable detailed invoice */
+    .svc-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--gray-100);
+      font-size: 14px;
+    }
+    .svc-row .svc-name { color: var(--gray-900); font-weight: 600; }
+    .svc-row .svc-meta { color: var(--gray-500); font-size: 12px; margin-top: 2px; }
+    .svc-row .svc-amt { color: var(--gray-900); font-weight: 600; white-space: nowrap; }
+    .svc-total {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0 0;
+      margin-top: 4px;
+      border-top: 2px solid var(--gray-200);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--gray-900);
+    }
+    .svc-note { font-size: 12px; color: var(--gray-500); margin-top: 10px; line-height: 1.5; }
 
     .thank-you {
       background: var(--green-light);
@@ -337,6 +360,14 @@
       return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
     }
 
+    // Thousands separators — season totals routinely run into four figures
+    // and "$1000.00" reads poorly on a document someone writes a check from.
+    function money(v) {
+      const n = Number(v);
+      if (!isFinite(n)) return esc(v);
+      return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
     function methodLabel(m) {
       if (!m) return 'On file';
       const map = { card: 'Credit/Debit Card', check: 'Check', ach: 'Bank Transfer', cash: 'Cash' };
@@ -420,6 +451,35 @@
 
             <div class="invoice-num">${esc(d.invoice_number)}</div>
           </div>
+
+          ${(d.line_items && d.line_items.length) ? `
+            <div class="details">
+              <h3>${isPaid ? 'Services' : 'Services on this account'}</h3>
+              ${d.line_items.map(it => `
+                <div class="svc-row">
+                  <div>
+                    <div class="svc-name">${esc(it.service_name)}</div>
+                    <div class="svc-meta">${it.is_recurring
+                      ? `${it.rounds} treatment${it.rounds === 1 ? '' : 's'} &times; $${money(it.unit_price)}`
+                      : 'One-time service'}</div>
+                  </div>
+                  <div class="svc-amt">$${money(it.season_total)}</div>
+                </div>
+              `).join('')}
+              ${d.season_total ? `
+                <div class="svc-total">
+                  <span>Season total</span>
+                  <span>$${money(d.season_total)}</span>
+                </div>
+              ` : ''}
+              ${installment ? `
+                <div class="svc-note">
+                  This ${isPaid ? 'payment covers' : 'invoice is for'} <strong>${esc(installment.toLowerCase())}</strong>
+                  of the season total above &mdash; <strong>$${money(d.amount_dollars)}</strong>${isPaid ? '' : ' due'}.
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
 
           <div class="details">
             <h3>Payment Details</h3>
