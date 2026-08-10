@@ -460,7 +460,7 @@
                   <div>
                     <div class="svc-name">${esc(it.service_name)}</div>
                     <div class="svc-meta">${it.is_recurring
-                      ? `${it.rounds} treatment${it.rounds === 1 ? '' : 's'} &times; $${money(it.unit_price)}`
+                      ? `${it.rounds} ${esc(it.unit_label || 'services')} &times; $${money(it.unit_price)}`
                       : 'One-time service'}</div>
                   </div>
                   <div class="svc-amt">$${money(it.season_total)}</div>

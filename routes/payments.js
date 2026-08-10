@@ -151,18 +151,32 @@ router.get('/public/receipt/:token', (req, res) => {
   // actually review before writing a check (previously it only showed a bare
   // total, which is what customers were asking us to break down).
   const lineItems = inv.est_id ? db.prepare(`
-    SELECT service_name, description, price, is_recurring, rounds
-      FROM estimate_items
-     WHERE estimate_id = ? AND is_included = 1
-     ORDER BY sort_order, id
-  `).all(inv.est_id).map(it => ({
-    service_name: it.service_name,
-    description: it.description,
-    rounds: it.is_recurring ? (it.rounds || 1) : 1,
-    is_recurring: !!it.is_recurring,
-    unit_price: Number(it.price || 0).toFixed(2),
-    season_total: (Number(it.price || 0) * (it.is_recurring ? (it.rounds || 1) : 1)).toFixed(2)
-  })) : [];
+    SELECT ei.service_name, ei.description, ei.price, ei.is_recurring, ei.rounds,
+           s.requires_application
+      FROM estimate_items ei
+      LEFT JOIN services s ON s.id = ei.service_id
+     WHERE ei.estimate_id = ? AND ei.is_included = 1
+     ORDER BY ei.sort_order, ei.id
+  `).all(inv.est_id).map(it => {
+    const rounds = it.is_recurring ? (it.rounds || 1) : 1;
+    // "26 treatments of Mowing" is wrong — only chemical applications are
+    // treatments. services.requires_application already encodes exactly that
+    // distinction (it drives whether completing a visit needs an MDARD
+    // application record), so reuse it instead of matching on service names.
+    // Custom line items have no service_id, so they fall back to the neutral
+    // wording rather than claiming to be treatments.
+    const isTreatment = it.requires_application === 1;
+    const noun = isTreatment ? 'treatment' : 'service';
+    return {
+      service_name: it.service_name,
+      description: it.description,
+      rounds,
+      is_recurring: !!it.is_recurring,
+      unit_label: rounds === 1 ? noun : noun + 's',
+      unit_price: Number(it.price || 0).toFixed(2),
+      season_total: (Number(it.price || 0) * rounds).toFixed(2)
+    };
+  }) : [];
 
   // Pull business branding from app_settings (falls back to defaults)
   const settings = {};
