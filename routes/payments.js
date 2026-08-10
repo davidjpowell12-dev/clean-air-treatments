@@ -605,7 +605,7 @@ async function processDueInvoices(options = {}) {
         payment_intent: result.id
       });
 
-      // Send receipt
+      // Send receipt by email (no-op unless SendGrid is configured)
       if (email.isEnabled() && inv.email) {
         email.sendPaymentConfirmationEmail({
           to: inv.email,
@@ -614,6 +614,25 @@ async function processDueInvoices(options = {}) {
           amount: (inv.amount_cents / 100).toFixed(2),
           paymentMethod: 'card'
         }).catch(err => console.error('[auto-charge] Receipt email failed:', err.message));
+      }
+
+      // Queue a receipt SMS draft for review in Messaging → Receipts. Texts
+      // go out from the user's own phone (Twilio/A2P was never approved), so
+      // this is the delivery path that actually reaches customers. Idempotent
+      // and non-fatal — a draft problem must never undo a successful charge.
+      try {
+        const { createReceiptDraft } = require('./messaging');
+        const baseUrl = process.env.RAILWAY_PUBLIC_DOMAIN
+          ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+          : 'https://clean-air-treatments-production.up.railway.app';
+        const draft = createReceiptDraft(db, inv.id, { baseUrl });
+        if (!draft.ok) {
+          console.log(`[auto-charge] No receipt draft for ${inv.invoice_number}: ${draft.reason}`);
+        } else if (!draft.already_existed) {
+          console.log(`[auto-charge] Receipt draft ${draft.draft_id} queued for ${inv.invoice_number}`);
+        }
+      } catch (draftErr) {
+        console.error('[auto-charge] Receipt draft failed:', draftErr.message);
       }
 
       results.charged++;

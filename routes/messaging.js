@@ -286,57 +286,52 @@ router.put('/property/:id/opt-in', requireAuth, (req, res) => {
   res.json({ success: true, sms_opted_in: val });
 });
 
-// Compose a SMS draft with a payment receipt link for a specific invoice.
-// Called from the Invoice detail page after you record a payment.
-// Uses the same edit-before-send flow as heads-ups and completions.
-router.post('/compose/receipt/:invoiceId', requireAuth, (req, res) => {
-  const db = getDb();
+// Build a "here's your receipt" SMS draft for a paid invoice.
+//
+// Exported on module.exports so the auto-charge cron can queue one the moment
+// it charges a card — otherwise an auto-charged customer gets nothing unless
+// SendGrid happens to be configured, and nobody is around at 8 AM to compose
+// it by hand. Returns a plain result object instead of an HTTP response so
+// both the route below and routes/payments.js can share it.
+//
+// Idempotent: one receipt draft per invoice, keyed on service_summary.
+function createReceiptDraft(db, invoiceId, { baseUrl, userId = null } = {}) {
   const inv = db.prepare(`
-    SELECT i.*, e.customer_name, e.phone, e.property_id, p.phone as property_phone,
-           p.sms_opted_in
+    SELECT i.*, e.customer_name, e.phone, e.property_id, p.phone as property_phone
     FROM invoices i
     LEFT JOIN estimates e ON e.id = i.estimate_id
     LEFT JOIN properties p ON p.id = e.property_id
     WHERE i.id = ?
-  `).get(req.params.invoiceId);
-  if (!inv) return res.status(404).json({ error: 'Invoice not found' });
-  if (!inv.token) return res.status(400).json({ error: 'Invoice has no receipt token — save and retry' });
+  `).get(invoiceId);
+  if (!inv) return { ok: false, reason: 'Invoice not found' };
+  if (!inv.token) return { ok: false, reason: 'Invoice has no receipt token — save and retry' };
 
   const phone = inv.property_phone || inv.phone;
-  if (!phone || !phone.trim()) {
-    return res.status(400).json({ error: 'No phone number on file for this customer' });
-  }
+  if (!phone || !phone.trim()) return { ok: false, reason: 'No phone number on file for this customer' };
+
   if (inv.property_id) {
     const prop = db.prepare('SELECT sms_opted_in FROM properties WHERE id = ?').get(inv.property_id);
-    if (prop && prop.sms_opted_in === 0) {
-      return res.status(400).json({ error: 'This customer has opted out of SMS' });
-    }
+    if (prop && prop.sms_opted_in === 0) return { ok: false, reason: 'This customer has opted out of SMS' };
   }
 
-  // Pull business name + opt-out line from settings
-  const row = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('msg_business_name', 'msg_opt_out')").all();
+  // Dedupe before composing — cheaper, and avoids any chance of two drafts
+  // for one invoice if the cron and a manual compose race.
+  const existing = db.prepare(`
+    SELECT id FROM message_drafts
+    WHERE type = 'receipt' AND application_id IS NULL AND service_summary = ?
+  `).get('invoice:' + inv.id);
+  if (existing) return { ok: true, draft_id: existing.id, already_existed: true };
+
+  const rows = db.prepare("SELECT key, value FROM app_settings WHERE key IN ('msg_business_name', 'msg_opt_out')").all();
   const settings = {};
-  for (const r of row) settings[r.key] = r.value;
+  for (const r of rows) settings[r.key] = r.value;
   const businessName = settings.msg_business_name || 'Clean Air Lawn Care';
   const optOut = settings.msg_opt_out || 'Reply STOP to unsubscribe.';
 
   const first = (inv.customer_name || 'there').split(/\s+/)[0];
   const amount = (inv.amount_cents / 100).toFixed(2);
-  const host = req.get('host');
-  const proto = req.protocol === 'https' ? 'https' : (req.get('x-forwarded-proto') || 'https');
-  const url = `${proto}://${host}/receipt/${inv.token}`;
-
+  const url = `${String(baseUrl || '').replace(/\/$/, '')}/receipt/${inv.token}`;
   const composed = `Hi ${first}, thanks for your payment of $${amount} to ${businessName}. Your receipt: ${url}\n\n${optOut}`;
-
-  // Dedupe: if a receipt draft already exists for this invoice, return it
-  // rather than creating duplicates.
-  const existing = db.prepare(`
-    SELECT id FROM message_drafts
-    WHERE type = 'receipt' AND application_id IS NULL AND service_summary = ?
-  `).get('invoice:' + inv.id);
-  if (existing) {
-    return res.json({ draft_id: existing.id, already_existed: true });
-  }
 
   const result = db.prepare(`
     INSERT INTO message_drafts (
@@ -351,11 +346,27 @@ router.post('/compose/receipt/:invoiceId', requireAuth, (req, res) => {
     phone
   );
 
-  logAudit(db, 'invoice', inv.id, req.session.userId, 'compose_receipt_draft', {
+  logAudit(db, 'invoice', inv.id, userId, 'compose_receipt_draft', {
     invoice_number: inv.invoice_number, draft_id: result.lastInsertRowid
   });
 
-  res.json({ draft_id: result.lastInsertRowid, already_existed: false });
+  return { ok: true, draft_id: result.lastInsertRowid, already_existed: false };
+}
+
+// Compose a SMS draft with a payment receipt link for a specific invoice.
+// Called from the Invoice detail page after you record a payment.
+// Uses the same edit-before-send flow as heads-ups and completions.
+router.post('/compose/receipt/:invoiceId', requireAuth, (req, res) => {
+  const db = getDb();
+  const proto = req.protocol === 'https' ? 'https' : (req.get('x-forwarded-proto') || 'https');
+  const r = createReceiptDraft(db, req.params.invoiceId, {
+    baseUrl: `${proto}://${req.get('host')}`,
+    userId: req.session.userId
+  });
+  if (!r.ok) {
+    return res.status(r.reason === 'Invoice not found' ? 404 : 400).json({ error: r.reason });
+  }
+  res.json({ draft_id: r.draft_id, already_existed: r.already_existed });
 });
 
 // Compose an SMS draft sending the customer an invoice link. Mirrors the
@@ -516,3 +527,4 @@ function escapeXml(s) {
 
 module.exports = router;
 module.exports.createCompletionDraft = createCompletionDraft;
+module.exports.createReceiptDraft = createReceiptDraft;
