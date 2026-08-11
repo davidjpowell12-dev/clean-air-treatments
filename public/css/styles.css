@@ -2364,10 +2364,13 @@ body {
 /* Builder: Payment months picker */
 .est-months-picker {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
 }
 .est-month-btn {
-  flex: 1;
+  /* Grow to fill the row, but never shrink below a comfortable tap target —
+     the short mid-season options make this a wrapping set on phones. */
+  flex: 1 1 60px;
   padding: 10px;
   border: 2px solid var(--gray-200);
   border-radius: 8px;

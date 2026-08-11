@@ -308,7 +308,7 @@ const EstimatesPage = {
             <div class="form-group">
               <label>Monthly Payments Over</label>
               <div class="est-months-picker">
-                ${[6, 8, 10, 12].map(m => `
+                ${[2, 3, 4, 5, 6, 8, 10, 12].map(m => `
                   <button class="est-month-btn ${(estimate?.payment_months || 8) === m ? 'active' : ''}" data-months="${m}" onclick="EstimatesPage.setMonths(${m})">${m} mo</button>
                 `).join('')}
               </div>

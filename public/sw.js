@@ -1,10 +1,10 @@
-const CACHE_NAME = 'clean-air-v127';
+const CACHE_NAME = 'clean-air-v128';
 const STATIC_ASSETS = [
   '/',
   '/app',
   '/index.html',
   '/app.html',
-  '/css/styles.css?v=28',
+  '/css/styles.css?v=29',
   '/js/app.js?v=28',
   '/js/pages/activate.js?v=4',
   '/js/utils/api.js?v=25',
