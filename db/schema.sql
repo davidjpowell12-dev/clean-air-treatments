@@ -474,6 +474,11 @@ CREATE TABLE IF NOT EXISTS follow_ups (
   waiting_on TEXT NOT NULL DEFAULT 'me',
   pinned INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'open',
+  -- Nullable "needs action by" date. NULL = captured but not yet triaged
+  -- (shows in the Unsorted pile), which keeps capture to one tap.
+  due_date DATE,
+  -- inquiry | add_on | question | check_on (nullable = untagged)
+  kind TEXT,
   linked_estimate_id INTEGER REFERENCES estimates(id) ON DELETE SET NULL,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -485,6 +490,10 @@ CREATE TABLE IF NOT EXISTS follow_ups (
 CREATE INDEX IF NOT EXISTS idx_followups_status ON follow_ups(status);
 CREATE INDEX IF NOT EXISTS idx_followups_property ON follow_ups(property_id);
 CREATE INDEX IF NOT EXISTS idx_followups_bucket ON follow_ups(bucket);
+-- Note: idx_followups_due is created in the schema-repair block, not here.
+-- On an existing database CREATE TABLE IF NOT EXISTS is a no-op, so the table
+-- still lacks due_date at this point and indexing it would throw — aborting
+-- initDatabase() before runMigrations() ever adds the column.
 
 -- QuickBooks Online OAuth connection (single-row table for the whole business)
 CREATE TABLE IF NOT EXISTS quickbooks_connection (

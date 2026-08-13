@@ -1,8 +1,10 @@
 // Follow-ups: client request capture system
-// Buckets: today, this_week, someday
+// Grouped by urgency from due_date (overdue / today / next 7 days / later),
+// plus an Unsorted pile for items captured without a date.
 // Waiting on: me (action required), customer (waiting for response)
 const FollowUpsPage = {
-  currentFilter: 'all', // all | waiting_me | waiting_customer | done
+  currentFilter: 'all', // all | waiting_me | waiting_customer | unsorted | done
+  currentKind: '',      // '' = every kind
 
   async render(action, id) {
     if (action === 'view' && id) return this.renderDetail(id);
@@ -18,28 +20,29 @@ const FollowUpsPage = {
       const qs = new URLSearchParams({ status });
       if (this.currentFilter === 'waiting_me') qs.set('waiting_on', 'me');
       if (this.currentFilter === 'waiting_customer') qs.set('waiting_on', 'customer');
+      if (this.currentFilter === 'unsorted') qs.set('undated', '1');
+      if (this.currentKind) qs.set('kind', this.currentKind);
 
       const items = await Api.get('/api/follow-ups?' + qs.toString());
       const counts = await Api.get('/api/follow-ups/counts').catch(() => ({}));
 
-      // Group by bucket
-      const byBucket = { today: [], this_week: [], someday: [] };
+      // Group by urgency from the due date. The server already returns them in
+      // urgency order (pinned, then soonest due, oldest first), so preserve
+      // that order here rather than re-sorting newest-first as this page used
+      // to — that buried the most-neglected item at the bottom.
+      const todayStr = new Date().toLocaleDateString('en-CA');
+      const g = { overdue: [], today: [], week: [], later: [], unsorted: [] };
       items.forEach(it => {
-        const b = it.bucket || 'today';
-        (byBucket[b] = byBucket[b] || []).push(it);
+        if (!it.due_date) return g.unsorted.push(it);
+        const diff = this.daysBetween(todayStr, it.due_date);
+        if (diff < 0) g.overdue.push(it);
+        else if (diff === 0) g.today.push(it);
+        else if (diff <= 7) g.week.push(it);
+        else g.later.push(it);
       });
 
-      // Sort pinned first, then by created_at desc
-      ['today', 'this_week', 'someday'].forEach(b => {
-        byBucket[b].sort((a, c) => {
-          if (a.pinned !== c.pinned) return c.pinned - a.pinned;
-          return (c.created_at || '').localeCompare(a.created_at || '');
-        });
-      });
-
-      const todayCount = byBucket.today.length;
-      const todayWarning = todayCount > 7
-        ? `<p style="font-size:12px;color:var(--orange);margin-top:4px;">Today list is getting long — consider moving some to This Week.</p>`
+      const unsortedNudge = g.unsorted.length > 5
+        ? `<p style="font-size:12px;color:var(--orange);padding:0 16px 12px;">Give these a date so they show up when they matter — otherwise they just sit here.</p>`
         : '';
 
       main.innerHTML = `
@@ -58,9 +61,27 @@ const FollowUpsPage = {
           <button class="fu-tab ${this.currentFilter === 'waiting_customer' ? 'active' : ''}" data-filter="waiting_customer">
             Waiting <span class="fu-tab-count">${counts.waiting_customer || 0}</span>
           </button>
+          <button class="fu-tab ${this.currentFilter === 'unsorted' ? 'active' : ''}" data-filter="unsorted" title="Captured but no date yet">
+            Unsorted <span class="fu-tab-count">${counts.unsorted || 0}</span>
+          </button>
           <button class="fu-tab ${this.currentFilter === 'done' ? 'active' : ''}" data-filter="done">
             Done
           </button>
+        </div>
+
+        ${counts.overdue ? `
+          <div class="card" style="border-left:4px solid var(--red);margin-bottom:12px;">
+            <div class="card-body" style="padding:10px 14px;font-size:13px;">
+              <strong style="color:var(--red);">${counts.overdue} overdue</strong>${counts.due_today ? ` · ${counts.due_today} due today` : ''} — listed first below.
+            </div>
+          </div>
+        ` : ''}
+
+        <div class="inv-chip-row" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">
+          <span style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:.5px;font-weight:700;">Type</span>
+          ${[['', 'All'], ['inquiry', 'New inquiry'], ['add_on', 'Add-on'], ['question', 'Question'], ['check_on', 'Check on']].map(([k, lbl]) => `
+            <button class="btn btn-sm ${this.currentKind === k ? 'btn-primary' : 'btn-outline'}" data-kind-filter="${k}" style="font-size:12px;padding:4px 10px;">${lbl}</button>
+          `).join('')}
         </div>
 
         ${items.length === 0 ? `
@@ -75,9 +96,11 @@ const FollowUpsPage = {
             ${items.map(it => this.renderRow(it, true)).join('')}
           </div>
         ` : `
-          ${this.renderBucketSection('Today', 'today', byBucket.today, todayWarning)}
-          ${this.renderBucketSection('This Week', 'this_week', byBucket.this_week)}
-          ${this.renderBucketSection('Someday', 'someday', byBucket.someday)}
+          ${g.overdue.length ? this.renderGroup('Overdue', 'overdue', g.overdue) : ''}
+          ${g.today.length ? this.renderGroup('Due today', 'today', g.today) : ''}
+          ${g.week.length ? this.renderGroup('Next 7 days', 'week', g.week) : ''}
+          ${g.later.length ? this.renderGroup('Later', 'later', g.later) : ''}
+          ${g.unsorted.length ? this.renderGroup('Unsorted — needs a date', 'unsorted', g.unsorted, unsortedNudge) : ''}
         `}
       `;
 
@@ -88,32 +111,69 @@ const FollowUpsPage = {
           this.renderList();
         });
       });
+
+      // Type filter chips
+      document.querySelectorAll('[data-kind-filter]').forEach(chip => {
+        chip.addEventListener('click', () => {
+          this.currentKind = chip.dataset.kindFilter;
+          this.renderList();
+        });
+      });
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
   },
 
-  renderBucketSection(label, bucket, items, extraHtml) {
-    const icon = bucket === 'today' ? '🔥' : bucket === 'this_week' ? '📆' : '💭';
+  // Urgency group. Only rendered when non-empty, so the page shows what needs
+  // doing instead of three fixed headers that were mostly empty.
+  renderGroup(label, key, items, extraHtml) {
+    const icon = { overdue: '🔴', today: '🔥', week: '📆', later: '💭', unsorted: '📥' }[key] || '';
+    const accent = key === 'overdue' ? 'border-left:4px solid var(--red);' : '';
     return `
-      <div class="card fu-bucket" data-bucket="${bucket}">
+      <div class="card fu-bucket" data-group="${key}" style="${accent}">
         <div class="card-header">
           <h3>${icon} ${label} <span style="color:var(--gray-500);font-weight:500;font-size:14px;">(${items.length})</span></h3>
         </div>
         <div class="card-body" style="padding:0;">
-          ${items.length === 0
-            ? `<p style="padding:16px;color:var(--gray-500);font-size:14px;text-align:center;">Nothing in ${label.toLowerCase()}.</p>`
-            : items.map(it => this.renderRow(it, false)).join('')}
+          ${items.map(it => this.renderRow(it, false)).join('')}
           ${extraHtml || ''}
         </div>
       </div>
     `;
   },
 
+  // "Due" badge. This replaced an age-since-created badge, which flagged an
+  // item jotted 10 days ago for next month as urgent while a promise made to
+  // a customer today looked identical. Due date is what actually matters.
+  dueBadge(it) {
+    if (!it.due_date) {
+      return `<span style="font-size:11px;color:var(--gray-400);">no date</span>`;
+    }
+    const today = new Date().toLocaleDateString('en-CA');
+    const diff = this.daysBetween(today, it.due_date);
+    if (diff < 0) {
+      const n = Math.abs(diff);
+      return `<span class="badge badge-red" style="font-size:10px;">Overdue ${n}d</span>`;
+    }
+    if (diff === 0) return `<span class="badge badge-orange" style="font-size:10px;">Due today</span>`;
+    if (diff === 1) return `<span style="font-size:11px;color:var(--gray-500);">Due tomorrow</span>`;
+    const d = new Date(it.due_date + 'T12:00:00');
+    return `<span style="font-size:11px;color:var(--gray-500);">Due ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>`;
+  },
+
+  // Whole-day difference between two YYYY-MM-DD strings (b - a). Compared in
+  // UTC on date-only values so DST can't shift the result by a day.
+  daysBetween(a, b) {
+    const p = (s) => { const [y, m, d] = String(s).split('-').map(Number); return Date.UTC(y, m - 1, d); };
+    return Math.round((p(b) - p(a)) / 86400000);
+  },
+
+  KIND_LABELS: { inquiry: 'New inquiry', add_on: 'Add-on', question: 'Question', check_on: 'Check on' },
+
   renderRow(it, isDone) {
-    const ageDays = this.daysSince(it.created_at);
-    const ageColor = ageDays >= 7 ? 'var(--red)' : ageDays >= 3 ? 'var(--orange)' : 'var(--gray-500)';
-    const ageLabel = ageDays === 0 ? 'today' : ageDays === 1 ? '1d ago' : `${ageDays}d ago`;
+    const kindBadge = it.kind && this.KIND_LABELS[it.kind]
+      ? `<span class="badge" style="background:var(--green-light);color:var(--green-dark);font-size:10px;">${this.KIND_LABELS[it.kind]}</span>`
+      : '';
     const waitingBadge = it.waiting_on === 'customer'
       ? `<span class="badge badge-blue" style="font-size:10px;">Waiting</span>`
       : `<span class="badge badge-orange" style="font-size:10px;">On me</span>`;
@@ -137,9 +197,10 @@ const FollowUpsPage = {
           ${customerLine}
           ${it.notes ? `<p style="font-size:13px;color:var(--gray-700);margin-top:4px;">${this.esc(this.truncate(it.notes, 120))}</p>` : ''}
           <div style="display:flex;gap:6px;align-items:center;margin-top:6px;flex-wrap:wrap;">
+            ${isDone ? '' : this.dueBadge(it)}
+            ${kindBadge}
             ${isDone ? '' : waitingBadge}
             ${linkedBadge}
-            <span style="font-size:11px;color:${ageColor};">${ageLabel}</span>
           </div>
         </div>
         <div class="data-row-right" style="display:flex;gap:6px;align-items:center;">
@@ -201,13 +262,24 @@ const FollowUpsPage = {
           </div>
 
           <div class="form-group">
-            <label>Bucket</label>
+            <label>Needs action by <span style="font-weight:400;color:var(--gray-500);">(optional — blank stays in Unsorted)</span></label>
             <div class="fu-segments">
-              <button type="button" class="fu-seg ${fu.bucket === 'today' ? 'active' : ''}" data-bucket="today">🔥 Today</button>
-              <button type="button" class="fu-seg ${fu.bucket === 'this_week' ? 'active' : ''}" data-bucket="this_week">📆 Week</button>
-              <button type="button" class="fu-seg ${fu.bucket === 'someday' ? 'active' : ''}" data-bucket="someday">💭 Someday</button>
+              <button type="button" class="fu-seg-due" data-due-offset="0">Today</button>
+              <button type="button" class="fu-seg-due" data-due-offset="1">Tomorrow</button>
+              <button type="button" class="fu-seg-due" data-due-offset="7">+1 week</button>
+              <button type="button" class="fu-seg-due" data-due-offset="">No date</button>
             </div>
-            <input type="hidden" id="fuBucket" value="${fu.bucket || 'today'}">
+            <input type="date" id="fuDueDate" value="${this.esc(fu.due_date || '')}" style="margin-top:8px;">
+          </div>
+
+          <div class="form-group">
+            <label>What is it? <span style="font-weight:400;color:var(--gray-500);">(optional)</span></label>
+            <div class="fu-segments" style="flex-wrap:wrap;">
+              ${[['inquiry','New inquiry'],['add_on','Add-on'],['question','Question'],['check_on','Check on'],['','—']].map(([k, lbl]) => `
+                <button type="button" class="fu-seg-k ${(fu.kind || '') === k ? 'active' : ''}" data-kind="${k}">${lbl}</button>
+              `).join('')}
+            </div>
+            <input type="hidden" id="fuKind" value="${this.esc(fu.kind || '')}">
           </div>
 
           <div class="form-group">
@@ -267,12 +339,26 @@ const FollowUpsPage = {
     document.body.appendChild(overlay);
     requestAnimationFrame(() => overlay.classList.add('open'));
 
-    // Segmented controls
-    overlay.querySelectorAll('.fu-seg').forEach(btn => {
+    // Quick due-date presets — fill the real date input so there's a single
+    // source of truth (the date field), not a separate hidden bucket value.
+    overlay.querySelectorAll('.fu-seg-due').forEach(btn => {
       btn.addEventListener('click', () => {
-        overlay.querySelectorAll('.fu-seg').forEach(b => b.classList.remove('active'));
+        const off = btn.dataset.dueOffset;
+        const input = document.getElementById('fuDueDate');
+        if (off === '') {
+          input.value = '';
+        } else {
+          const d = new Date();
+          d.setDate(d.getDate() + Number(off));
+          input.value = d.toLocaleDateString('en-CA'); // local YYYY-MM-DD
+        }
+      });
+    });
+    overlay.querySelectorAll('.fu-seg-k').forEach(btn => {
+      btn.addEventListener('click', () => {
+        overlay.querySelectorAll('.fu-seg-k').forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
-        document.getElementById('fuBucket').value = btn.dataset.bucket;
+        document.getElementById('fuKind').value = btn.dataset.kind;
       });
     });
     overlay.querySelectorAll('.fu-seg-w').forEach(btn => {
@@ -343,10 +429,12 @@ const FollowUpsPage = {
     const body = {
       title,
       notes: document.getElementById('fuNotes').value.trim() || null,
-      bucket: document.getElementById('fuBucket').value,
       waiting_on: document.getElementById('fuWaitingOn').value,
       pinned: document.getElementById('fuPinned').checked ? 1 : 0,
-      property_id: document.getElementById('fuPropertyId').value || null
+      property_id: document.getElementById('fuPropertyId').value || null,
+      // Empty string clears the date, sending the item back to Unsorted.
+      due_date: document.getElementById('fuDueDate').value || '',
+      kind: document.getElementById('fuKind').value || ''
     };
 
     try {
@@ -628,11 +716,5 @@ const FollowUpsPage = {
   truncate(s, n) {
     s = String(s || '');
     return s.length > n ? s.slice(0, n - 1) + '…' : s;
-  },
-  daysSince(iso) {
-    if (!iso) return 0;
-    const then = new Date(iso.replace(' ', 'T') + 'Z');
-    const now = new Date();
-    return Math.max(0, Math.floor((now - then) / (1000 * 60 * 60 * 24)));
   }
 };

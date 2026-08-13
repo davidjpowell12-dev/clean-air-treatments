@@ -532,6 +532,21 @@ function runMigrations(db) {
   ensureColumn(db, 'properties', 'heads_up_note', 'TEXT');
   ensureColumn(db, 'schedules', 'heads_up_emailed_at', 'DATETIME');
 
+  // Follow-ups: a real "needs action by" date and a kind tag.
+  //
+  // The bucket column (today/this_week/someday) is a static label — an item
+  // filed under "today" still said "today" a week later, so nothing ever aged
+  // into overdue and the list became an undifferentiated pile. due_date lets
+  // items age, sort by urgency, and feed the evening digest. Nullable on
+  // purpose: capture stays one-tap, and undated items collect in an
+  // "Unsorted" pile to triage later rather than being silently buried.
+  ensureColumn(db, 'follow_ups', 'due_date', 'DATE');
+  // What kind of thing this is (inquiry / add_on / question / check_on), so a
+  // season's worth of new-business inquiries can be worked in one pass instead
+  // of being mixed in with reminders. Nullable — untagged is fine.
+  ensureColumn(db, 'follow_ups', 'kind', 'TEXT');
+  safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_followups_due ON follow_ups(due_date)', 'idx_followups_due');
+
   // Client notes — staff-authored observations & recommendations, shown in the
   // portal only when published. Distinct from internal schedules/applications notes.
   safeExec(db, `CREATE TABLE IF NOT EXISTS client_notes (

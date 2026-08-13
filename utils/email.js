@@ -291,6 +291,45 @@ async function sendHeadsUpEmail({ to, customerName, serviceDate, serviceSummary,
   });
 }
 
+// Internal daily digest of follow-ups needing attention. Unlike every other
+// sender here this goes to the OWNER, not a customer — recipient comes from
+// FOLLOWUP_DIGEST_EMAIL, else the configured from-address (which is a mailbox
+// the business already reads).
+async function sendFollowUpDigestEmail({ digest, to }) {
+  if (!init()) throw new Error('Email not configured.');
+  const recipient = to || process.env.FOLLOWUP_DIGEST_EMAIL || FROM_EMAIL;
+
+  const parts = [];
+  if (digest.overdue) parts.push(`${digest.overdue} overdue`);
+  if (digest.due_today) parts.push(`${digest.due_today} due today`);
+  if (digest.due_tomorrow) parts.push(`${digest.due_tomorrow} tomorrow`);
+  const summary = parts.join(' · ');
+
+  const html = `
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f4f5f7;">
+  <div style="max-width:560px;margin:0 auto;padding:24px 16px;">
+    <div style="background:linear-gradient(135deg,#78be20 0%,#5a9616 100%);border-radius:12px 12px 0 0;padding:20px 24px;">
+      <h1 style="color:white;font-size:18px;margin:0;">Follow-ups needing attention</h1>
+      <p style="color:rgba(255,255,255,0.9);font-size:14px;margin:4px 0 0;">${escHtml(summary)}</p>
+    </div>
+    <div style="background:white;padding:24px;border-radius:0 0 12px 12px;box-shadow:0 2px 8px rgba(0,0,0,0.06);">
+      <pre style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;font-size:14px;color:#374151;line-height:1.6;white-space:pre-wrap;margin:0;">${escHtml(digest.text || '')}</pre>
+    </div>
+  </div>
+</body>
+</html>`;
+
+  await sgMail.send({
+    to: recipient,
+    from: { email: FROM_EMAIL, name: FROM_NAME },
+    subject: `Follow-ups: ${summary}`,
+    html
+  });
+}
+
 async function sendMagicLinkEmail({ to, customerName, magicUrl }) {
   if (!init()) throw new Error('Email not configured.');
 
@@ -338,4 +377,4 @@ function escHtml(str) {
   return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, sendMagicLinkEmail, sendHeadsUpEmail, isEnabled };
+module.exports = { sendProposalEmail, sendReminderEmail, sendInvoiceEmail, sendPaymentConfirmationEmail, sendMagicLinkEmail, sendHeadsUpEmail, sendFollowUpDigestEmail, isEnabled };

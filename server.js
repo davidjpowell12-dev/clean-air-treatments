@@ -388,6 +388,51 @@ app.listen(PORT, '0.0.0.0', () => {
     } catch (err) {
       console.error('[cron] Could not run heads-ups:', err.message);
     }
+
   }, 60 * 60 * 1000); // Check every hour
   console.log('[startup] Evening heads-up cron scheduled (runs after 6 PM for next day)');
+
+  // ─── Morning follow-up digest ───────────────────────────────
+  // Pushes what's overdue / due today / due tomorrow so follow-ups stop
+  // depending on remembering to open the page. Runs in the morning so the
+  // list lands before the day starts. Always logged, so the summary is
+  // recoverable even if email delivery isn't configured.
+  //
+  // Set FOLLOWUP_DIGEST_EMAIL to a carrier email-to-SMS gateway address
+  // (e.g. 6165551234@vtext.com) to receive this as a text — the app can't
+  // send SMS directly since Twilio/A2P was never approved.
+  let lastDigestDate = null;
+  setInterval(() => {
+    const now = new Date();
+    const today = now.toLocaleDateString('en-CA', { timeZone: 'America/Detroit' });
+    if (lastDigestDate === today) return;
+
+    const hour = Number(new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Detroit', hour: 'numeric', hour12: false
+    }).format(now));
+    if (hour < 7) return;
+
+    lastDigestDate = today;
+    try {
+      const { buildFollowUpDigest } = require('./routes/follow-ups');
+      const email = require('./utils/email');
+      const { getDb } = require('./db/database');
+      const digest = buildFollowUpDigest(getDb());
+      if (digest.total === 0) {
+        console.log('[cron] Follow-up digest: nothing due — skipped');
+      } else {
+        console.log(`[cron] Follow-up digest: ${digest.overdue} overdue, ${digest.due_today} due today, ${digest.due_tomorrow} tomorrow, ${digest.unsorted} unsorted\n${digest.text}`);
+        if (email.isEnabled()) {
+          email.sendFollowUpDigestEmail({ digest })
+            .then(() => console.log('[cron] Follow-up digest sent'))
+            .catch(err => console.error('[cron] Follow-up digest send failed:', err.message));
+        } else {
+          console.log('[cron] Follow-up digest not sent — SENDGRID_API_KEY not set');
+        }
+      }
+    } catch (err) {
+      console.error('[cron] Follow-up digest failed:', err.message);
+    }
+  }, 60 * 60 * 1000); // Check every hour
+  console.log('[startup] Morning follow-up digest cron scheduled (runs after 7 AM)');
 });
