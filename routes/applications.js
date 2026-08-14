@@ -234,11 +234,13 @@ router.post('/', requireAuth, (req, res) => {
     b.schedule_id || null
   );
 
-  // Auto-complete the linked schedule entry
+  // Auto-complete the linked schedule entry. Stamp completed_date from the
+  // application's own date — that's the day the work was actually performed
+  // (and the date on the MDARD record), which can differ from the plan.
   if (b.schedule_id) {
     db.prepare(
-      "UPDATE schedules SET status = 'completed', updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'"
-    ).run(b.schedule_id);
+      "UPDATE schedules SET status = 'completed', completed_date = COALESCE(completed_date, ?), updated_at = CURRENT_TIMESTAMP WHERE id = ? AND status != 'completed'"
+    ).run(b.application_date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Detroit' }), b.schedule_id);
 
     // ─── Billing: activate monthly invoices OR create per-service invoice ───
     // Shared logic in utils/billing.js (see routes/schedules.js for the twin

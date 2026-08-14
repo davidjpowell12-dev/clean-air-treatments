@@ -231,6 +231,8 @@ CREATE TABLE IF NOT EXISTS schedules (
   service_type TEXT,
   estimate_id INTEGER REFERENCES estimates(id),
   heads_up_emailed_at DATETIME,
+  -- When the visit was actually performed (scheduled_date is only the plan)
+  completed_date DATE,
   created_by INTEGER REFERENCES users(id),
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP

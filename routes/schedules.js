@@ -508,7 +508,18 @@ router.put('/:id', requireAuth, (req, res) => {
   const existing = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
   if (!existing) return res.status(404).json({ error: 'Schedule entry not found' });
 
-  const { status, notes, assigned_to, sort_order, service_type, scheduled_date } = req.body;
+  const { status, notes, assigned_to, sort_order, service_type, scheduled_date, completed_date } = req.body;
+
+  // Stamp when the work was actually done the first time it's marked
+  // completed. scheduled_date is only the plan, so without this a job done on
+  // a different day than planned shows the planned date on the invoice.
+  // Caller may pass completed_date explicitly (back-dating a late entry).
+  let completedDate = existing.completed_date;
+  if (status === 'completed' && existing.status !== 'completed') {
+    completedDate = completed_date || new Date().toLocaleDateString('en-CA', { timeZone: 'America/Detroit' });
+  } else if (completed_date !== undefined) {
+    completedDate = completed_date || null;
+  }
 
   db.prepare(`
     UPDATE schedules SET
@@ -518,6 +529,7 @@ router.put('/:id', requireAuth, (req, res) => {
       sort_order = COALESCE(?, sort_order),
       service_type = COALESCE(?, service_type),
       scheduled_date = COALESCE(?, scheduled_date),
+      completed_date = ?,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
@@ -527,6 +539,7 @@ router.put('/:id', requireAuth, (req, res) => {
     sort_order != null ? sort_order : null,
     service_type !== undefined ? service_type : null,
     scheduled_date || null,
+    completedDate || null,
     req.params.id
   );
 

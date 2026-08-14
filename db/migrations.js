@@ -532,6 +532,15 @@ function runMigrations(db) {
   ensureColumn(db, 'properties', 'heads_up_note', 'TEXT');
   ensureColumn(db, 'schedules', 'heads_up_emailed_at', 'DATETIME');
 
+  // When the visit was ACTUALLY performed, as opposed to scheduled_date which
+  // is only the plan. Without this, marking a visit complete left the planned
+  // date as the only date on record — so a job scheduled for Aug 6 but done
+  // Jul 15 showed up as Aug 6 on the customer's invoice. Chemical services
+  // have the true date in applications.application_date (the MDARD record);
+  // this covers everything else (mowing, clean-ups). Historical rows stay
+  // NULL and fall back to scheduled_date.
+  ensureColumn(db, 'schedules', 'completed_date', 'DATE');
+
   // Follow-ups: a real "needs action by" date and a kind tag.
   //
   // The bucket column (today/this_week/someday) is a static label — an item

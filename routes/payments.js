@@ -162,7 +162,14 @@ router.get('/public/receipt/:token', (req, res) => {
     // means when they ask what they're paying for.
     const anchor = inv.due_date || (inv.paid_at ? inv.paid_at.slice(0, 10) : null);
     if (anchor) {
-      const [y, m] = anchor.split('-').map(Number);
+      // Billed in arrears: the period is the month that just ENDED, not the
+      // month the due date falls in. Taking the month containing (due - 1 day)
+      // handles both cases with one rule — an invoice due Aug 1 covers July,
+      // while a first installment due mid-May (at activation) covers May.
+      const [ay, am, ad] = anchor.split('-').map(Number);
+      const prev = new Date(Date.UTC(ay, am - 1, ad - 1));
+      const y = prev.getUTCFullYear();
+      const m = prev.getUTCMonth() + 1;
       const start = `${y}-${String(m).padStart(2, '0')}-01`;
       const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); // last day of month
       servicePeriod = {
@@ -170,15 +177,24 @@ router.get('/public/receipt/:token', (req, res) => {
         end,
         label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
       };
+      // Use the date the work was ACTUALLY performed, not the date it was
+      // planned for. Priority: the MDARD application date (authoritative for
+      // chemical services) → completed_date → scheduled_date as a last resort
+      // for older rows recorded before completion dates were captured.
+      // Filtering on the same resolved date means a job planned for Aug but
+      // performed in July lands in July, where the customer expects it.
       visits = db.prepare(`
-        SELECT scheduled_date, service_type, round_number, total_rounds
-          FROM schedules
-         WHERE property_id = ?
-           AND status = 'completed'
-           AND scheduled_date BETWEEN ? AND ?
-         ORDER BY scheduled_date ASC
+        SELECT COALESCE(MIN(a.application_date), s.completed_date, s.scheduled_date) AS performed_date,
+               s.service_type, s.round_number, s.total_rounds,
+               MIN(a.application_date) IS NOT NULL AS from_application
+          FROM schedules s
+          LEFT JOIN applications a ON a.schedule_id = s.id
+         WHERE s.property_id = ? AND s.status = 'completed'
+         GROUP BY s.id
+        HAVING performed_date BETWEEN ? AND ?
+         ORDER BY performed_date ASC
       `).all(inv.property_id, start, end).map(v => ({
-        date: v.scheduled_date,
+        date: v.performed_date,
         service: v.service_type || 'Service',
         round: v.round_number && v.total_rounds ? `${v.round_number} of ${v.total_rounds}` : null
       }));
