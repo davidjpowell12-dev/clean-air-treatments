@@ -140,12 +140,50 @@ router.get('/public/receipt/:token', (req, res) => {
   const inv = db.prepare(`
     SELECT i.*, e.customer_name, e.address, e.city, e.state, e.zip,
            e.email, e.phone, e.payment_method_preference,
-           e.id AS est_id, e.total_price, e.payment_months
+           e.id AS est_id, e.property_id, e.total_price, e.payment_months
     FROM invoices i
     LEFT JOIN estimates e ON e.id = i.estimate_id
     WHERE i.token = ?
   `).get(req.params.token);
   if (!inv) return res.status(404).json({ error: 'Receipt not found' });
+
+  // What was actually done during the billing period. A monthly customer
+  // asking for "a detailed invoice" wants to see the visits behind THIS
+  // month's charge — a season-total breakdown alone doesn't answer that.
+  //
+  // Scoped to monthly plans, where a billing month is a meaningful period.
+  // Sourced from completed schedule visits (covers mowing and every other
+  // service); the applications table is the MDARD chemical record and is far
+  // too technical for a customer-facing invoice.
+  let servicePeriod = null;
+  let visits = [];
+  if (inv.payment_plan === 'monthly' && inv.property_id) {
+    // The calendar month the invoice falls in — that's the month a customer
+    // means when they ask what they're paying for.
+    const anchor = inv.due_date || (inv.paid_at ? inv.paid_at.slice(0, 10) : null);
+    if (anchor) {
+      const [y, m] = anchor.split('-').map(Number);
+      const start = `${y}-${String(m).padStart(2, '0')}-01`;
+      const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); // last day of month
+      servicePeriod = {
+        start,
+        end,
+        label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+      };
+      visits = db.prepare(`
+        SELECT scheduled_date, service_type, round_number, total_rounds
+          FROM schedules
+         WHERE property_id = ?
+           AND status = 'completed'
+           AND scheduled_date BETWEEN ? AND ?
+         ORDER BY scheduled_date ASC
+      `).all(inv.property_id, start, end).map(v => ({
+        date: v.scheduled_date,
+        service: v.service_type || 'Service',
+        round: v.round_number && v.total_rounds ? `${v.round_number} of ${v.total_rounds}` : null
+      }));
+    }
+  }
 
   // Itemized services, so this doubles as a detailed invoice a customer can
   // actually review before writing a check (previously it only showed a bare
@@ -203,6 +241,8 @@ router.get('/public/receipt/:token', (req, res) => {
     total_installments: inv.total_installments,
     notes: inv.notes,
     line_items: lineItems,
+    service_period: servicePeriod,
+    visits,
     season_total: inv.total_price != null ? Number(inv.total_price).toFixed(2) : null,
     payment_months: inv.payment_months,
     customer: {

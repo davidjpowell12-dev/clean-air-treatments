@@ -356,8 +356,18 @@
 
     function fmtDate(iso) {
       if (!iso) return '';
-      const d = new Date(iso);
+      // A date-only value ("2026-07-31") parses as UTC midnight, which renders
+      // as the PREVIOUS day in any negative-offset timezone — a due date one
+      // day early on a customer's invoice. Anchor those at local noon.
+      // Full timestamps (paid_at) already carry a time and parse correctly.
+      const d = /^\d{4}-\d{2}-\d{2}$/.test(iso) ? new Date(iso + 'T12:00:00') : new Date(iso);
       return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+    }
+
+    // Short visit date for the monthly service list, e.g. "Jul 3".
+    function fmtShort(iso) {
+      if (!iso) return '';
+      return new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
     }
 
     // Thousands separators — season totals routinely run into four figures
@@ -452,9 +462,39 @@
             <div class="invoice-num">${esc(d.invoice_number)}</div>
           </div>
 
+          ${d.service_period ? `
+            <div class="details">
+              <h3>Services performed &mdash; ${esc(d.service_period.label)}</h3>
+              ${d.visits && d.visits.length ? d.visits.map(v => `
+                <div class="svc-row">
+                  <div>
+                    <div class="svc-name">${esc(v.service)}</div>
+                    ${v.round ? `<div class="svc-meta">Visit ${esc(v.round)}</div>` : ''}
+                  </div>
+                  <div class="svc-amt" style="font-weight:600;color:var(--gray-500);">${fmtShort(v.date)}</div>
+                </div>
+              `).join('') : `
+                <p style="font-size:14px;color:var(--gray-500);padding:8px 0;">
+                  No visits recorded for this period.
+                </p>
+              `}
+              <div class="svc-total">
+                <span>${isPaid ? 'Paid this month' : 'Amount due this month'}</span>
+                <span>$${money(d.amount_dollars)}</span>
+              </div>
+              ${installment ? `
+                <div class="svc-note">
+                  ${esc(installment)} of your seasonal plan. Monthly payments are the
+                  season total spread evenly across ${d.payment_months || 8} months, so this
+                  amount stays the same each month regardless of how many visits fall in it.
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
+
           ${(d.line_items && d.line_items.length) ? `
             <div class="details">
-              <h3>${isPaid ? 'Services' : 'Services on this account'}</h3>
+              <h3>${d.service_period ? 'Your seasonal plan' : (isPaid ? 'Services' : 'Services on this account')}</h3>
               ${d.line_items.map(it => `
                 <div class="svc-row">
                   <div>
@@ -472,7 +512,7 @@
                   <span>$${money(d.season_total)}</span>
                 </div>
               ` : ''}
-              ${installment ? `
+              ${installment && !d.service_period ? `
                 <div class="svc-note">
                   This ${isPaid ? 'payment covers' : 'invoice is for'} <strong>${esc(installment.toLowerCase())}</strong>
                   of the season total above &mdash; <strong>$${money(d.amount_dollars)}</strong>${isPaid ? '' : ' due'}.
