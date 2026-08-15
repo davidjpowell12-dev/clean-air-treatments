@@ -177,27 +177,45 @@ router.get('/public/receipt/:token', (req, res) => {
         end,
         label: new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' })
       };
-      // Use the date the work was ACTUALLY performed, not the date it was
-      // planned for. Priority: the MDARD application date (authoritative for
-      // chemical services) → completed_date → scheduled_date as a last resort
-      // for older rows recorded before completion dates were captured.
-      // Filtering on the same resolved date means a job planned for Aug but
-      // performed in July lands in July, where the customer expects it.
-      visits = db.prepare(`
-        SELECT COALESCE(MIN(a.application_date), s.completed_date, s.scheduled_date) AS performed_date,
-               s.service_type, s.round_number, s.total_rounds,
-               MIN(a.application_date) IS NOT NULL AS from_application
+      // Work performed comes from TWO sources and neither alone is complete:
+      //
+      //  - applications: the MDARD record of every chemical treatment, with
+      //    the authoritative date it was performed. schedule_id is OPTIONAL
+      //    (the app explicitly supports schedule-less visits), so driving off
+      //    schedules alone silently dropped real treatments from the invoice.
+      //  - schedules: the only record of non-chemical visits (mowing,
+      //    clean-ups), which never produce an application record.
+      //
+      // Applications win where both exist, since they carry the true date;
+      // schedules are included only when they have no linked application, so
+      // a visit is never listed twice.
+      const fromApplications = db.prepare(`
+        SELECT a.application_date AS performed_date,
+               COALESCE(s.service_type, a.product_name) AS service,
+               s.round_number, s.total_rounds
+          FROM applications a
+          LEFT JOIN schedules s ON s.id = a.schedule_id
+         WHERE a.property_id = ?
+           AND a.application_date BETWEEN ? AND ?
+      `).all(inv.property_id, start, end);
+
+      const fromSchedules = db.prepare(`
+        SELECT COALESCE(s.completed_date, s.scheduled_date) AS performed_date,
+               s.service_type AS service, s.round_number, s.total_rounds
           FROM schedules s
-          LEFT JOIN applications a ON a.schedule_id = s.id
-         WHERE s.property_id = ? AND s.status = 'completed'
-         GROUP BY s.id
-        HAVING performed_date BETWEEN ? AND ?
-         ORDER BY performed_date ASC
-      `).all(inv.property_id, start, end).map(v => ({
-        date: v.performed_date,
-        service: v.service_type || 'Service',
-        round: v.round_number && v.total_rounds ? `${v.round_number} of ${v.total_rounds}` : null
-      }));
+         WHERE s.property_id = ?
+           AND s.status = 'completed'
+           AND NOT EXISTS (SELECT 1 FROM applications a2 WHERE a2.schedule_id = s.id)
+           AND COALESCE(s.completed_date, s.scheduled_date) BETWEEN ? AND ?
+      `).all(inv.property_id, start, end);
+
+      visits = [...fromApplications, ...fromSchedules]
+        .sort((a, b) => String(a.performed_date).localeCompare(String(b.performed_date)))
+        .map(v => ({
+          date: v.performed_date,
+          service: v.service || 'Service',
+          round: v.round_number && v.total_rounds ? `${v.round_number} of ${v.total_rounds}` : null
+        }));
     }
   }
 
@@ -1012,6 +1030,67 @@ router.get('/estimate-detail', requireAuth, (req, res) => {
     res.json({ ok: true, matches: out.length, estimates: out });
   } catch (err) {
     console.error('[estimate-detail] error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─── Why isn't a visit on the invoice? (read-only diagnostic) ─
+// Dumps every schedule row and application the app has for a customer in a
+// month, with the date the invoice would use and whether it qualifies — so a
+// missing visit can be traced to the actual record instead of guessed at.
+// /api/payments/visit-audit?name=Carol Rich&month=2026-07
+router.get('/visit-audit', requireAuth, (req, res) => {
+  try {
+    const db = getDb();
+    const name = String(req.query.name || '').trim();
+    const month = String(req.query.month || '').trim(); // YYYY-MM
+    if (!name || !/^\d{4}-\d{2}$/.test(month)) {
+      return res.status(400).json({ ok: false, error: 'pass ?name=Carol Rich&month=2026-07' });
+    }
+    const [y, m] = month.split('-').map(Number);
+    const start = `${month}-01`;
+    const end = new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+
+    const props = db.prepare(
+      "SELECT id, customer_name, address FROM properties WHERE customer_name LIKE '%' || ? || '%'"
+    ).all(name);
+
+    const out = props.map(p => {
+      const schedules = db.prepare(`
+        SELECT s.id, s.scheduled_date, s.completed_date, s.service_type, s.status,
+               s.round_number, s.total_rounds,
+               (SELECT COUNT(*) FROM applications a WHERE a.schedule_id = s.id) AS linked_applications
+          FROM schedules s
+         WHERE s.property_id = ?
+           AND (s.scheduled_date BETWEEN ? AND ? OR s.completed_date BETWEEN ? AND ?)
+         ORDER BY s.scheduled_date
+      `).all(p.id, start, end, start, end).map(s => ({
+        ...s,
+        date_invoice_would_use: s.completed_date || s.scheduled_date,
+        on_invoice: s.status === 'completed' && s.linked_applications === 0
+          ? 'yes (as a schedule)'
+          : s.linked_applications > 0
+            ? 'via its application record'
+            : `no — status is "${s.status}", not completed`
+      }));
+
+      const applications = db.prepare(`
+        SELECT id, application_date, product_name, schedule_id
+          FROM applications
+         WHERE property_id = ? AND application_date BETWEEN ? AND ?
+         ORDER BY application_date
+      `).all(p.id, start, end).map(a => ({
+        ...a,
+        on_invoice: 'yes — applications always count',
+        note: a.schedule_id ? 'linked to a schedule' : 'schedule-less visit'
+      }));
+
+      return { property_id: p.id, customer_name: p.customer_name, address: p.address, schedules, applications };
+    });
+
+    res.json({ ok: true, month, period: { start, end }, matches: out.length, properties: out });
+  } catch (err) {
+    console.error('[visit-audit] error:', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });
