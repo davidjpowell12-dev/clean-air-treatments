@@ -11,11 +11,25 @@ router.get('/clients', requireAuth, (req, res) => {
   const db = getDb();
   const search = String(req.query.search || '').trim();
   const rows = search
-    ? db.prepare("SELECT id, name, email, phone FROM clients WHERE name LIKE ? OR email LIKE ? ORDER BY name LIMIT 200").all('%' + search + '%', '%' + search + '%')
-    : db.prepare("SELECT id, name, email, phone FROM clients ORDER BY name LIMIT 200").all();
+    ? db.prepare("SELECT id, name, email, phone, password_set_at FROM clients WHERE name LIKE ? OR email LIKE ? ORDER BY name LIMIT 200").all('%' + search + '%', '%' + search + '%')
+    : db.prepare("SELECT id, name, email, phone, password_set_at FROM clients ORDER BY name LIMIT 200").all();
   const cnt = db.prepare("SELECT COUNT(*) AS c, COALESCE(SUM(published),0) AS p FROM client_notes WHERE client_id = ?");
   const clients = rows.map(r => { const x = cnt.get(r.id); return { ...r, note_count: x.c, published_count: x.p }; });
   res.json({ ok: true, clients });
+});
+
+// Reset a customer's portal password. There's no self-service reset (that
+// would need email), so this is how a forgotten password gets fixed: clearing
+// the hash lets the customer register again with the same email.
+router.post('/clients/:id/reset-portal-password', requireAuth, (req, res) => {
+  const db = getDb();
+  const { clearClientPassword } = require('../utils/client-password');
+  const client = db.prepare('SELECT id, email FROM clients WHERE id = ?').get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  clearClientPassword(db, client.id);
+  logAudit(db, 'client', client.id, req.session.userId, 'portal_password_reset', { email: client.email });
+  res.json({ ok: true, message: 'Password cleared — they can register again with the same email.' });
 });
 
 // List notes for a client (by client_id, or resolved from an estimate_id).

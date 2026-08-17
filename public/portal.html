@@ -60,6 +60,8 @@
     .hide { display:none; }
     .msg { padding:14px; border-radius:10px; font-size:14px; margin-top:8px; }
     .msg.ok { background:var(--green-light); color:var(--green-dark); }
+    .msg.err { background:var(--red-light); color:var(--red); }
+    .login a { color:var(--green-dark); font-weight:600; }
   </style>
 </head>
 <body>
@@ -67,13 +69,32 @@
   <div id="loginView" class="hide">
     <div class="login">
       <h1>Clean Air Lawn Care</h1>
-      <p>Sign in to view your invoices and upcoming visits. Enter your email and we'll send you a secure sign-in link — no password needed.</p>
-      <form id="loginForm">
-        <input id="email" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" required>
-        <button class="btn btn-primary" type="submit">Send me a sign-in link</button>
-      </form>
-      <div id="loginMsg" class="msg ok hide"></div>
-      <p class="note">Trouble signing in? Just reply to any email from us.</p>
+
+      <!-- SIGN IN -->
+      <div id="signinPane">
+        <p>Sign in to see your invoices, upcoming visits, and service history.</p>
+        <form id="signinForm">
+          <input id="siEmail" type="email" inputmode="email" autocomplete="email" placeholder="Email address" required>
+          <input id="siPassword" type="password" autocomplete="current-password" placeholder="Password" required>
+          <button class="btn btn-primary" type="submit">Sign in</button>
+        </form>
+        <div id="signinMsg" class="msg err hide"></div>
+        <p class="note">First time here? <a href="#" id="toRegister">Create your account</a></p>
+      </div>
+
+      <!-- CREATE ACCOUNT -->
+      <div id="registerPane" class="hide">
+        <p>Use the email address we have on file for you, then choose a password.</p>
+        <form id="registerForm">
+          <input id="rgEmail" type="email" inputmode="email" autocomplete="email" placeholder="Email address we have on file" required>
+          <input id="rgPassword" type="password" autocomplete="new-password" placeholder="Choose a password (8+ characters)" required minlength="8">
+          <button class="btn btn-primary" type="submit">Create account</button>
+        </form>
+        <div id="registerMsg" class="msg err hide"></div>
+        <p class="note">Already registered? <a href="#" id="toSignin">Sign in</a></p>
+      </div>
+
+      <p class="note" style="margin-top:20px;">Trouble getting in? Just reply to our email and we'll sort it out.</p>
     </div>
   </div>
 
@@ -145,18 +166,51 @@
       $('dashView').classList.toggle('hide', view !== 'dash');
     }
 
-    // Login
-    $('loginForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const email = $('email').value.trim();
-      await fetch('/portal/request-link', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const m = $('loginMsg');
-      m.textContent = "If that email is on file, we've sent you a sign-in link. Check your inbox.";
+    // Toggle between sign-in and create-account
+    function showPane(which) {
+      $('signinPane').classList.toggle('hide', which !== 'signin');
+      $('registerPane').classList.toggle('hide', which !== 'register');
+      $('signinMsg').classList.add('hide');
+      $('registerMsg').classList.add('hide');
+    }
+    $('toRegister').addEventListener('click', (e) => { e.preventDefault(); showPane('register'); });
+    $('toSignin').addEventListener('click', (e) => { e.preventDefault(); showPane('signin'); });
+
+    function showErr(id, text) {
+      const m = $(id);
+      m.textContent = text;
       m.classList.remove('hide');
-      $('loginForm').reset();
+    }
+
+    // Shared submit path: both endpoints set the session cookie on success, so
+    // a win means we can go straight to the dashboard.
+    async function submitAuth(url, email, password, msgId, btn) {
+      btn.disabled = true;
+      try {
+        const r = await fetch(url, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: email.trim(), password })
+        });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) { showErr(msgId, data.error || 'Something went wrong. Please try again.'); return; }
+        const me = await api('/me');
+        if (me && me.ok) loadDashboard(me);
+        else showErr(msgId, 'Signed in, but could not load your account. Please refresh.');
+      } catch (err) {
+        showErr(msgId, 'Connection problem. Please try again.');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    $('signinForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitAuth('/portal/login', $('siEmail').value, $('siPassword').value, 'signinMsg', e.target.querySelector('button'));
+    });
+
+    $('registerForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      submitAuth('/portal/register', $('rgEmail').value, $('rgPassword').value, 'registerMsg', e.target.querySelector('button'));
     });
 
     $('logoutBtn').addEventListener('click', async () => {

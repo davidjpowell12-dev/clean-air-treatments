@@ -8,6 +8,7 @@ const express = require('express');
 const path = require('path');
 const router = express.Router();
 const { getDb } = require('../db/database');
+const { logAudit } = require('../db/audit');
 const clientAuth = require('../utils/client-auth');
 const clients = require('../utils/clients');
 const portalData = require('../utils/portal-data');
@@ -69,6 +70,44 @@ function findClient(db, { email: emailInput, phone }) {
   return null;
 }
 
+// ─── Password login ─────────────────────────────────────────
+// The primary way in. Magic links (below) need the app to send email, which
+// isn't configured, so the owner emails a portal link himself and customers
+// register with the address already on file.
+const clientPassword = require('../utils/client-password');
+
+router.post('/register', (req, res) => {
+  const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  if (rateLimited(ip, 10)) {
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
+  }
+  const db = getDb();
+  // Not destructured as `email` — that would shadow the email module above.
+  const emailInput = (req.body || {}).email;
+  const r = clientPassword.registerClientPassword(db, emailInput, (req.body || {}).password);
+  if (!r.ok) return res.status(400).json({ error: r.reason, code: r.code });
+
+  logAudit(db, 'client', r.clientId, null, 'portal_register', { email: String(emailInput || '').toLowerCase() });
+  res.cookie(COOKIE, clientAuth.createSession(db, r.clientId), COOKIE_OPTS);
+  res.json({ ok: true });
+});
+
+router.post('/login', (req, res) => {
+  const ip = req.ip || (req.connection && req.connection.remoteAddress) || 'unknown';
+  if (rateLimited(ip, 10)) {
+    return res.status(429).json({ error: 'Too many attempts. Please wait a few minutes and try again.' });
+  }
+  const db = getDb();
+  const b = req.body || {};
+  const r = clientPassword.verifyClientPassword(db, b.email, b.password);
+  if (!r.ok) return res.status(401).json({ error: r.reason });
+
+  res.cookie(COOKIE, clientAuth.createSession(db, r.clientId), COOKIE_OPTS);
+  res.json({ ok: true });
+});
+
+// Magic-link request. Kept working for the day email is configured; the UI
+// doesn't surface it while SendGrid is unset.
 // Always responds identically whether or not the account exists.
 router.post('/request-link', async (req, res) => {
   const SAME = { ok: true, message: "If that account exists, we've sent a sign-in link." };

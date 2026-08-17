@@ -3,11 +3,23 @@ const InvoicingPage = {
   // Reliably open the native SMS app on iOS and Android.
   // iOS uses sms:NUMBER&body=  Android uses sms:NUMBER?body=
   // Mirrors EstimatesPage._openSMS — keep them in sync.
+  // phone is expected pre-cleaned to digits only by the caller; normalize
+  // to E.164 (+1XXXXXXXXXX) — a bare 10-digit number is ambiguous and can
+  // cause iOS to route the message oddly ("Not Delivered") even though the
+  // same text typed by hand goes through fine.
+  _toE164(phone) {
+    const digits = String(phone || '').replace(/\D/g, '');
+    if (digits.length === 10) return '+1' + digits;
+    if (digits.length === 11 && digits.startsWith('1')) return '+' + digits;
+    return phone;
+  },
+
   _openSMS(phone, message) {
     const ua = navigator.userAgent || '';
     const isIOS = /iPhone|iPad|iPod/i.test(ua);
+    const e164 = this._toE164(phone);
     const sep = isIOS ? '&' : '?';
-    const smsUrl = `sms:${phone}${sep}body=${encodeURIComponent(message)}`;
+    const smsUrl = `sms:${e164}${sep}body=${encodeURIComponent(message)}`;
     const a = document.createElement('a');
     a.href = smsUrl;
     a.style.display = 'none';

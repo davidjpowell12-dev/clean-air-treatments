@@ -375,6 +375,9 @@ CREATE TABLE IF NOT EXISTS clients (
   email TEXT UNIQUE,
   phone TEXT,
   name TEXT,
+  -- bcrypt hash. NULL = customer hasn't registered a portal login yet.
+  password_hash TEXT,
+  password_set_at DATETIME,
   created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );

@@ -526,6 +526,14 @@ function runMigrations(db) {
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_client_auth_token_hash ON client_auth_tokens(token_hash)', 'idx_client_auth_token_hash');
   ensureColumn(db, 'estimates', 'client_id', 'INTEGER REFERENCES clients(id)');
   safeExec(db, 'CREATE INDEX IF NOT EXISTS idx_estimates_client ON estimates(client_id)', 'idx_estimates_client');
+
+  // Client portal password login. Magic links need the app to send email, which
+  // isn't available (no SendGrid), so customers register a password themselves
+  // from a portal link the owner emails from his own inbox. These belong HERE
+  // and not in the numbered migration that created `clients` — that migration
+  // has already run on the live DB, so adding columns there is a no-op forever.
+  ensureColumn(db, 'clients', 'password_hash', 'TEXT');
+  ensureColumn(db, 'clients', 'password_set_at', 'DATETIME');
   // Heads-up notifications: per-property custom line included in pre-visit
   // messages ("Please have pets and kids inside"), and an idempotency stamp on
   // schedules so the evening auto-email never sends twice for one visit.
