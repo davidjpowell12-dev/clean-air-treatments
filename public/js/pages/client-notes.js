@@ -32,7 +32,10 @@ const ClientNotesPage = {
           style="display:flex;justify-content:space-between;align-items:center;padding:12px;border:1px solid var(--gray-200);border-radius:8px;margin-bottom:8px;cursor:pointer;">
           <div><div style="font-weight:600;">${this._esc(c.name || '—')}</div>
             <div style="font-size:13px;color:var(--gray-500);">${this._esc(c.email || c.phone || '')}</div></div>
-          <div style="font-size:12px;color:var(--gray-500);white-space:nowrap;">${c.note_count} note${c.note_count === 1 ? '' : 's'}${c.published_count ? ` · ${c.published_count} live` : ''}</div>
+          <div style="font-size:12px;color:var(--gray-500);white-space:nowrap;text-align:right;">
+            ${c.note_count} note${c.note_count === 1 ? '' : 's'}${c.published_count ? ` · ${c.published_count} live` : ''}
+            <div style="margin-top:2px;">${c.password_set_at ? 'Portal: registered' : 'Portal: not yet'}</div>
+          </div>
         </div>`).join('') : '<p style="color:var(--gray-500);font-size:14px;padding:8px;">No matching customers.</p>';
     } catch (e) { box.innerHTML = `<p style="color:var(--red);font-size:14px;">Could not load customers: ${this._esc(e.message)}</p>`; }
   },
@@ -48,7 +51,11 @@ const ClientNotesPage = {
     const res = await Api.get('/api/client-notes?client_id=' + this._clientId);
     const notes = res.notes || [];
     box.innerHTML = `
-      <div class="card"><div class="card-header"><h3>Notes for ${this._esc(this._clientName)}</h3></div>
+      <div class="card"><div class="card-header"
+        style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+        <h3>Notes for ${this._esc(this._clientName)}</h3>
+        <a class="btn btn-outline btn-sm" href="/portal/preview/${this._clientId}" target="_blank" rel="noopener">View their portal</a>
+      </div>
         <div class="card-body">
           <div style="display:grid;gap:8px;margin-bottom:16px;">
             <input id="cnTitle" class="input" placeholder="Title (optional) — e.g. Spring observations">

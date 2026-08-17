@@ -9,6 +9,7 @@ const path = require('path');
 const router = express.Router();
 const { getDb } = require('../db/database');
 const { logAudit } = require('../db/audit');
+const { requireAuth } = require('../middleware/auth');
 const clientAuth = require('../utils/client-auth');
 const clients = require('../utils/clients');
 const portalData = require('../utils/portal-data');
@@ -34,11 +35,18 @@ function readCookie(req, name) {
   return null;
 }
 
-// Auth gate for every future portal API route. Sets req.clientId.
+// Auth gate for every portal API route. Sets req.clientId and req.isPreview.
+// A staff preview is read-only: the portal is all GETs today, but this makes
+// sure that stays true if a write action (pay-in-full, profile edit) is added
+// later — nobody should change a customer's data from inside a preview.
 function requireClient(req, res, next) {
-  const clientId = clientAuth.validateSession(getDb(), readCookie(req, COOKIE));
-  if (!clientId) return res.status(401).json({ error: 'Not signed in' });
-  req.clientId = clientId;
+  const session = clientAuth.readSession(getDb(), readCookie(req, COOKIE));
+  if (!session) return res.status(401).json({ error: 'Not signed in' });
+  if (session.preview && req.method !== 'GET') {
+    return res.status(403).json({ error: 'This is a staff preview — it can look, but not change anything.' });
+  }
+  req.clientId = session.clientId;
+  req.isPreview = session.preview;
   next();
 }
 
@@ -155,6 +163,23 @@ router.get('/auth', (req, res) => {
   }
 });
 
+// ─── Staff "view as customer" preview ────────────────────────
+// Behind STAFF auth (the app session), not client auth. Lets the owner see a
+// customer's portal exactly as they'd see it — without knowing their password
+// and without consuming their one-time registration. Read-only and expires in
+// 30 minutes. Every use is audit-logged.
+router.get('/preview/:clientId', requireAuth, (req, res) => {
+  const db = getDb();
+  const client = db.prepare('SELECT id, name, email FROM clients WHERE id = ?').get(req.params.clientId);
+  if (!client) return res.status(404).send(authPage('That customer no longer exists.'));
+
+  logAudit(db, 'client', client.id, req.session.userId, 'portal_preview', { email: client.email });
+  res.cookie(COOKIE, clientAuth.createPreviewSession(db, client.id), {
+    ...COOKIE_OPTS, maxAge: clientAuth.PREVIEW_TTL_MS,
+  });
+  res.redirect('/portal/home');
+});
+
 // ─── Customer-facing page (login + dashboard SPA) ────────────
 const PAGE = path.join(__dirname, '..', 'public', 'portal.html');
 router.get('/', (req, res) => res.sendFile(PAGE));
@@ -163,7 +188,7 @@ router.get('/home', (req, res) => res.sendFile(PAGE));
 // ─── Portal data API (all behind requireClient, all scoped) ──
 router.get('/me', requireClient, (req, res) => {
   const client = getDb().prepare('SELECT id, email, name FROM clients WHERE id = ?').get(req.clientId);
-  res.json({ ok: true, client });
+  res.json({ ok: true, client, preview: !!req.isPreview });
 });
 
 router.get('/invoices', requireClient, (req, res) => {

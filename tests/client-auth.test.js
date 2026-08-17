@@ -79,3 +79,69 @@ test('purgeExpiredTokens removes expired and used tokens', () => {
   assert.ok(removed >= 2, 'removed used + expired');
   assert.equal(validateSession(db, live), cid, 'valid session untouched');
 });
+
+// ─── Staff "view as customer" preview sessions ───────────────
+// The point of a preview is that the owner can see a customer's portal without
+// knowing their password and without burning their one-time registration.
+const { createPreviewSession, readSession } = require('../utils/client-auth');
+
+test('a preview session reads as a valid session, but flagged as preview', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  const raw = createPreviewSession(db, cid);
+
+  const s = readSession(db, raw);
+  assert.equal(s.clientId, cid);
+  assert.equal(s.preview, true, 'must be distinguishable from a real login');
+  assert.equal(validateSession(db, raw), cid, 'still resolves to the right client');
+});
+
+test('a real login session is NOT flagged as preview', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  const s = readSession(db, createSession(db, cid));
+  assert.equal(s.preview, false);
+});
+
+test('previewing does not touch the customer password or registration', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  createPreviewSession(db, cid);
+  const row = db.prepare('SELECT password_hash, password_set_at FROM clients WHERE id = ?').get(cid);
+  assert.equal(row.password_hash, null, 'their registration is still available to them');
+  assert.equal(row.password_set_at, null);
+});
+
+test('a preview expires much sooner than a real session', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  createPreviewSession(db, cid);
+  createSession(db, cid);
+  const rows = db.prepare("SELECT kind, expires_at FROM client_auth_tokens WHERE client_id = ? AND kind IN ('preview','session')").all(cid);
+  const preview = rows.find(r => r.kind === 'preview');
+  const real = rows.find(r => r.kind === 'session');
+  assert.ok(new Date(preview.expires_at) < new Date(real.expires_at));
+});
+
+test('exiting a preview destroys it', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  const raw = createPreviewSession(db, cid);
+  destroySession(db, raw);
+  assert.equal(readSession(db, raw), null);
+});
+
+test('an expired preview is refused', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  const raw = createPreviewSession(db, cid);
+  db.prepare("UPDATE client_auth_tokens SET expires_at = '2020-01-01T00:00:00.000Z' WHERE kind = 'preview'").run();
+  assert.equal(readSession(db, raw), null);
+});
+
+test('a login token cannot be used as a session or preview', () => {
+  const db = makeDb();
+  const cid = makeClient(db);
+  const raw = createLoginToken(db, cid);
+  assert.equal(readSession(db, raw), null, 'kinds must not be interchangeable');
+});

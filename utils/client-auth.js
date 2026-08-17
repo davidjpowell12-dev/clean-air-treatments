@@ -8,6 +8,7 @@ const crypto = require('crypto');
 
 const LOGIN_TTL_MS = 15 * 60 * 1000;          // 15 minutes
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+const PREVIEW_TTL_MS = 30 * 60 * 1000;        // 30 minutes (staff "view as customer")
 
 const hashToken = (raw) => crypto.createHash('sha256').update(String(raw)).digest('hex');
 const randomToken = () => crypto.randomBytes(32).toString('hex');
@@ -47,21 +48,41 @@ function createSession(db, clientId) {
   return createToken(db, clientId, 'session', SESSION_TTL_MS);
 }
 
-/** Return the client_id for a valid, unexpired session token, else null. */
-function validateSession(db, raw) {
+/**
+ * Staff "view as customer" session. Deliberately a DIFFERENT kind so it can
+ * never be confused with a real customer login: it expires in 30 minutes, the
+ * portal renders a preview banner for it, and write actions are refused.
+ * Creating one does NOT consume the customer's registration.
+ */
+function createPreviewSession(db, clientId) {
+  return createToken(db, clientId, 'preview', PREVIEW_TTL_MS);
+}
+
+/**
+ * Look up a session token. Returns { clientId, preview } or null.
+ * Accepts both real sessions and staff previews — callers use `preview` to
+ * decide what to show and what to refuse.
+ */
+function readSession(db, raw) {
   if (!raw) return null;
   const row = db.prepare(
-    "SELECT * FROM client_auth_tokens WHERE token_hash = ? AND kind = 'session'"
+    "SELECT * FROM client_auth_tokens WHERE token_hash = ? AND kind IN ('session','preview')"
   ).get(hashToken(raw));
   if (!row) return null;
   if (new Date(row.expires_at).getTime() < Date.now()) return null;
-  return row.client_id;
+  return { clientId: row.client_id, preview: row.kind === 'preview' };
 }
 
-/** Invalidate a session (logout). */
+/** Return the client_id for a valid, unexpired session token, else null. */
+function validateSession(db, raw) {
+  const s = readSession(db, raw);
+  return s ? s.clientId : null;
+}
+
+/** Invalidate a session (logout, or exiting a staff preview). */
 function destroySession(db, raw) {
   if (!raw) return;
-  db.prepare("DELETE FROM client_auth_tokens WHERE token_hash = ? AND kind = 'session'").run(hashToken(raw));
+  db.prepare("DELETE FROM client_auth_tokens WHERE token_hash = ? AND kind IN ('session','preview')").run(hashToken(raw));
 }
 
 /** Housekeeping: drop expired/used tokens. Safe to call anytime. */
@@ -73,7 +94,7 @@ function purgeExpiredTokens(db) {
 
 module.exports = {
   createLoginToken, consumeLoginToken,
-  createSession, validateSession, destroySession,
+  createSession, createPreviewSession, readSession, validateSession, destroySession,
   purgeExpiredTokens,
-  LOGIN_TTL_MS, SESSION_TTL_MS,
+  LOGIN_TTL_MS, SESSION_TTL_MS, PREVIEW_TTL_MS,
 };
