@@ -387,6 +387,15 @@ const SettingsPage = {
               <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportCSV('invoices')">Invoices</button>
             </div>
             <button class="btn btn-secondary btn-full" onclick="SettingsPage.exportAll()">Download All Exports</button>
+
+            <h4 style="margin:24px 0 8px;font-size:14px;">Mailing List</h4>
+            <p style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">
+              Every email address in the app, deduplicated and tagged, ready to import into MailerLite.</p>
+            <div id="emailListSummary" style="font-size:13px;color:var(--gray-500);margin-bottom:12px;">Counting…</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportEmailList('customer')">Current Customers</button>
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.exportEmailList()">Everyone</button>
+            </div>
           </div>
         </div>
       `;
@@ -395,6 +404,7 @@ const SettingsPage = {
       this.loadBackupsSection();
       this.loadTwilioStatus();
       this.loadQboStatus();
+      this.loadEmailListSummary();
     } catch (err) {
       main.innerHTML = `<div class="empty-state"><h3>Error</h3><p>${err.message}</p></div>`;
     }
@@ -1310,7 +1320,27 @@ const SettingsPage = {
   },
 
   exportCSV(type) {
-    window.location.href = `/api/export/${type}`;
+    // The admin router is mounted at /api/admin — these were pointing at
+    // /api/export/… and silently 404ing.
+    window.location.href = `/api/admin/export/${type}`;
+  },
+
+  exportEmailList(segment) {
+    window.location.href = '/api/admin/export/email-list' + (segment ? `?segment=${segment}` : '');
+  },
+
+  async loadEmailListSummary() {
+    const box = document.getElementById('emailListSummary');
+    if (!box) return;
+    try {
+      const res = await Api.get('/api/admin/export/email-list/summary');
+      const c = res.counts;
+      box.innerHTML = `<b>${c.total}</b> unique address${c.total === 1 ? '' : 'es'} — `
+        + `${c.customer} current customer${c.customer === 1 ? '' : 's'}, `
+        + `${c.past_customer} past, ${c.prospect} quoted but never signed.`;
+    } catch (e) {
+      box.textContent = 'Could not count addresses: ' + e.message;
+    }
   },
 
   exportAll() {

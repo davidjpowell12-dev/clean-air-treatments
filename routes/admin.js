@@ -497,6 +497,46 @@ router.get('/export/estimates', requireAdmin, (req, res) => {
   }
 });
 
+// ── Export Mailing List ──────────────────────────────────────────────
+// Every email address in the app, deduplicated across properties/estimates/
+// clients and tagged with a segment, ready to import into MailerLite.
+// ?segment=customer limits it to current customers only.
+router.get('/export/email-list', requireAdmin, (req, res) => {
+  try {
+    const { buildEmailList } = require('../utils/email-list');
+    let { rows } = buildEmailList(getDb());
+
+    const wanted = String(req.query.segment || '').trim();
+    if (wanted) rows = rows.filter(r => r.segment === wanted);
+
+    const headers = [
+      { key: 'email', label: 'Email' },
+      { key: 'first_name', label: 'Name' },        // MailerLite personalizes on "name"
+      { key: 'last_name', label: 'Last Name' },
+      { key: 'full_name', label: 'Full Name' },
+      { key: 'segment', label: 'Segment' },
+      { key: 'city', label: 'City' },
+      { key: 'zip', label: 'ZIP' },
+      { key: 'phone', label: 'Phone' },
+    ];
+    const suffix = wanted ? `-${wanted}` : '';
+    sendCSV(res, toCSV(rows, headers), `mailing-list${suffix}.csv`);
+  } catch (err) {
+    res.status(500).json({ error: 'Export failed: ' + err.message });
+  }
+});
+
+// Counts only — lets the Settings page show what's in the list before you
+// download and import it.
+router.get('/export/email-list/summary', requireAdmin, (req, res) => {
+  try {
+    const { buildEmailList } = require('../utils/email-list');
+    res.json({ ok: true, counts: buildEmailList(getDb()).counts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Export Invoices ──────────────────────────────────────────────────
 router.get('/export/invoices', requireAdmin, (req, res) => {
   try {
