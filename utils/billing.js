@@ -19,9 +19,13 @@ function activateBillingForEstimate(db, estimateId) {
     return false;
   }
 
-  // Check if this is the first completed visit for this estimate
+  // Check if this is the first completed visit for this estimate.
+  // Only billable work counts. A site visit is completed against the same
+  // estimate but is a measuring trip, not service — counting it here would
+  // make the first REAL visit look like the second and silently skip
+  // activation, so the customer would never be billed at all.
   const completedVisits = db.prepare(
-    "SELECT COUNT(*) as count FROM schedules WHERE estimate_id = ? AND status = 'completed'"
+    "SELECT COUNT(*) as count FROM schedules WHERE estimate_id = ? AND status = 'completed' AND COALESCE(kind, 'service') = 'service'"
   ).get(estimateId);
 
   if (completedVisits.count !== 1) {
@@ -82,7 +86,20 @@ function activateBillingForEstimate(db, estimateId) {
  */
 function billForCompletedVisit(db, schedule) {
   try {
-    if (!schedule || !schedule.estimate_id) return { action: 'none', reason: 'no_estimate' };
+    if (!schedule) return { action: 'none', reason: 'no_estimate' };
+
+    // Site visits are scheduled and completed like any other stop, but they
+    // are a measuring trip, not work performed. They can carry an estimate_id
+    // (that's the whole point — the visit produced the proposal), so without
+    // this guard, marking one complete would activate installment #1 or cut a
+    // per-service invoice for someone who hasn't agreed to anything yet.
+    // Checked on `kind`, not on the service_type string, deliberately: naming
+    // conventions are how the double-billing bug happened.
+    if (schedule.kind && schedule.kind !== 'service') {
+      return { action: 'none', reason: `not_billable_kind_${schedule.kind}` };
+    }
+
+    if (!schedule.estimate_id) return { action: 'none', reason: 'no_estimate' };
 
     const estimate = db.prepare('SELECT * FROM estimates WHERE id = ?').get(schedule.estimate_id);
     if (!estimate) return { action: 'none', reason: 'estimate_not_found' };

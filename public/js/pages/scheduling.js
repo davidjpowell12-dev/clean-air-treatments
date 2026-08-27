@@ -138,6 +138,7 @@ const SchedulingPage = {
 
       <div style="display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
         <button id="addPropsBtn" class="btn btn-primary btn-sm">+ Add Properties</button>
+        <button id="siteVisitBtn" class="btn btn-outline btn-sm">&#128208; Site Visit</button>
         <button id="calendarBtn" class="btn btn-outline btn-sm">Calendar</button>
         <button id="genSeasonBtn" class="btn btn-outline btn-sm">Generate Season</button>
         <button id="seasonOverviewBtn" class="btn btn-outline btn-sm">Season Overview</button>
@@ -242,6 +243,7 @@ const SchedulingPage = {
     });
 
     document.getElementById('addPropsBtn').addEventListener('click', () => App.navigate('scheduling', 'add'));
+    document.getElementById('siteVisitBtn').addEventListener('click', () => this._showSiteVisitModal(date));
     document.getElementById('calendarBtn').addEventListener('click', () => App.navigate('scheduling', 'calendar'));
     document.getElementById('genSeasonBtn').addEventListener('click', () => App.navigate('scheduling', 'season'));
     document.getElementById('seasonOverviewBtn').addEventListener('click', () => App.navigate('scheduling', 'overview'));
@@ -335,6 +337,7 @@ const SchedulingPage = {
       `<option value="${t.id}" ${e.assigned_to === t.id ? 'selected' : ''}>${t.full_name}</option>`
     ).join('');
     const svcColor = this._svcColor(e.service_type);
+    const isSiteVisit = e.kind === 'site_visit';
 
     return `
       <div class="schedule-entry ${e.status === 'completed' ? 'schedule-entry-done' : ''}" data-id="${e.id}" ${svcColor ? `data-svc-color="${svcColor}"` : ''}>
@@ -343,7 +346,9 @@ const SchedulingPage = {
           <div class="schedule-entry-info">
             <div class="schedule-entry-name">${e.customer_name}</div>
             <div class="schedule-entry-addr">${e.address}${e.city ? ', ' + e.city : ''}</div>
-            ${e.service_type ? `<div style="margin-top:2px;"><span class="svc-pill svc-pill-${svcColor || 'blue'}">${e.service_type}</span></div>` : ''}
+            ${isSiteVisit
+              ? `<div style="margin-top:2px;"><span class="svc-pill" style="background:#92400e;color:#fff;">&#128208; Site Visit</span></div>`
+              : (e.service_type ? `<div style="margin-top:2px;"><span class="svc-pill svc-pill-${svcColor || 'blue'}">${e.service_type}</span></div>` : '')}
             ${e.sqft ? `<div class="schedule-entry-meta">${Number(e.sqft).toLocaleString()} sq ft</div>` : ''}
             ${e.phone ? `<div class="schedule-entry-meta"><a href="tel:${e.phone}">${e.phone}</a></div>` : ''}
             ${e.notes ? `<div class="schedule-entry-notes">${e.notes}</div>` : ''}
@@ -359,7 +364,11 @@ const SchedulingPage = {
             ${techOptions}
           </select>
           <div class="schedule-entry-btns">
-            ${e.status !== 'completed' ? `<button class="btn btn-sm btn-primary sched-complete" data-id="${e.id}" data-property-id="${e.property_id}" data-date="${e.scheduled_date}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Complete &amp; Log Application">&#10003;</button>` : ''}
+            ${isSiteVisit
+              // A site visit produces measurements, not an application record,
+              // so it opens the capture form instead of the application log.
+              ? `<button class="btn btn-sm btn-primary sched-site-capture" data-id="${e.id}" title="Record what you found">&#128208; Record</button>`
+              : (e.status !== 'completed' ? `<button class="btn btn-sm btn-primary sched-complete" data-id="${e.id}" data-property-id="${e.property_id}" data-date="${e.scheduled_date}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Complete &amp; Log Application">&#10003;</button>` : '')}
             ${e.status === 'scheduled' ? `<button class="btn btn-sm btn-outline sched-reschedule" data-id="${e.id}" data-name="${e.customer_name}" data-round="${e.round_number || ''}" data-total="${e.total_rounds || ''}" title="Reschedule">&#8644;</button>` : ''}
             <button class="btn btn-sm btn-outline sched-edit-service" data-id="${e.id}" data-current="${(e.service_type || '').replace(/"/g, '&quot;')}" data-name="${(e.customer_name || '').replace(/"/g, '&quot;')}" title="Edit service type">&#9998;</button>
             ${e.status !== 'skipped' ? `<button class="btn btn-sm btn-outline sched-skip" data-id="${e.id}" title="Skip">Skip</button>` : ''}
@@ -455,6 +464,14 @@ const SchedulingPage = {
     document.querySelectorAll('.sched-edit-service').forEach(btn => {
       btn.addEventListener('click', () => {
         this._showEditServiceModal(btn.dataset.id, btn.dataset.current, btn.dataset.name);
+      });
+    });
+
+    // Site visit — record measurements and observations
+    document.querySelectorAll('.sched-site-capture').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const entry = entries.find(x => String(x.id) === String(btn.dataset.id));
+        this._showSiteVisitCapture(btn.dataset.id, entry || {});
       });
     });
 
@@ -868,6 +885,208 @@ const SchedulingPage = {
       } catch (err) {
         App.toast('Failed: ' + err.message, 'error');
       }
+    });
+  },
+
+  // ─── Site visits (estimate visits) ────────────────────────────────
+  // Booking one. Most come from a cold call, so the default is a brand-new
+  // lead typed straight in; an existing property can be picked instead.
+  _showSiteVisitModal(date) {
+    document.querySelector('.modal-overlay.site-visit-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay site-visit-modal';
+    const inp = 'width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;font-size:14px;';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Schedule Site Visit</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--gray-500);margin-bottom:14px;">
+            A visit to measure and look things over. It routes with the rest of your day and never bills.</p>
+
+          <div class="form-group">
+            <label style="font-size:13px;">Date</label>
+            <input type="date" id="svDate" value="${date}" style="${inp}">
+          </div>
+
+          <div class="form-group">
+            <label style="font-size:13px;">Existing customer (optional)</label>
+            <select id="svProperty" style="${inp}"><option value="">— New lead —</option></select>
+          </div>
+
+          <div id="svLeadFields">
+            <div class="form-group">
+              <label style="font-size:13px;">Name</label>
+              <input id="svName" placeholder="e.g. Sarah Kline" style="${inp}">
+            </div>
+            <div class="form-group">
+              <label style="font-size:13px;">Address</label>
+              <input id="svAddress" placeholder="1234 Maple Ave" style="${inp}">
+            </div>
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
+              <div class="form-group"><label style="font-size:13px;">City</label>
+                <input id="svCity" placeholder="Grand Rapids" style="${inp}"></div>
+              <div class="form-group"><label style="font-size:13px;">ZIP</label>
+                <input id="svZip" placeholder="49503" style="${inp}"></div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <div class="form-group"><label style="font-size:13px;">Phone</label>
+                <input id="svPhone" placeholder="616-555-0134" style="${inp}"></div>
+              <div class="form-group"><label style="font-size:13px;">Email</label>
+                <input id="svEmail" type="email" placeholder="optional" style="${inp}"></div>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom:0;">
+            <label style="font-size:13px;">What are they asking about?</label>
+            <textarea id="svNotes" rows="2" placeholder="e.g. Crabgrass in the front, wants a quote on a full program" style="${inp}"></textarea>
+          </div>
+          <div id="svMsg" style="font-size:13px;color:var(--red);margin-top:10px;display:none;"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-outline" id="svCancel" style="margin-left:auto;">Cancel</button>
+          <button class="btn btn-primary" id="svSave">Schedule Visit</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    const close = () => { overlay.classList.remove('open'); setTimeout(() => overlay.remove(), 200); };
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('#svCancel').addEventListener('click', close);
+
+    // Populate the existing-property picker in the background.
+    Api.get('/api/properties?limit=500').then(props => {
+      const sel = document.getElementById('svProperty');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— New lead —</option>' +
+        (props || []).map(p => `<option value="${p.id}">${this._esc(p.customer_name)} — ${this._esc(p.address || '')}</option>`).join('');
+    }).catch(() => {});
+
+    // Picking an existing property hides the new-lead fields.
+    overlay.querySelector('#svProperty').addEventListener('change', (e) => {
+      document.getElementById('svLeadFields').style.display = e.target.value ? 'none' : '';
+    });
+
+    overlay.querySelector('#svSave').addEventListener('click', async () => {
+      const msg = document.getElementById('svMsg');
+      const propertyId = document.getElementById('svProperty').value;
+      const body = {
+        scheduled_date: document.getElementById('svDate').value,
+        notes: document.getElementById('svNotes').value.trim() || null,
+      };
+      if (propertyId) {
+        body.property_id = Number(propertyId);
+      } else {
+        body.lead = {
+          name: document.getElementById('svName').value.trim(),
+          address: document.getElementById('svAddress').value.trim(),
+          city: document.getElementById('svCity').value.trim(),
+          zip: document.getElementById('svZip').value.trim(),
+          phone: document.getElementById('svPhone').value.trim(),
+          email: document.getElementById('svEmail').value.trim(),
+        };
+        if (!body.lead.name || !body.lead.address) {
+          msg.textContent = 'A name and address are needed to put them on the map.';
+          msg.style.display = '';
+          return;
+        }
+      }
+      try {
+        await Api.post('/api/schedules/site-visit', body);
+        App.toast('Site visit scheduled', 'success');
+        close();
+        this._selectedDate = body.scheduled_date;
+        this.renderDaily();
+      } catch (err) {
+        msg.textContent = err.message;
+        msg.style.display = '';
+      }
+    });
+  },
+
+  // What you fill in standing in the yard. Measurements go to the property
+  // (that's what the estimate builder reads); findings stay on the visit.
+  _showSiteVisitCapture(scheduleId, entry) {
+    document.querySelector('.modal-overlay.site-capture-modal')?.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay site-capture-modal';
+    const inp = 'width:100%;padding:8px;border:1px solid var(--gray-300);border-radius:6px;font-family:inherit;font-size:14px;';
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3>Site Visit</h3>
+          <button class="modal-close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:14px;margin-bottom:2px;"><strong>${this._esc(entry.customer_name || '')}</strong></p>
+          <p style="font-size:13px;color:var(--gray-500);margin-bottom:14px;">${this._esc(entry.address || '')}</p>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="form-group">
+              <label style="font-size:13px;">Measured sq ft</label>
+              <input id="scSqft" type="number" inputmode="numeric" value="${entry.sqft || ''}" placeholder="e.g. 6500" style="${inp}">
+            </div>
+            <div class="form-group">
+              <label style="font-size:13px;">Soil type</label>
+              <input id="scSoil" value="${this._esc(entry.soil_type || '')}" placeholder="e.g. Sandy loam" style="${inp}">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label style="font-size:13px;">What you observed</label>
+            <textarea id="scFindings" rows="4" placeholder="Crabgrass along the drive, thin shade under the maples, compacted strip by the sidewalk…" style="${inp}">${this._esc(entry.findings || '')}</textarea>
+          </div>
+          <div class="form-group" style="margin-bottom:0;">
+            <label style="font-size:13px;">What you'd recommend</label>
+            <textarea id="scRecs" rows="3" placeholder="Full 6-round program, aeration + overseed in fall…" style="${inp}">${this._esc(entry.recommendations || '')}</textarea>
+          </div>
+          <div id="scMsg" style="font-size:13px;color:var(--red);margin-top:10px;display:none;"></div>
+        </div>
+        <div class="modal-footer" style="flex-wrap:wrap;gap:8px;">
+          <button class="btn btn-outline" id="scCancel" style="margin-right:auto;">Cancel</button>
+          <button class="btn btn-outline" id="scSave">Save</button>
+          <button class="btn btn-primary" id="scBuild">Save &amp; Build Proposal</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
+    const close = () => { overlay.classList.remove('open'); setTimeout(() => overlay.remove(), 200); };
+    overlay.querySelector('.modal-close').addEventListener('click', close);
+    overlay.querySelector('#scCancel').addEventListener('click', close);
+
+    const save = async (complete) => {
+      const msg = document.getElementById('scMsg');
+      try {
+        const res = await Api.put(`/api/schedules/${scheduleId}/site-visit`, {
+          measured_sqft: document.getElementById('scSqft').value,
+          soil_type: document.getElementById('scSoil').value.trim(),
+          findings: document.getElementById('scFindings').value,
+          recommendations: document.getElementById('scRecs').value,
+          complete,
+        });
+        return res;
+      } catch (err) {
+        msg.textContent = err.message;
+        msg.style.display = '';
+        return null;
+      }
+    };
+
+    overlay.querySelector('#scSave').addEventListener('click', async () => {
+      if (await save(false)) { App.toast('Saved', 'success'); close(); this.renderDaily(); }
+    });
+
+    // Marking it complete here is safe — site visits are excluded from
+    // billing by kind (utils/billing.js).
+    overlay.querySelector('#scBuild').addEventListener('click', async () => {
+      const res = await save(true);
+      if (!res) return;
+      close();
+      App.navigate('estimates', 'new', res.property_id);
     });
   },
 

@@ -534,6 +534,17 @@ function runMigrations(db) {
   // has already run on the live DB, so adding columns there is a no-op forever.
   ensureColumn(db, 'clients', 'password_hash', 'TEXT');
   ensureColumn(db, 'clients', 'password_set_at', 'DATETIME');
+
+  // Site visits for estimates. A site visit is scheduled and routed like any
+  // other stop, but it is NOT work performed — it produces measurements that
+  // feed a proposal. `kind` is what keeps it out of billing: completing a
+  // visit is what activates installments and cuts per-service invoices, so a
+  // site visit tied to an estimate would otherwise charge someone who hasn't
+  // signed anything. Defaulting to 'service' keeps every existing row billable.
+  ensureColumn(db, 'schedules', 'kind', "TEXT DEFAULT 'service'");
+  ensureColumn(db, 'schedules', 'findings', 'TEXT');
+  ensureColumn(db, 'schedules', 'recommendations', 'TEXT');
+  safeExec(db, "UPDATE schedules SET kind = 'service' WHERE kind IS NULL", 'backfill schedules.kind');
   // Heads-up notifications: per-property custom line included in pre-visit
   // messages ("Please have pets and kids inside"), and an idempotency stamp on
   // schedules so the evening auto-email never sends twice for one visit.

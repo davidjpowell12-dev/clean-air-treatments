@@ -15,7 +15,7 @@ router.get('/daily', requireAuth, (req, res) => {
   // measured) → fallback to properties.sqft. Same logic as /day-mix so
   // the schedule list and Day Mix Sheet show consistent numbers.
   const entries = db.prepare(`
-    SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.phone,
+    SELECT s.*, p.customer_name, p.address, p.city, p.state, p.zip, p.phone, p.soil_type,
            COALESCE(
              (SELECT a.total_area_treated FROM applications a
               WHERE a.property_id = p.id AND a.total_area_treated > 0
@@ -474,6 +474,95 @@ router.post('/bulk', requireAuth, (req, res) => {
 });
 
 // Create single schedule entry
+// ─── Site visits (estimate visits) ──────────────────────────────────
+// A site visit is a stop on the calendar/route like any other, but it is a
+// measuring trip rather than work performed — see utils/billing.js for why
+// `kind` matters. Accepts either an existing property_id or a `lead` object
+// for someone who just called and isn't in the system yet.
+router.post('/site-visit', requireAuth, (req, res) => {
+  const db = getDb();
+  const { property_id, lead, scheduled_date, assigned_to, notes } = req.body || {};
+  if (!scheduled_date) return res.status(400).json({ error: 'scheduled_date required' });
+
+  let propertyId = property_id;
+  if (!propertyId) {
+    if (!lead || !String(lead.name || '').trim() || !String(lead.address || '').trim()) {
+      return res.status(400).json({ error: 'Either property_id, or a lead with a name and address, is required' });
+    }
+    const info = db.prepare(`
+      INSERT INTO properties (customer_name, address, city, state, zip, email, phone, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      String(lead.name).trim(), String(lead.address).trim(),
+      (lead.city || '').trim(), (lead.state || 'MI').trim(), (lead.zip || '').trim(),
+      (lead.email || '').trim(), (lead.phone || '').trim(),
+      (lead.notes || '').trim() || null
+    );
+    propertyId = info.lastInsertRowid;
+    logAudit(db, 'property', propertyId, req.session.userId, 'create_lead', { name: lead.name });
+  }
+
+  const maxOrder = db.prepare(
+    'SELECT COALESCE(MAX(sort_order), 0) as max FROM schedules WHERE scheduled_date = ?'
+  ).get(scheduled_date);
+
+  const result = db.prepare(`
+    INSERT INTO schedules (property_id, scheduled_date, assigned_to, sort_order, notes, service_type, kind, created_by)
+    VALUES (?, ?, ?, ?, ?, 'Site Visit', 'site_visit', ?)
+  `).run(propertyId, scheduled_date, assigned_to || null, maxOrder.max + 1, notes || null, req.session.userId);
+
+  const entry = db.prepare('SELECT * FROM schedules WHERE id = ?').get(result.lastInsertRowid);
+  logAudit(db, 'schedule', entry.id, req.session.userId, 'create_site_visit', entry);
+  res.json({ ok: true, schedule: entry, property_id: propertyId });
+});
+
+// Save what was found on a site visit. Measurements update the PROPERTY
+// (current truth, and what the estimate builder reads); findings and
+// recommendations stay on the VISIT as a record of that day.
+router.put('/:id/site-visit', requireAuth, (req, res) => {
+  const db = getDb();
+  const b = req.body || {};
+  const visit = db.prepare('SELECT * FROM schedules WHERE id = ?').get(req.params.id);
+  if (!visit) return res.status(404).json({ error: 'Visit not found' });
+
+  const measured = b.measured_sqft === '' || b.measured_sqft == null ? null : Number(b.measured_sqft);
+  if (measured !== null && (!Number.isFinite(measured) || measured <= 0)) {
+    return res.status(400).json({ error: 'Measured square footage must be a positive number.' });
+  }
+
+  const save = db.transaction(() => {
+    if (measured !== null) {
+      db.prepare('UPDATE properties SET sqft = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(measured, visit.property_id);
+    }
+    if (b.soil_type) {
+      db.prepare('UPDATE properties SET soil_type = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+        .run(String(b.soil_type).trim(), visit.property_id);
+    }
+    db.prepare(`
+      UPDATE schedules SET findings = ?, recommendations = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+    `).run(
+      b.findings != null ? String(b.findings).trim() || null : visit.findings,
+      b.recommendations != null ? String(b.recommendations).trim() || null : visit.recommendations,
+      visit.id
+    );
+    // Completing here is safe: billForCompletedVisit refuses non-'service'
+    // kinds, so this never bills.
+    if (b.complete && visit.status !== 'completed') {
+      db.prepare(`
+        UPDATE schedules SET status = 'completed',
+          completed_date = COALESCE(completed_date, ?), updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(new Date().toLocaleDateString('en-CA', { timeZone: 'America/Detroit' }), visit.id);
+    }
+  });
+  save();
+
+  const updated = db.prepare('SELECT * FROM schedules WHERE id = ?').get(visit.id);
+  logAudit(db, 'schedule', visit.id, req.session.userId, 'site_visit_findings', { measured_sqft: measured, completed: !!b.complete });
+  res.json({ ok: true, schedule: updated, property_id: visit.property_id });
+});
+
 router.post('/', requireAuth, (req, res) => {
   const db = getDb();
   const { property_id, scheduled_date, assigned_to, notes } = req.body;

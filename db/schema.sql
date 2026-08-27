@@ -229,6 +229,11 @@ CREATE TABLE IF NOT EXISTS schedules (
   total_rounds INTEGER DEFAULT 6,
   program_id TEXT,
   service_type TEXT,
+  -- 'service' = billable work. 'site_visit' = a measuring/quoting visit that
+  -- must never trigger billing (see utils/billing.js).
+  kind TEXT DEFAULT 'service',
+  findings TEXT,
+  recommendations TEXT,
   estimate_id INTEGER REFERENCES estimates(id),
   heads_up_emailed_at DATETIME,
   -- When the visit was actually performed (scheduled_date is only the plan)

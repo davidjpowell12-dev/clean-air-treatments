@@ -37,12 +37,22 @@ function addItem(db, estimateId, serviceName, price, included = 1) {
 }
 
 function addSchedule(db, { propertyId, estimateId = null, serviceType = 'Fert',
-                          status = 'completed', round = 1, totalRounds = 6, date = '2026-06-01' }) {
+                          status = 'completed', round = 1, totalRounds = 6, date = '2026-06-01',
+                          kind = 'service' }) {
   return db.prepare(`
     INSERT INTO schedules
-      (property_id, estimate_id, scheduled_date, service_type, status, round_number, total_rounds)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(propertyId, estimateId, date, serviceType, status, round, totalRounds).lastInsertRowid;
+      (property_id, estimate_id, scheduled_date, service_type, status, round_number, total_rounds, kind)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(propertyId, estimateId, date, serviceType, status, round, totalRounds, kind).lastInsertRowid;
+}
+
+// The scheduled installments a monthly estimate carries before service starts.
+// activateBillingForEstimate is a no-op without these.
+function addScheduledInvoices(db, estimateId, count = 8, cents = 12500) {
+  for (let i = 1; i <= count; i++) {
+    db.prepare(`INSERT INTO invoices (invoice_number, estimate_id, amount_cents, status, payment_plan, installment_number, total_installments)
+                VALUES (?, ?, ?, 'scheduled', 'monthly', ?, ?)`).run(`INV-${estimateId}-${i}`, estimateId, cents, i, count);
+  }
 }
 
 function getSchedule(db, id) {
@@ -56,5 +66,5 @@ function invoicesFor(db, estimateId) {
 }
 
 module.exports = {
-  makeDb, addProperty, addEstimate, addItem, addSchedule, getSchedule, invoicesFor,
+  makeDb, addProperty, addEstimate, addItem, addSchedule, addScheduledInvoices, getSchedule, invoicesFor,
 };
