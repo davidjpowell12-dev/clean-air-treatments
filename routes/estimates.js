@@ -186,10 +186,25 @@ router.get('/public/:token', (req, res) => {
 
   const db = getDb();
   const est = db.prepare('SELECT * FROM estimates WHERE token = ?').get(req.params.token);
-  if (!est || est.status === 'draft') return res.status(404).json({ error: 'Proposal not found' });
+  if (!est) return res.status(404).json({ error: 'Proposal not found' });
 
-  // Auto-update status from sent → viewed
-  if (est.status === 'sent') {
+  // Signed-in staff looking at their own proposal. Two things follow from
+  // this, and both were wrong before:
+  //   1. A draft is hidden from customers (it isn't finished or sent), but
+  //      "View as Customer" on an unsent estimate is exactly how you check
+  //      your work — that used to 404.
+  //   2. Never leave customer-facing traces. viewed_at is what tells you the
+  //      customer opened the proposal; the owner previewing it would have
+  //      flipped 'sent' → 'viewed' and stamped that time, so the estimate
+  //      would look opened when nobody had opened it.
+  const isStaffPreview = !!(req.session && req.session.userId);
+
+  if (est.status === 'draft' && !isStaffPreview) {
+    return res.status(404).json({ error: 'Proposal not found' });
+  }
+
+  // Auto-update status from sent → viewed (real customers only)
+  if (est.status === 'sent' && !isStaffPreview) {
     db.prepare(
       'UPDATE estimates SET status = ?, viewed_at = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?'
     ).run('viewed', new Date().toISOString(), est.id);
@@ -249,6 +264,9 @@ router.get('/public/:token', (req, res) => {
     customer_message: est.customer_message,
     accepted_at: est.accepted_at,
     next_unpaid_invoice: nextUnpaidInvoice,
+    // Lets the page show a preview bar so an unsent draft is never mistaken
+    // for the live proposal the customer sees.
+    staff_preview: isStaffPreview || undefined,
     items
   });
 });

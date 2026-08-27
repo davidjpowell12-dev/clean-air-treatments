@@ -216,9 +216,22 @@
         // Re-apply the hero using the real plan (the template's markup is
         // written for the monthly default).
         updatePriceHero();
+        if (proposalData.staff_preview) showPreviewBar(proposalData.status);
       } catch (err) {
         showError('Connection Error', 'Please check your internet connection and try again.');
       }
+    }
+
+    // Shown only to signed-in staff. A draft looks identical to a sent
+    // proposal, so without this it's easy to think the customer already has it.
+    function showPreviewBar(status) {
+      const bar = document.createElement('div');
+      bar.style.cssText = 'position:sticky;top:0;z-index:999;background:#92400e;color:#fff;'
+        + 'font-family:system-ui,sans-serif;font-size:13px;padding:8px 16px;text-align:center;';
+      bar.textContent = status === 'draft'
+        ? 'Staff preview — this is a DRAFT. The customer cannot see it until you send it.'
+        : 'Staff preview — viewing does not mark it as opened by the customer.';
+      document.body.insertBefore(bar, document.body.firstChild);
     }
 
     function renderProposal(est) {
