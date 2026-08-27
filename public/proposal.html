@@ -222,16 +222,29 @@
       }
     }
 
-    // Shown only to signed-in staff. A draft looks identical to a sent
-    // proposal, so without this it's easy to think the customer already has it.
+    // Shown only to signed-in staff. The whole point of "View as Customer" is
+    // to see EXACTLY what the customer will see, so this floats over the page
+    // rather than sitting in the layout — it shifts nothing — and it can be
+    // dismissed to get a completely untouched view.
     function showPreviewBar(status) {
-      const bar = document.createElement('div');
-      bar.style.cssText = 'position:sticky;top:0;z-index:999;background:#92400e;color:#fff;'
-        + 'font-family:system-ui,sans-serif;font-size:13px;padding:8px 16px;text-align:center;';
-      bar.textContent = status === 'draft'
-        ? 'Staff preview — this is a DRAFT. The customer cannot see it until you send it.'
-        : 'Staff preview — viewing does not mark it as opened by the customer.';
-      document.body.insertBefore(bar, document.body.firstChild);
+      const pill = document.createElement('div');
+      pill.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9999;'
+        + 'background:rgba(146,64,14,.94);color:#fff;font-family:system-ui,sans-serif;font-size:12px;'
+        + 'padding:8px 12px;border-radius:999px;box-shadow:0 2px 10px rgba(0,0,0,.25);'
+        + 'display:flex;align-items:center;gap:10px;max-width:92vw;';
+      const text = document.createElement('span');
+      text.textContent = status === 'draft'
+        ? 'Preview — draft, not sent yet. Everything else is exactly what they see.'
+        : 'Preview — this does not mark it opened.';
+      const close = document.createElement('button');
+      close.textContent = '×';
+      close.setAttribute('aria-label', 'Hide preview notice');
+      close.style.cssText = 'background:none;border:none;color:#fff;font-size:16px;line-height:1;'
+        + 'cursor:pointer;padding:0 2px;';
+      close.addEventListener('click', () => pill.remove());
+      pill.appendChild(text);
+      pill.appendChild(close);
+      document.body.appendChild(pill);
     }
 
     function renderProposal(est) {
