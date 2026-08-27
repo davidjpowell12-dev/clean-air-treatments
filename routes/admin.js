@@ -76,6 +76,13 @@ function runSchemaChecks(db) {
     { label: 'services.heads_up_text', ok: hasColumn('services', 'heads_up_text') },
     { label: 'properties.sms_opted_in', ok: hasColumn('properties', 'sms_opted_in') },
     { label: 'properties.is_active', ok: hasColumn('properties', 'is_active') },
+    { label: 'clients.password_hash', ok: hasColumn('clients', 'password_hash') },
+    { label: 'clients.password_set_at', ok: hasColumn('clients', 'password_set_at') },
+    // schedules.kind is what keeps site visits out of billing — if it went
+    // missing, site visits would start charging people.
+    { label: 'schedules.kind', ok: hasColumn('schedules', 'kind') },
+    { label: 'schedules.findings', ok: hasColumn('schedules', 'findings') },
+    { label: 'schedules.recommendations', ok: hasColumn('schedules', 'recommendations') },
   ];
 
   const firstFailure = checks.find(c => c.ok !== true);
