@@ -10,6 +10,7 @@ const router = express.Router();
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, '..', 'db', 'clean-air.db');
 const BACKUPS_DIR = process.env.BACKUPS_DIR || path.join(__dirname, '..', 'backups');
 const MAX_BACKUPS = 30;
+const START_TIME = new Date().toISOString();
 
 // Ensure backups directory exists
 function ensureBackupsDir() {
@@ -19,6 +20,18 @@ function ensureBackupsDir() {
 }
 
 // ── Database Health Check ───────────────────────────────────────────
+// What code is this server actually running? Answers "I deployed a fix but
+// still see the old thing" in one look, instead of guessing at caches.
+// Unauthenticated on purpose — it reveals nothing but a build timestamp, and
+// being able to check it without signing in is the point.
+router.get('/version', (req, res) => {
+  let builtAt = null;
+  try {
+    builtAt = fs.statSync(path.join(__dirname, '..', 'public', 'app.html')).mtime.toISOString();
+  } catch (e) { /* fall through */ }
+  res.json({ built_at: builtAt, started_at: START_TIME, now: new Date().toISOString() });
+});
+
 router.get('/health', requireAuth, (req, res) => {
   try {
     const db = getDb();

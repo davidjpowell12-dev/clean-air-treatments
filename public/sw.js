@@ -1,27 +1,35 @@
-const CACHE_NAME = 'clean-air-v129';
+const CACHE_NAME = 'clean-air-v130';
+
+// Paths are listed WITHOUT ?v= on purpose. This list used to carry version
+// numbers that had to be kept in sync with app.html by hand, and it drifted
+// constantly — six files were stale at once — which quietly broke offline
+// fallback and made "I deployed a fix but still see the old thing" hard to
+// diagnose. app.html is now the single place versions live; the offline
+// lookup below matches while ignoring the query string.
 const STATIC_ASSETS = [
   '/',
   '/app',
   '/index.html',
   '/app.html',
-  '/css/styles.css?v=29',
-  '/js/app.js?v=28',
-  '/js/pages/activate.js?v=4',
-  '/js/utils/api.js?v=25',
-  '/js/utils/offline.js?v=24',
-  '/js/pages/dashboard.js?v=27',
-  '/js/pages/messaging.js?v=2',
-  '/js/pages/products.js?v=25',
-  '/js/pages/inventory.js?v=25',
-  '/js/pages/calculator.js?v=24',
-  '/js/pages/applications.js?v=28',
-  '/js/pages/properties.js?v=29',
-  '/js/pages/ipm.js?v=24',
-  '/js/pages/scheduling.js?v=36',
-  '/js/pages/estimates.js?v=40',
-  '/js/pages/invoicing.js?v=45',
-  '/js/pages/settings.js?v=53',
-  '/js/pages/follow-ups.js?v=4',
+  '/css/styles.css',
+  '/js/app.js',
+  '/js/pages/activate.js',
+  '/js/utils/api.js',
+  '/js/utils/offline.js',
+  '/js/pages/dashboard.js',
+  '/js/pages/messaging.js',
+  '/js/pages/products.js',
+  '/js/pages/inventory.js',
+  '/js/pages/calculator.js',
+  '/js/pages/applications.js',
+  '/js/pages/properties.js',
+  '/js/pages/ipm.js',
+  '/js/pages/scheduling.js',
+  '/js/pages/estimates.js',
+  '/js/pages/invoicing.js',
+  '/js/pages/settings.js',
+  '/js/pages/follow-ups.js',
+  '/js/pages/client-notes.js',
   '/js/lib/html5-qrcode.min.js',
   '/logo.png',
   '/manifest.json'
@@ -79,8 +87,11 @@ self.addEventListener('fetch', (event) => {
       }
       return response;
     }).catch(() => {
-      // Offline — try cache
-      return caches.match(request).then((cached) => {
+      // Offline — try cache. ignoreSearch so a request for
+      // scheduling.js?v=37 still matches the precached scheduling.js;
+      // without it, every version bump would silently lose offline support
+      // for that file until it happened to be fetched again.
+      return caches.match(request, { ignoreSearch: true }).then((cached) => {
         if (cached) return cached;
         // If offline and no cache for a navigation, return app shell
         // (but not for the public proposal page, which is standalone)

@@ -154,5 +154,16 @@
   <script src="/js/pages/messaging.js?v=4"></script>
   <script src="/js/pages/client-notes.js?v=2"></script>
   <script src="/js/app.js?v=28"></script>
+  <script>
+    // The service worker was only ever registered on index.html, so opening
+    // the installed app (which starts at /app) never checked for a new
+    // version — a deploy could sit unnoticed until the browser got around to
+    // its own check. Registering here asks on every launch.
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js')
+        .then((reg) => reg.update())
+        .catch(() => {});
+    }
+  </script>
 </body>
 </html>
