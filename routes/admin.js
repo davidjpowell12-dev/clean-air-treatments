@@ -32,6 +32,39 @@ router.get('/version', (req, res) => {
   res.json({ built_at: builtAt, started_at: START_TIME, now: new Date().toISOString() });
 });
 
+// Is Google Maps actually working? Route optimization uses two APIs and both
+// fail the same way when billing lapses. This asks each one directly so the
+// answer is Google's own words rather than a guess from a downstream error.
+router.get('/maps-check', requireAuth, async (req, res) => {
+  const key = process.env.GOOGLE_MAPS_API_KEY;
+  if (!key) return res.json({ ok: false, reason: 'GOOGLE_MAPS_API_KEY is not set on the server' });
+
+  const probe = async (label, url) => {
+    try {
+      const data = await (await fetch(url)).json();
+      return { api: label, status: data.status, error_message: data.error_message || null, ok: data.status === 'OK' };
+    } catch (err) {
+      return { api: label, status: 'NETWORK_ERROR', error_message: err.message, ok: false };
+    }
+  };
+
+  const results = [
+    await probe('Geocoding',
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent('Grand Rapids, MI')}&key=${key}`),
+    await probe('Distance Matrix',
+      `https://maps.googleapis.com/maps/api/distancematrix/json?origins=42.9634,-85.6681&destinations=42.9,-85.6&mode=driving&key=${key}`),
+  ];
+
+  const denied = results.find(r => r.status === 'REQUEST_DENIED');
+  res.json({
+    ok: results.every(r => r.ok),
+    diagnosis: denied
+      ? 'Google is refusing the key. Almost always billing disabled on the Cloud project, or key restrictions. See error_message.'
+      : (results.every(r => r.ok) ? 'Both APIs are responding normally.' : 'See status per API below.'),
+    apis: results,
+  });
+});
+
 router.get('/health', requireAuth, (req, res) => {
   try {
     const db = getDb();

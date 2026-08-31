@@ -790,29 +790,75 @@ router.post('/optimize-route', requireAuth, async (req, res) => {
     return res.status(400).json({ error: 'Need at least 2 stops to optimize' });
   }
 
-  // Geocode a single address string → { lat, lng } or null
+  // Geocode a single address → { loc } or { failure: { status, message } }.
+  // Telling "this address is wrong" apart from "the Google account is broken"
+  // matters: this used to return null for both, so a disabled billing account
+  // surfaced as "check the address in Settings" and sent you looking in
+  // exactly the wrong place while nothing was wrong with the address.
   const geocode = async (address) => {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
-    const r = await fetch(url);
-    const data = await r.json();
-    if (data.status === 'OK' && data.results.length > 0) return data.results[0].geometry.location;
-    return null;
+    try {
+      const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${apiKey}`;
+      const r = await fetch(url);
+      const data = await r.json();
+      if (data.status === 'OK' && data.results.length > 0) return { loc: data.results[0].geometry.location };
+      return { failure: { status: data.status, message: data.error_message } };
+    } catch (err) {
+      return { failure: { status: 'NETWORK_ERROR', message: err.message } };
+    }
+  };
+
+  // ZERO_RESULTS is the only status that's genuinely about the address.
+  // Everything else is the Google Cloud account and should say so.
+  const explainGeocode = (failure, what) => {
+    const f = failure || {};
+    if (f.status === 'ZERO_RESULTS') return `Google couldn't find ${what}. Check the address.`;
+    if (f.status === 'REQUEST_DENIED') {
+      return `Google Maps rejected the request — this is an account problem, not the address. `
+        + `Check that billing is enabled and the API key isn't restricted in Google Cloud.`
+        + (f.message ? ` (Google says: ${f.message})` : '');
+    }
+    if (f.status === 'OVER_QUERY_LIMIT') {
+      return 'Google Maps quota exceeded — check billing and quotas in Google Cloud.';
+    }
+    return `Google Maps error while looking up ${what}: ${f.status || 'unknown'}`
+      + (f.message ? ` — ${f.message}` : '');
   };
 
   // Geocode home address
-  const homeLoc = await geocode(homeAddress);
-  if (!homeLoc) return res.status(400).json({ error: 'Could not geocode home address. Check the address in Settings.' });
+  const home = await geocode(homeAddress);
+  if (!home.loc) return res.status(400).json({ error: explainGeocode(home.failure, 'your home address') });
+  const homeLoc = home.loc;
 
-  // Geocode any properties missing coordinates, cache in DB
+  // Geocode any properties missing coordinates, cache in DB.
+  // A stop that can't be located used to be left with null coordinates and
+  // passed to Distance Matrix anyway, which failed later with an unrelated
+  // message. Collect them and say plainly which ones are the problem.
+  const unlocatable = [];
+  let accountFailure = null;
   for (const e of entries) {
     if (e.lat && e.lng) continue;
     const addr = [e.address, e.city, e.state].filter(Boolean).join(', ');
-    const loc = await geocode(addr);
-    if (loc) {
-      db.prepare('UPDATE properties SET lat = ?, lng = ? WHERE id = ?').run(loc.lat, loc.lng, e.property_id);
-      e.lat = loc.lat;
-      e.lng = loc.lng;
+    const g = await geocode(addr);
+    if (g.loc) {
+      db.prepare('UPDATE properties SET lat = ?, lng = ? WHERE id = ?').run(g.loc.lat, g.loc.lng, e.property_id);
+      e.lat = g.loc.lat;
+      e.lng = g.loc.lng;
+    } else {
+      // An account-level failure affects every stop — report it once and stop
+      // rather than grinding through the whole list making doomed requests.
+      if (g.failure && g.failure.status !== 'ZERO_RESULTS') { accountFailure = g.failure; break; }
+      unlocatable.push(`${e.customer_name} (${addr})`);
     }
+  }
+  if (accountFailure) {
+    return res.status(400).json({ error: explainGeocode(accountFailure, 'a stop on this route') });
+  }
+  if (unlocatable.length) {
+    return res.status(400).json({
+      error: `Couldn't locate ${unlocatable.length} stop${unlocatable.length === 1 ? '' : 's'}: `
+        + `${unlocatable.slice(0, 3).join('; ')}${unlocatable.length > 3 ? `; and ${unlocatable.length - 3} more` : ''}. `
+        + `Fix the address on the property, then optimize again.`
+    });
   }
 
   // Build locations array: [home, ...stops]
