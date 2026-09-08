@@ -1230,7 +1230,13 @@ router.get('/stripe-pi-status', requireAuth, async (req, res) => {
         created: new Date(pi.created * 1000).toISOString(),
         charge_status: ch ? ch.status : null,    // succeeded | pending | failed
         charge_paid: ch ? ch.paid : null,
-        failure_message: ch ? (ch.failure_message || null) : null
+        failure_message: ch ? (ch.failure_message || null) : null,
+        // Why it declined, and whether retrying is pointless. failure_message
+        // alone says "card was declined" without saying that the bank sent
+        // expired_card — which decides whether you retry or ask for a new card.
+        decline_code: ch ? (ch.outcome && ch.outcome.reason) || null : null,
+        seller_message: ch ? (ch.outcome && ch.outcome.seller_message) || null : null,
+        network_status: ch ? (ch.outcome && ch.outcome.network_status) || null : null
       };
     } catch (err) {
       rec.stripe_error = err.message;            // e.g. "No such payment_intent" => wrong mode / different account
