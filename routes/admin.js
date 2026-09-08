@@ -70,7 +70,18 @@ router.get('/maps-check', requireAuth, async (req, res) => {
 router.get('/stripe-check', requireAuth, async (req, res) => {
   const stripeUtils = require('../utils/stripe');
   const key = stripeUtils.getStripeKey();
-  if (!key) return res.json({ ok: false, reason: 'STRIPE_SK is not set — payments are down' });
+
+  // Which variable actually supplied the key. STRIPE_SK wins over
+  // STRIPE_SECRET_KEY, so a new key set in one while a stale key sits in the
+  // other silently keeps the stale one — worth naming rather than guessing at.
+  const fingerprint = (k) => k ? `${k.slice(0, 8)}...${k.slice(-4)}` : null;
+  const vars = {
+    STRIPE_SK: fingerprint(process.env.STRIPE_SK),
+    STRIPE_SECRET_KEY: fingerprint(process.env.STRIPE_SECRET_KEY),
+    used: process.env.STRIPE_SK ? 'STRIPE_SK' : (process.env.STRIPE_SECRET_KEY ? 'STRIPE_SECRET_KEY' : null),
+  };
+
+  if (!key) return res.json({ ok: false, reason: 'No Stripe key set — payments are down', env_vars: vars });
 
   try {
     const stripe = require('stripe')(key);
@@ -79,12 +90,19 @@ router.get('/stripe-check', requireAuth, async (req, res) => {
     res.json({
       ok: true,
       mode: key.startsWith('sk_live') ? 'live' : key.startsWith('sk_test') ? 'test' : 'unknown',
-      key_prefix: key.substring(0, 8) + '...',
+      key: fingerprint(key),
+      env_vars: vars,
       available: sum(bal.available),
       pending: sum(bal.pending),
     });
   } catch (err) {
-    res.json({ ok: false, reason: err.message, hint: 'An "Invalid API Key" here means the key in the environment is revoked or mistyped.' });
+    res.json({
+      ok: false,
+      reason: err.message,
+      env_vars: vars,
+      hint: `The key came from ${vars.used || 'nowhere'}. If that variable holds the OLD key, clear it — `
+        + `STRIPE_SK takes precedence over STRIPE_SECRET_KEY, so a stale STRIPE_SK will override a correct STRIPE_SECRET_KEY.`,
+    });
   }
 });
 
