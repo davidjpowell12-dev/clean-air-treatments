@@ -6,16 +6,20 @@ function generateInvoiceToken() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// Lazy-load Stripe
-// Fallback: base64-encoded key for Railway env var injection bug
-const _FALLBACK_SK = 'c2tfbGl2ZV81MU9hZllwRFdaVVFOZEdoRDhGRkF0UzlrWXJSdHdjVDc3aldHUTFIVWI0cEV2SEV6bUp5RzltYmpFdzBkdHh5VnowVnFwWUgzOER0R1hYZWpxbndmSXZNYTAwbTQ3dGE0Q08=';
-
+// Lazy-load Stripe.
+//
+// The key comes from the environment and nowhere else. There used to be a
+// base64-encoded live secret key hardcoded here as a fallback for a Railway
+// env-injection problem. Base64 is an encoding, not encryption: the key sat
+// readable in a public repo for 168 days and was ultimately picked up by a
+// key scanner. It has been revoked. Never reintroduce a key literal here —
+// if env injection breaks again, fix the deploy, and let payments fail loudly
+// in the meantime.
 let _stripe = null;
 function getStripeKey() {
   const envKey = process.env.STRIPE_SK || process.env.STRIPE_SECRET_KEY;
   if (envKey && envKey !== 'your_key_here') return envKey;
-  // Decode fallback
-  return Buffer.from(_FALLBACK_SK, 'base64').toString('utf8');
+  return null;
 }
 
 function getStripe() {
@@ -32,7 +36,14 @@ function isEnabled() {
   return !!key && key.startsWith('sk_');
 }
 
-console.log(`[startup] Stripe configured: ${isEnabled()} (key starts with: ${getStripeKey() ? getStripeKey().substring(0, 8) + '...' : 'NOT SET'}, source: ${(process.env.STRIPE_SK || process.env.STRIPE_SECRET_KEY) && (process.env.STRIPE_SK || process.env.STRIPE_SECRET_KEY) !== 'your_key_here' ? 'env' : 'fallback'})`);
+// Loud on failure: with no hardcoded fallback, a missing env var means
+// payments are down, and that must be obvious in the logs immediately
+// rather than discovered when a customer's card won't charge.
+if (isEnabled()) {
+  console.log(`[startup] Stripe configured (key: ${getStripeKey().substring(0, 8)}..., source: env)`);
+} else {
+  console.error('[startup] STRIPE IS NOT CONFIGURED — set STRIPE_SK. Payments will fail until this is set.');
+}
 
 // ─── Invoice Number Generator ─────────────────────────────────
 // Produces globally unique sequential IDs: CA-2026-0001, CA-2026-0002, etc.

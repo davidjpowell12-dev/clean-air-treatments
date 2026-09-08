@@ -3,7 +3,9 @@ db/clean-air.db
 db/clean-air.db-wal
 db/clean-air.db-shm
 db/sessions.sqlite
-.env
+# .env* not just .env — a bare ".env" left .env.production tracked, and it
+# held live credentials in a public repo.
+.env*
 uploads/
 backups/
 

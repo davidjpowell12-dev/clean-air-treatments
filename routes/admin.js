@@ -65,6 +65,29 @@ router.get('/maps-check', requireAuth, async (req, res) => {
   });
 });
 
+// Read-only Stripe health check. Confirms the configured key actually works
+// without creating a charge — the way to verify a key rotation landed.
+router.get('/stripe-check', requireAuth, async (req, res) => {
+  const stripeUtils = require('../utils/stripe');
+  const key = stripeUtils.getStripeKey();
+  if (!key) return res.json({ ok: false, reason: 'STRIPE_SK is not set — payments are down' });
+
+  try {
+    const stripe = require('stripe')(key);
+    const bal = await stripe.balance.retrieve();
+    const sum = (arr) => arr.reduce((t, b) => t + b.amount, 0) / 100;
+    res.json({
+      ok: true,
+      mode: key.startsWith('sk_live') ? 'live' : key.startsWith('sk_test') ? 'test' : 'unknown',
+      key_prefix: key.substring(0, 8) + '...',
+      available: sum(bal.available),
+      pending: sum(bal.pending),
+    });
+  } catch (err) {
+    res.json({ ok: false, reason: err.message, hint: 'An "Invalid API Key" here means the key in the environment is revoked or mistyped.' });
+  }
+});
+
 router.get('/health', requireAuth, (req, res) => {
   try {
     const db = getDb();
