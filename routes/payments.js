@@ -389,7 +389,14 @@ router.post('/invoices', requireAuth, (req, res) => {
   const invNumber = stripeUtils.generateInvoiceNumber(db);
   const token = crypto.randomBytes(16).toString('hex');
   const status = b.status || 'pending';
-  const dueDate = b.due_date || new Date().toISOString().split('T')[0];
+  const { normalizeDate, todayLocal } = require('../utils/dates');
+  let dueDate = todayLocal();
+  if (b.due_date != null && String(b.due_date).trim() !== '') {
+    dueDate = normalizeDate(b.due_date);
+    if (!dueDate) {
+      return res.status(400).json({ error: `"${b.due_date}" isn't a date I can read — use a format like 9/16/2026 or 2026-09-16.` });
+    }
+  }
   const plan = b.payment_plan || 'full';
 
   db.prepare(`
@@ -433,6 +440,19 @@ router.put('/invoices/:id', requireAuth, (req, res) => {
     check_date: b.check_date !== undefined ? b.check_date : existing.check_date,
     notes: b.notes !== undefined ? b.notes : existing.notes
   };
+
+  // Same date rule as creation. Blank clears the date; anything unreadable
+  // is refused rather than stored.
+  const { normalizeDate } = require('../utils/dates');
+  for (const field of ['due_date', 'check_date']) {
+    if (b[field] === undefined) continue;
+    if (b[field] == null || String(b[field]).trim() === '') { next[field] = null; continue; }
+    const norm = normalizeDate(b[field]);
+    if (!norm) {
+      return res.status(400).json({ error: `"${b[field]}" isn't a date I can read — use a format like 9/16/2026 or 2026-09-16.` });
+    }
+    next[field] = norm;
+  }
 
   // If newly marked paid and no paid_at supplied, stamp today
   if (next.status === 'paid' && !next.paid_at) {

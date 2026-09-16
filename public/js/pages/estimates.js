@@ -1035,10 +1035,12 @@ const EstimatesPage = {
     if (!amount) return;
     const num = Number(amount);
     if (!Number.isFinite(num) || num <= 0) { App.toast('Invalid amount', 'error'); return; }
-    const dueDate = prompt('Due date (YYYY-MM-DD), or leave blank for today:') || new Date().toISOString().split('T')[0];
+    const dueDate = prompt('Due date (e.g. 9/16/2026), or leave blank for today:');
+    if (dueDate === null) return;
     try {
+      // Blank → the server fills in today (Michigan time) and checks any typed date.
       await Api.post('/api/payments/invoices', {
-        estimate_id: estId, amount: num, due_date: dueDate, status: 'pending'
+        estimate_id: estId, amount: num, due_date: dueDate.trim() || null, status: 'pending'
       });
       App.toast('Invoice added', 'success');
       this.renderBillingManager(estId);
@@ -1077,7 +1079,7 @@ const EstimatesPage = {
     const amountCents = Math.round(Number(newAmt) * 100);
     if (!Number.isFinite(amountCents) || amountCents < 0) { App.toast('Invalid amount', 'error'); return; }
 
-    const newDue = prompt(`Due date (YYYY-MM-DD):`, inv.due_date || '');
+    const newDue = prompt(`Due date (e.g. 9/16/2026 or 2026-09-16):`, inv.due_date || '');
     if (newDue === null) return;
 
     const newStatus = prompt(`Status (pending / paid / scheduled / failed / voided):`, inv.status);
@@ -1090,7 +1092,7 @@ const EstimatesPage = {
       if (method) body.payment_method = method;
       if (method === 'check') {
         body.check_number = prompt('Check number:', inv.check_number || '') || null;
-        body.check_date = prompt('Check date (YYYY-MM-DD):', inv.check_date || '') || null;
+        body.check_date = prompt('Check date (e.g. 9/16/2026):', inv.check_date || '') || null;
       }
       body.paid_at = prompt('Paid date (ISO or blank for now):', inv.paid_at || '') || new Date().toISOString();
     }

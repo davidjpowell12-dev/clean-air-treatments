@@ -545,6 +545,29 @@ function runMigrations(db) {
   ensureColumn(db, 'schedules', 'findings', 'TEXT');
   ensureColumn(db, 'schedules', 'recommendations', 'TEXT');
   safeExec(db, "UPDATE schedules SET kind = 'service' WHERE kind IS NULL", 'backfill schedules.kind');
+
+  // Invoice dates typed as '9/16/2026' were stored verbatim until the API
+  // started normalizing them. Such an invoice shows "Invalid Date" and drops
+  // out of every Invoicing view but "All". Convert the ones that can be read;
+  // leave anything else alone for a human to fix. Idempotent.
+  try {
+    const { normalizeDate } = require('../utils/dates');
+    const bad = db.prepare(`
+      SELECT id, due_date, check_date FROM invoices
+       WHERE (due_date IS NOT NULL AND due_date NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+          OR (check_date IS NOT NULL AND check_date NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')
+    `).all();
+    for (const r of bad) {
+      const due = r.due_date == null ? null : (normalizeDate(r.due_date) || r.due_date);
+      const chk = r.check_date == null ? null : (normalizeDate(r.check_date) || r.check_date);
+      if (due !== r.due_date || chk !== r.check_date) {
+        db.prepare('UPDATE invoices SET due_date = ?, check_date = ? WHERE id = ?').run(due, chk, r.id);
+        console.log(`[schema-repair] Normalized dates on invoice ${r.id}: due ${r.due_date} → ${due}`);
+      } else {
+        console.error(`[schema-repair] Invoice ${r.id} has an unreadable date (due: ${r.due_date}) — fix it by hand`);
+      }
+    }
+  } catch (e) { console.error('[schema-repair] invoice date normalization failed (non-fatal):', e.message); }
   // Heads-up notifications: per-property custom line included in pre-visit
   // messages ("Please have pets and kids inside"), and an idempotency stamp on
   // schedules so the evening auto-email never sends twice for one visit.
