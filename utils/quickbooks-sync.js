@@ -251,6 +251,60 @@ async function pushInvoiceToQbo(db, invoiceId) {
 // we skip — applying another payment would double-pay the invoice.
 //
 // Idempotent: if the invoice already has qbo_payment_id we skip.
+// ─── Invoice link check ───────────────────────────────────────
+// Returns the QBO Invoice that really is this app invoice, correcting the
+// stored link if it pointed somewhere else.
+//
+// Every invoice the app pushes carries the app's number as its DocNumber, so
+// that's the proof of identity. Two paid invoices were found linked to the
+// wrong QuickBooks records (a journal entry, and an unreadable record) while
+// their real invoices sat in QBO fully paid. Worse, the balance check below
+// used to trust whatever the link pointed at — a link to someone else's paid
+// invoice would have marked this one "already paid" and skipped it, or
+// applied a payment to the wrong customer's invoice.
+//
+// Only an unambiguous match is fixed automatically. If there's no invoice
+// with this number, or more than one, it stops with an explanation rather
+// than re-sending, because a hand-entered record (like a journal entry) may
+// already account for the money and a fresh push would double-count it.
+async function resolveLinkedQboInvoice(db, invoice) {
+  let linkProblem = null;
+  if (invoice.qbo_invoice_id) {
+    try {
+      const data = await qbo.qboFetch(db, 'invoice/' + invoice.qbo_invoice_id);
+      const linked = data?.Invoice;
+      if (linked && linked.DocNumber === invoice.invoice_number) return linked;
+      linkProblem = linked
+        ? `is QuickBooks invoice ${linked.DocNumber || '(no number)'} for ${linked.CustomerRef?.name || 'another customer'}`
+        : 'is not an invoice';
+    } catch (err) {
+      const m = err.message || '';
+      // Only "this record isn't usable as this invoice" is a link problem;
+      // auth/network/rate-limit errors must surface unchanged.
+      if (!/Object Not Found|TxnType does not match|inactive/i.test(m)) throw err;
+      linkProblem = /TxnType does not match/i.test(m) ? 'is not an invoice (a different kind of transaction)' : "can't be read";
+    }
+  }
+
+  const q = `SELECT * FROM Invoice WHERE DocNumber = '${escapeQbo(invoice.invoice_number)}'`;
+  const found = (await qbo.qboFetch(db, 'query', { query: { query: q } }))?.QueryResponse?.Invoice || [];
+
+  if (found.length === 1) {
+    const match = found[0];
+    if (String(match.Id) !== String(invoice.qbo_invoice_id)) {
+      console.warn(`[qbo-sync] ${invoice.invoice_number}: link to QBO #${invoice.qbo_invoice_id} ${linkProblem || 'was missing'}; relinking to QBO #${match.Id}`);
+      db.prepare('UPDATE invoices SET qbo_invoice_id = ? WHERE id = ?').run(match.Id, invoice.id);
+      invoice.qbo_invoice_id = match.Id;
+    }
+    return match;
+  }
+  if (found.length > 1) {
+    throw new Error(`QuickBooks has ${found.length} invoices numbered ${invoice.invoice_number}. Delete or void the duplicate in QuickBooks, then sync again.`);
+  }
+  throw new Error(`Linked QuickBooks record #${invoice.qbo_invoice_id} ${linkProblem || 'is missing'}, and there's no QuickBooks invoice numbered ${invoice.invoice_number}. `
+    + `Check whether this payment was already entered in QuickBooks some other way before re-sending it.`);
+}
+
 async function recordPaymentInQbo(db, invoiceId) {
   const invoice = db.prepare('SELECT * FROM invoices WHERE id = ?').get(invoiceId);
   if (!invoice) throw new Error(`Invoice ${invoiceId} not found`);
@@ -263,9 +317,10 @@ async function recordPaymentInQbo(db, invoiceId) {
   if (invoice.qbo_payment_synced_at) return { skipped: true, reason: 'already synced' };
 
   try {
-    // Guard against double-paying an invoice already settled in QBO.
-    const qboInv = await qbo.qboFetch(db, 'invoice/' + invoice.qbo_invoice_id);
-    const balance = qboInv?.Invoice?.Balance;
+    // Guard against double-paying an invoice already settled in QBO — using
+    // the invoice that is verifiably this one, not merely what the link says.
+    const qboInvoice = await resolveLinkedQboInvoice(db, invoice);
+    const balance = qboInvoice?.Balance;
     if (balance !== undefined && balance <= 0) {
       db.prepare(`
         UPDATE invoices SET qbo_payment_synced_at = CURRENT_TIMESTAMP, qbo_sync_error = NULL WHERE id = ?
