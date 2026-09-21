@@ -801,13 +801,14 @@ const SettingsPage = {
     try {
       const r = await Api.get('/api/quickbooks/sync-status');
       const invoices = r.invoices || [];
+      const failures = r.failures || [];
       const synced = invoices.filter(i => i.qbo_invoice_id).length;
-      const errored = invoices.filter(i => i.qbo_sync_error).length;
       const unsynced = invoices.length - synced;
 
       const summary = document.getElementById('qboSyncResult');
       if (summary) {
-        summary.innerHTML = `<strong>${invoices.length}</strong> invoices in scope (pending/paid) — <span style="color:var(--green);">${synced} synced</span>, <span style="color:var(--gray-700);">${unsynced} unsynced</span>${errored ? `, <span style="color:var(--red);">${errored} with errors</span>` : ''}`;
+        summary.innerHTML = `<strong>${invoices.length}</strong> most recent invoices in scope (pending/paid) — <span style="color:var(--green);">${synced} synced</span>, <span style="color:var(--gray-700);">${unsynced} unsynced</span>`
+          + this._renderQboFailures(failures);
       }
 
       if (invoices.length === 0) {
@@ -818,10 +819,14 @@ const SettingsPage = {
       const rows = invoices.map(i => {
         const dollars = (i.amount_cents / 100).toFixed(2);
         let statusCell;
-        if (i.qbo_invoice_id) {
+        // Check the error BEFORE the invoice id: an invoice can reach QBO and
+        // then have its payment fail, and showing ✓ for that hid the failure.
+        if (i.qbo_sync_error) {
+          statusCell = i.qbo_invoice_id
+            ? `<span style="color:var(--red);">⚠ In QBO #${this.esc(i.qbo_invoice_id)}, payment failed — see above</span>`
+            : `<span style="color:var(--red);">⚠ Failed — see above</span>`;
+        } else if (i.qbo_invoice_id) {
           statusCell = `<span style="color:var(--green);">✓ QBO #${this.esc(i.qbo_invoice_id)}</span>`;
-        } else if (i.qbo_sync_error) {
-          statusCell = `<span style="color:var(--red);" title="${this.esc(i.qbo_sync_error)}">⚠ Error</span>`;
         } else {
           statusCell = '<span style="color:var(--gray-500);">—</span>';
         }
@@ -856,6 +861,42 @@ const SettingsPage = {
     } catch (err) {
       table.innerHTML = `<p style="color:var(--red);">${this.esc(err.message)}</p>`;
     }
+  },
+
+  // Failed syncs, readable without hovering. Grouped by error message: 20
+  // failures are usually two or three causes repeated, and seeing "18 × same
+  // error" says what to fix far faster than 20 separate rows.
+  _renderQboFailures(failures) {
+    if (!failures.length) {
+      return '<div style="margin-top:8px;color:var(--green);">No failed syncs. ✓</div>';
+    }
+    const groups = new Map();
+    for (const f of failures) {
+      const key = f.qbo_sync_error || 'Unknown error';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(f);
+    }
+    const blocks = [...groups.entries()]
+      .sort((a, b) => b[1].length - a[1].length)
+      .map(([err, list]) => `
+        <div style="margin-top:10px;padding:10px 12px;background:#fff;border:1px solid #fca5a5;border-radius:6px;">
+          <div style="color:var(--red);font-weight:600;margin-bottom:6px;">
+            ${list.length} × ${this.esc(err)}
+          </div>
+          ${list.map(f => `
+            <div style="display:flex;justify-content:space-between;gap:8px;padding:2px 0;color:var(--gray-700);">
+              <span><code>${this.esc(f.invoice_number)}</code> — ${this.esc(f.customer_name || '—')}${f.qbo_invoice_id ? ` <span style="color:var(--gray-500);">(invoice in QBO, payment failed)</span>` : ''}</span>
+              <span>$${((f.amount_cents || 0) / 100).toFixed(2)}</span>
+            </div>`).join('')}
+        </div>`).join('');
+    return `
+      <div style="margin-top:10px;padding:10px 12px;background:#fee2e2;border:1px solid #fca5a5;border-radius:6px;">
+        <strong style="color:var(--red);">${failures.length} invoice${failures.length === 1 ? '' : 's'} failed to sync — here's why</strong>
+        <div style="font-size:12px;color:var(--gray-600);margin-top:2px;">
+          Once the cause is fixed, click <strong>Sync Paid Invoices →</strong> again — it retries the paid ones below and skips everything already done.
+        </div>
+        ${blocks}
+      </div>`;
   },
 
   async syncSingleQboInvoice(id) {

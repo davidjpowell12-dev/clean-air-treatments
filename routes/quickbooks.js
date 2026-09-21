@@ -685,7 +685,7 @@ router.get('/sync-status', requireAuth, (req, res) => {
   const rows = db.prepare(`
     SELECT
       i.id, i.invoice_number, i.amount_cents, i.status, i.payment_plan,
-      i.qbo_invoice_id, i.qbo_synced_at, i.qbo_sync_error,
+      i.qbo_invoice_id, i.qbo_synced_at, i.qbo_sync_error, i.qbo_payment_synced_at,
       e.customer_name
     FROM invoices i
     JOIN estimates e ON e.id = i.estimate_id
@@ -693,7 +693,22 @@ router.get('/sync-status', requireAuth, (req, res) => {
     ORDER BY i.id DESC
     LIMIT 200
   `).all();
-  res.json({ ok: true, invoices: rows });
+
+  // Every invoice whose last sync attempt failed, with no age limit. The
+  // table above is capped at the 200 newest, so an older failure could be
+  // missing from it entirely — these are what need attention.
+  const failures = db.prepare(`
+    SELECT
+      i.id, i.invoice_number, i.amount_cents, i.status,
+      i.qbo_invoice_id, i.qbo_sync_error, e.customer_name
+    FROM invoices i
+    JOIN estimates e ON e.id = i.estimate_id
+    WHERE i.qbo_sync_error IS NOT NULL
+      AND i.status IN ('pending', 'paid')
+    ORDER BY e.customer_name, i.id
+  `).all();
+
+  res.json({ ok: true, invoices: rows, failures });
 });
 
 module.exports = router;
