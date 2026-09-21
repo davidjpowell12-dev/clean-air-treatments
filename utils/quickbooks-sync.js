@@ -41,14 +41,48 @@ async function ensureIncomeAccountId(db) {
 // ─── Customer Matching ────────────────────────────────────────
 // Properties are the customer-of-record in CAT. We try email first,
 // then DisplayName. If neither matches, create. Cache the QBO id.
+//
+// The cached id is re-checked before use. It used to be trusted forever, so
+// when a duplicate customer was deactivated or merged away during QuickBooks
+// cleanup, every later invoice for that person was sent to the dead record
+// and QBO refused it ("Something you're trying to use has been made
+// inactive") — while the real, active customer sat unused. A stale id is now
+// dropped and the lookup below finds the active customer. Checks are
+// remembered for a few minutes so a bulk sync doesn't re-check the same
+// customer for every installment.
+const _verifiedCustomers = new Map(); // qbo customer id -> time verified active
+const CUSTOMER_VERIFY_TTL_MS = 10 * 60 * 1000;
+
+async function isQboCustomerUsable(db, qboCustomerId) {
+  const seen = _verifiedCustomers.get(qboCustomerId);
+  if (seen && Date.now() - seen < CUSTOMER_VERIFY_TTL_MS) return true;
+  try {
+    const data = await qbo.qboFetch(db, 'customer/' + qboCustomerId);
+    const active = !!data?.Customer && data.Customer.Active !== false;
+    if (active) _verifiedCustomers.set(qboCustomerId, Date.now());
+    return active;
+  } catch (err) {
+    // Only "this record is gone/inactive" means stale. Anything else (auth,
+    // network, rate limit) must surface, not trigger a re-match.
+    if (/Object Not Found|inactive/i.test(err.message || '')) return false;
+    throw err;
+  }
+}
+
 async function ensureQboCustomer(db, propertyId) {
   const prop = db.prepare('SELECT * FROM properties WHERE id = ?').get(propertyId);
   if (!prop) throw new Error(`Property ${propertyId} not found`);
-  if (prop.qbo_customer_id) return prop.qbo_customer_id;
+  if (prop.qbo_customer_id) {
+    if (await isQboCustomerUsable(db, prop.qbo_customer_id)) return prop.qbo_customer_id;
+    console.warn(`[qbo-sync] Property ${propertyId} (${prop.customer_name}) was linked to inactive/missing QBO customer ${prop.qbo_customer_id} — re-matching`);
+    db.prepare('UPDATE properties SET qbo_customer_id = NULL WHERE id = ?').run(propertyId);
+  }
 
   // 1. Try email
   if (prop.email) {
-    const emailQ = `SELECT * FROM Customer WHERE PrimaryEmailAddr = '${escapeQbo(prop.email)}'`;
+    // Active = true is explicit so a re-match can never land back on the
+    // deactivated duplicate that caused it.
+    const emailQ = `SELECT * FROM Customer WHERE PrimaryEmailAddr = '${escapeQbo(prop.email)}' AND Active = true`;
     const data = await qbo.qboFetch(db, 'query', { query: { query: emailQ } });
     const match = data?.QueryResponse?.Customer?.[0];
     if (match) {
@@ -59,7 +93,7 @@ async function ensureQboCustomer(db, propertyId) {
 
   // 2. Try DisplayName
   const displayName = makeDisplayName(prop);
-  const nameQ = `SELECT * FROM Customer WHERE DisplayName = '${escapeQbo(displayName)}'`;
+  const nameQ = `SELECT * FROM Customer WHERE DisplayName = '${escapeQbo(displayName)}' AND Active = true`;
   const nameData = await qbo.qboFetch(db, 'query', { query: { query: nameQ } });
   const nameMatch = nameData?.QueryResponse?.Customer?.[0];
   if (nameMatch) {
