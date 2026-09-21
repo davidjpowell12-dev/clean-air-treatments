@@ -222,8 +222,14 @@ const InvoicingPage = {
     setCount('roundNum', this._currentRound);
     setCount('countAll', invoices.length);
 
-    // Filter to current view
-    const view = this._currentView;
+    // Filter to current view. A search ignores the view: typing an exact
+    // invoice number while sitting on "Round 6" returned "No matches" for a
+    // one-off invoice that belongs to no round. When you search, you want
+    // the invoice, not the invoice-if-it-happens-to-be-in-this-tab. The
+    // method/cadence chips still apply — those are filters you set on purpose,
+    // and the empty state names them if they're what's hiding a result.
+    const searching = !!query;
+    const view = searching ? 'all' : this._currentView;
     let filtered = invoices.filter(i => {
       if (view === 'all') return true;
       // Round N work queue: unpaid invoices for the selected installment
@@ -273,9 +279,12 @@ const InvoicingPage = {
 
     const list = document.getElementById('invoicesList');
     if (list) {
-      list.innerHTML = view === 'round'
+      const scopeNote = searching && this._currentView !== 'all'
+        ? `<div style="font-size:13px;color:var(--gray-500);margin:0 0 10px;">Searching all ${invoices.length} invoices — clear the search to return to the tab you were on.</div>`
+        : '';
+      list.innerHTML = scopeNote + (view === 'round'
         ? this._renderFirstRound(filtered, query)
-        : this._renderCustomerGroups(filtered, query);
+        : this._renderCustomerGroups(filtered, query));
     }
   },
 
@@ -501,7 +510,8 @@ const InvoicingPage = {
       // common cause: stacked filters (e.g. Card + Pay in Full = 0) without realizing.
       const active = [];
       const viewLabels = { attention: 'Needs Attention', upcoming: 'Upcoming', history: 'History' };
-      if (this._currentView && this._currentView !== 'all' && viewLabels[this._currentView]) {
+      // A search spans every tab, so the tab isn't a filter while searching.
+      if (!query && this._currentView && this._currentView !== 'all' && viewLabels[this._currentView]) {
         active.push({ type: 'view', label: viewLabels[this._currentView] });
       }
       if (this._methodFilter && this._methodFilter !== 'all') {
