@@ -884,10 +884,24 @@ const SettingsPage = {
         if (summary) summary.innerHTML = '<span style="color:var(--green);">No paid invoices need syncing — everything is up to date. ✓</span>';
         return;
       }
+      // The confirm button lives HERE, above the list — not only under it. The
+      // list renders in a 320px scroll box, so after a couple of months of
+      // payments the bottom button was scrolled out of sight, and clicking
+      // "Sync Paid Invoices" appeared to do nothing: it's only a preview.
+      const confirmBtn = `<button class="btn btn-primary btn-sm" onclick="SettingsPage.confirmSyncPaidQboInvoices(${limit || 'null'})">Confirm &amp; Push ${p.shown} →</button>`;
       if (summary) {
-        summary.innerHTML = limit && p.shown < p.total
-          ? `Test batch: showing the first <strong>${p.shown}</strong> of <strong>${p.total}</strong> paid invoices. Review below, then confirm to push just these ${p.shown}.`
-          : `<strong>${p.total}</strong> paid invoice${p.total === 1 ? '' : 's'} ready to push. Review below, then confirm.`;
+        summary.innerHTML = `
+          <div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:10px 12px;">
+            <div style="margin-bottom:8px;color:var(--gray-800);">
+              ${limit && p.shown < p.total
+                ? `<strong>Preview only — nothing sent yet.</strong> Test batch: the first <strong>${p.shown}</strong> of <strong>${p.total}</strong> paid invoices.`
+                : `<strong>Preview only — nothing sent yet.</strong> <strong>${p.total}</strong> paid invoice${p.total === 1 ? '' : 's'} ready to push to QuickBooks.`}
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+              ${confirmBtn}
+              <button class="btn btn-outline btn-sm" onclick="SettingsPage.loadQboSyncStatus()">Cancel</button>
+            </div>
+          </div>`;
       }
       const rows = p.invoices.map(inv => `
         <tr>
