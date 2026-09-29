@@ -503,6 +503,16 @@ const InvoicingPage = {
   // Group invoices by customer_name and render one collapsible card per group.
   // Sort: customers with outstanding balance first (highest $ first), then
   // all-paid customers alphabetical.
+  // "In QuickBooks" vs "Not in QuickBooks". Deliberately says nothing when an
+  // invoice is void — a voided invoice needs no QB action here.
+  _qboBadge(inv) {
+    if (inv.status === 'void' || inv.status === 'voided') return '';
+    const style = 'font-size:11px;padding:1px 6px;border-radius:10px;white-space:nowrap;';
+    return inv.qbo_invoice_id
+      ? `<span title="Also in QuickBooks (#${this._esc(inv.qbo_invoice_id)}) — voiding here does NOT void it there" style="${style}background:#dcfce7;color:#166534;">QB ✓</span>`
+      : `<span title="Not in QuickBooks yet — safe to void or change here" style="${style}background:var(--gray-100);color:var(--gray-500);">QB —</span>`;
+  },
+
   _renderCustomerGroups(invoices, query) {
     const today = this._today;
     if (invoices.length === 0) {
@@ -735,6 +745,10 @@ const InvoicingPage = {
     const dueStr = inv.due_date ? new Date(inv.due_date + 'T12:00:00').toLocaleDateString() : '';
     const paidStr = inv.paid_at ? new Date(inv.paid_at).toLocaleDateString() : '';
     const installment = inv.total_installments ? ` (${inv.installment_number}/${inv.total_installments})` : '';
+    // Whether this invoice exists in QuickBooks. Shown here because this is
+    // where invoices are actually looked up; the only other place was an
+    // unsearchable 200-row table in Settings. It decides whether voiding an
+    // invoice here also needs voiding in QuickBooks.
 
     // Always show the due date when we have one, regardless of status.
     // Hiding it for "scheduled" was confusing for monthly installments where
@@ -762,6 +776,7 @@ const InvoicingPage = {
             <div class="est-list-card-meta">
               ${inv.payment_method ? `<span style="text-transform:capitalize;">${inv.payment_method}</span>` : ''}
               ${dateLine}
+              ${this._qboBadge(inv)}
             </div>
           </div>
         </div>
