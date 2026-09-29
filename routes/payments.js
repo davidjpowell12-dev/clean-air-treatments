@@ -250,6 +250,32 @@ router.get('/public/receipt/:token', (req, res) => {
     };
   }) : [];
 
+  // Does the seasonal breakdown actually explain THIS invoice's amount?
+  //
+  // The line items describe the estimate's whole season. That's meaningful for
+  // a monthly installment (the page frames it as "1/6 of the season total"),
+  // for a pay-in-full invoice, and for a per-service invoice matching one
+  // item. It is NOT meaningful for a one-off or combined charge: an invoice
+  // consolidating several services showed a service list totalling the
+  // season price and then asked for a different amount, with the two
+  // contradicting each other on the page. When the breakdown can't explain
+  // the amount, the page shows the description instead of a wrong breakdown.
+  //
+  // Comparisons are fee-aware: card invoices carry a 3.5% fee on top, so an
+  // invoice for a $120 service is $124.20.
+  const { CARD_FEE_RATE } = require('../utils/stripe');
+  const amountDollars = (inv.amount_cents || 0) / 100;
+  const exFee = amountDollars / (1 + CARD_FEE_RATE);
+  const near = (a, b) => Math.abs(a - b) < 0.02;
+  const matchesAmount = (value) => near(amountDollars, value) || near(exFee, value);
+  const seasonTotalValue = lineItems.reduce((sum, it) => sum + Number(it.season_total), 0);
+
+  const breakdownExplainsAmount =
+    inv.payment_plan === 'monthly' ||                       // installment framing covers it
+    (lineItems.length > 0 && matchesAmount(seasonTotalValue)) ||  // paid in full
+    lineItems.some(it => matchesAmount(Number(it.season_total)));  // single service
+  const customCharge = lineItems.length > 0 && !breakdownExplainsAmount;
+
   // Pull business branding from app_settings (falls back to defaults)
   const settings = {};
   const rows = db.prepare(
@@ -274,6 +300,9 @@ router.get('/public/receipt/:token', (req, res) => {
     installment_number: inv.installment_number,
     total_installments: inv.total_installments,
     notes: inv.notes,
+    // A one-off or combined charge: the page leads with the description and
+    // hides the seasonal breakdown, which would contradict the amount.
+    custom_charge: customCharge,
     line_items: lineItems,
     service_period: servicePeriod,
     visits,

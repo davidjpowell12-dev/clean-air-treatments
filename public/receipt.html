@@ -462,6 +462,13 @@
             <div class="invoice-num">${esc(d.invoice_number)}</div>
           </div>
 
+          ${d.custom_charge && d.notes ? `
+            <div class="details">
+              <h3>What this invoice covers</h3>
+              <div style="font-size:15px;line-height:1.5;color:var(--gray-800, #1f2937);white-space:pre-wrap;">${esc(d.notes)}</div>
+            </div>
+          ` : ''}
+
           ${d.service_period ? `
             <div class="details">
               <h3>Services performed &mdash; ${esc(d.service_period.label)}</h3>
@@ -492,7 +499,7 @@
             </div>
           ` : ''}
 
-          ${(d.line_items && d.line_items.length) ? `
+          ${(d.line_items && d.line_items.length && !d.custom_charge) ? `
             <div class="details">
               <h3>${d.service_period ? 'Your seasonal plan' : (isPaid ? 'Services' : 'Services on this account')}</h3>
               ${d.line_items.map(it => `
@@ -565,7 +572,7 @@
                 <span class="value">${esc(fmtDate(d.paid_at))}</span>
               </div>
             ` : ''}
-            ${d.notes ? `
+            ${d.notes && !d.custom_charge ? `
               <div class="detail-row">
                 <span class="label">For</span>
                 <span class="value" style="max-width:60%;text-align:right;">${esc(d.notes)}</span>
