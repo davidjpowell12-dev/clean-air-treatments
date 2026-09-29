@@ -1037,10 +1037,15 @@ const EstimatesPage = {
     if (!Number.isFinite(num) || num <= 0) { App.toast('Invalid amount', 'error'); return; }
     const dueDate = prompt('Due date (e.g. 9/16/2026), or leave blank for today:');
     if (dueDate === null) return;
+    // Shown to the customer on the invoice, so a combined or one-off charge
+    // says what it covers instead of being a bare amount.
+    const description = prompt('What is this for? (shown on the invoice)\ne.g. "Mowing 8/4, 8/11, 8/18 + Fert Round 3"');
+    if (description === null) return;
     try {
       // Blank → the server fills in today (Michigan time) and checks any typed date.
       await Api.post('/api/payments/invoices', {
-        estimate_id: estId, amount: num, due_date: dueDate.trim() || null, status: 'pending'
+        estimate_id: estId, amount: num, due_date: dueDate.trim() || null, status: 'pending',
+        notes: description.trim() || null
       });
       App.toast('Invoice added', 'success');
       this.renderBillingManager(estId);
