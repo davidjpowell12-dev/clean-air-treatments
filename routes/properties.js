@@ -210,7 +210,17 @@ router.get('/:id/overview', requireAuth, (req, res) => {
   `).all(req.params.id);
 
   // Top-of-page summary stats: the "is this customer healthy?" quick read.
-  const acceptedEst = estimates.find(e => e.status === 'accepted') || null;
+  //
+  // Every accepted estimate counts, not just the first. Outstanding and paid
+  // below already sum invoices across all of them, so taking the season total
+  // from one estimate made the three figures disagree for any customer with
+  // two plans running (a monthly program plus per-service work, say) — paid
+  // plus outstanding could exceed the "season total" with no explanation.
+  const acceptedEsts = estimates.filter(e => e.status === 'accepted');
+  const acceptedEst = acceptedEsts[0] || null;
+  const distinct = (key) => [...new Set(acceptedEsts.map(e => e[key]).filter(Boolean))];
+  const plans = distinct('payment_plan');
+  const methods = distinct('payment_method_preference');
   const today = new Date().toISOString().slice(0, 10);
   let outstandingCents = 0, paidCents = 0;
   for (const inv of invoices) {
@@ -225,14 +235,17 @@ router.get('/:id/overview', requireAuth, (req, res) => {
   `).get(req.params.id, today);
 
   prop.overview_stats = {
-    season_total: acceptedEst ? acceptedEst.total_price : 0,
+    season_total: acceptedEsts.reduce((sum, e) => sum + (e.total_price || 0), 0),
     outstanding: outstandingCents / 100,
     paid: paidCents / 100,
     last_visit_date: prop.last_application_date,
     next_visit_date: nextVisit ? nextVisit.scheduled_date : null,
     next_visit_service: nextVisit ? nextVisit.service_type : null,
-    payment_plan: acceptedEst ? acceptedEst.payment_plan : null,
-    payment_method: acceptedEst ? acceptedEst.payment_method_preference : null
+    // 'mixed' when two accepted estimates disagree — better than showing one
+    // plan as if it were the whole story.
+    payment_plan: plans.length > 1 ? 'mixed' : (plans[0] || null),
+    payment_method: methods.length > 1 ? 'mixed' : (methods[0] || null),
+    accepted_estimate_count: acceptedEsts.length
   };
 
   res.json({ property: prop, estimates, invoices });

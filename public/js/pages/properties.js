@@ -1377,11 +1377,15 @@ const PropertiesPage = {
     if (!stats || (!stats.season_total && !stats.outstanding && !stats.paid && !stats.last_visit_date && !stats.next_visit_date)) {
       return '';
     }
-    const fmt = (v) => '$' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    // Cents, not rounded dollars — these figures get checked against what a
+    // customer actually paid, and "$1,234" can't be reconciled with a $1,233.72
+    // check.
+    const fmt = (v) => '$' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmtDate = (iso) => iso ? new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '—';
     const planLabel = stats.payment_plan === 'monthly' ? 'Monthly'
                    : stats.payment_plan === 'per_service' ? 'Per Service'
                    : stats.payment_plan === 'full' ? 'Pay in Full'
+                   : stats.payment_plan === 'mixed' ? 'Multiple plans'
                    : '—';
     return `
       <div class="card" style="margin-bottom:12px;">
@@ -1409,7 +1413,7 @@ const PropertiesPage = {
           </div>
           <div style="background:white;padding:12px 14px;">
             <div style="font-size:11px;color:var(--gray-500);text-transform:uppercase;letter-spacing:0.5px;font-weight:600;">Plan</div>
-            <div style="font-size:14px;font-weight:600;color:var(--gray-800);margin-top:2px;">${planLabel}${stats.payment_method ? '<br><span style="font-size:11px;color:var(--gray-500);font-weight:400;text-transform:capitalize;">' + this.esc(stats.payment_method) + '</span>' : ''}</div>
+            <div style="font-size:14px;font-weight:600;color:var(--gray-800);margin-top:2px;">${planLabel}${stats.payment_method ? '<br><span style="font-size:11px;color:var(--gray-500);font-weight:400;text-transform:capitalize;">' + this.esc(stats.payment_method === 'mixed' ? 'Multiple methods' : stats.payment_method) + '</span>' : ''}</div>
           </div>
         </div>
       </div>
@@ -1492,6 +1496,11 @@ const PropertiesPage = {
       const total = g.items.length;
       const outstandingCents = g.items.reduce((s, i) =>
         s + ((i.status !== 'paid' && i.status !== 'void') ? (i.amount_cents || 0) : 0), 0);
+      // Paid dollars per plan, not just a count. "3 of 6 paid" didn't say how
+      // much that was, so answering "what has this customer paid?" meant
+      // expanding the group and adding the rows up by hand.
+      const paidCents = g.items.reduce((s, i) =>
+        s + (i.status === 'paid' ? (i.amount_cents || 0) : 0), 0);
       const planLabel = g.plan === 'monthly' ? `Monthly · ${paid} of ${total} paid`
                      : g.plan === 'per_service' ? `Per Service · ${paid} of ${total} paid`
                      : g.plan === 'full' ? `Pay in Full · ${paid === total ? 'Paid' : 'Outstanding'}`
@@ -1516,7 +1525,11 @@ const PropertiesPage = {
           <div class="data-row" style="cursor:pointer;padding:10px 14px;" onclick="App.navigate('invoicing','view',${inv.id})">
             <div class="data-row-main">
               <h4 style="font-family:monospace;font-size:13px;letter-spacing:0.5px;">${this.esc(inv.invoice_number)}${installment}</h4>
-              <p style="color:var(--gray-500);font-size:12px;">${inv.status === 'paid' && inv.paid_at ? 'Paid ' + new Date(inv.paid_at).toLocaleDateString() : dueStr ? 'Due ' + dueStr : ''}</p>
+              <p style="color:var(--gray-500);font-size:12px;">${inv.status === 'paid' && inv.paid_at
+                  ? 'Paid ' + new Date(inv.paid_at).toLocaleDateString()
+                    + (inv.payment_method ? ' · ' + this.esc(inv.payment_method.charAt(0).toUpperCase() + inv.payment_method.slice(1)) : '')
+                    + (inv.check_number ? ' #' + this.esc(inv.check_number) : '')
+                  : dueStr ? 'Due ' + dueStr : ''}</p>
             </div>
             <div class="data-row-right" style="display:flex;gap:8px;align-items:center;">
               <span style="font-weight:600;">$${((inv.amount_cents || 0) / 100).toFixed(2)}</span>
@@ -1532,7 +1545,11 @@ const PropertiesPage = {
           <div onclick="const b=document.getElementById('${groupId}');b.style.display=b.style.display==='none'?'':'none';" style="padding:12px 14px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;background:var(--gray-50);">
             <div>
               <div style="font-size:13px;font-weight:600;color:var(--navy,var(--blue));">${planLabel}</div>
-              ${outstandingCents > 0 ? `<div style="font-size:12px;color:var(--orange);margin-top:2px;">$${(outstandingCents/100).toFixed(2)} outstanding</div>` : ''}
+              <div style="font-size:12px;margin-top:2px;display:flex;gap:10px;flex-wrap:wrap;">
+                ${paidCents > 0 ? `<span style="color:var(--green-dark,#2d6a1e);">$${(paidCents/100).toFixed(2)} paid</span>` : ''}
+                ${outstandingCents > 0 ? `<span style="color:var(--orange);">$${(outstandingCents/100).toFixed(2)} outstanding</span>` : ''}
+                ${paidCents === 0 && outstandingCents === 0 ? `<span style="color:var(--gray-400);">Nothing outstanding</span>` : ''}
+              </div>
             </div>
             <span style="color:var(--gray-400);font-size:12px;">▾</span>
           </div>
